@@ -1,0 +1,10 @@
+# Local build output (binary is named after the repo so `gh extension install .` finds it)
+/gh-elm
+
+# Release artifacts
+/dist/
+
+# OS / editor cruft
+.DS_Store
+*.exe
+*.out

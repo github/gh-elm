@@ -1,0 +1,20 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cli/gh-extension-precompile@v2
+        with:
+          # Build cross-platform binaries with the Go version from go.mod and
+          # attach them to the release for `gh extension install`/upgrade.
+          go_version_file: go.mod
