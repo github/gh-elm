@@ -1,7 +1,12 @@
 // Package cmd assembles the `gh elm` command tree.
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/github/gh-elm/internal/cmd/migration"
+	"github.com/github/gh-elm/internal/cmd/target"
+)
 
 // NewRootCmd builds the root `gh elm` command with all subcommands attached.
 // version is injected from main at build time and surfaced via `--version`.
@@ -21,8 +26,8 @@ func NewRootCmd(version string) *cobra.Command {
 	rootCmd.SetVersionTemplate("gh elm {{.Version}}\n")
 
 	rootCmd.AddCommand(newConfigureCmd())
-	rootCmd.AddCommand(newMigrationCmd())
-	rootCmd.AddCommand(newTargetCmd())
+	rootCmd.AddCommand(migration.NewCommand())
+	rootCmd.AddCommand(target.NewCommand())
 
 	return rootCmd
 }

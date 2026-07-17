@@ -1,0 +1,117 @@
+package elmapi
+
+import (
+	"context"
+	"fmt"
+	"iter"
+	"net/url"
+	"strconv"
+	"time"
+)
+
+// Node origins accepted by the target API (wire values).
+const (
+	OriginBackfill   = "NODE_ORIGIN_BACKFILL"
+	OriginLiveUpdate = "NODE_ORIGIN_LIVE_UPDATE"
+)
+
+// Node states accepted by the target API (wire values).
+const (
+	StatePending   = "NODE_STATE_PENDING"
+	StateProcessed = "NODE_STATE_PROCESSED"
+	StateFailed    = "NODE_STATE_FAILED"
+	StateEligible  = "NODE_STATE_ELIGIBLE"
+)
+
+// nodesPageSize is the page size used when following pagination.
+const nodesPageSize = 100
+
+// Node represents a migration node as exposed by the target API.
+type Node struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Origin    string    `json:"origin"`
+	State     string    `json:"state"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ListMigrationNodesResponse is a single page of migration nodes. After is the
+// cursor for the next page; it is empty on the last page.
+type ListMigrationNodesResponse struct {
+	Nodes []Node `json:"nodes"`
+	After string `json:"after"`
+}
+
+// ListNodesOptions filters and paginates a ListMigrationNodes call. Origin and
+// State are wire values (see the Origin*/State* constants); leave them empty to
+// omit the filter.
+type ListNodesOptions struct {
+	RepositoryNWO string
+	Origin        string
+	State         string
+	PageSize      int
+	After         string
+}
+
+// ListMigrationNodes fetches a single page of nodes for a migration.
+func (c *Client) ListMigrationNodes(ctx context.Context, migrationID int64, opts ListNodesOptions) (*ListMigrationNodesResponse, error) {
+	path := fmt.Sprintf("/enterprise/migration/%d/nodes", migrationID)
+
+	q := url.Values{}
+	if opts.RepositoryNWO != "" {
+		q.Set("repository_nwo", opts.RepositoryNWO)
+	}
+	if opts.State != "" {
+		q.Set("state", opts.State)
+	}
+	if opts.Origin != "" {
+		q.Set("origin", opts.Origin)
+	}
+	if opts.PageSize > 0 {
+		q.Set("page_size", strconv.Itoa(opts.PageSize))
+	}
+	if opts.After != "" {
+		q.Set("after", opts.After)
+	}
+
+	var resp ListMigrationNodesResponse
+	if err := c.get(ctx, path, q, &resp); err != nil {
+		return nil, fmt.Errorf("listing migration nodes: %w", err)
+	}
+	return &resp, nil
+}
+
+// IterNodes yields every node matching opts, following pagination until the API
+// stops returning progress. Iteration stops on the first error, which is
+// delivered as the second value of the final pair; callers must check it.
+func (c *Client) IterNodes(ctx context.Context, migrationID int64, opts ListNodesOptions) iter.Seq2[Node, error] {
+	return func(yield func(Node, error) bool) {
+		opts.PageSize = nodesPageSize
+		opts.After = ""
+
+		for ctx.Err() == nil {
+			page, err := c.ListMigrationNodes(ctx, migrationID, opts)
+			if err != nil {
+				yield(Node{}, err)
+				return
+			}
+
+			for _, n := range page.Nodes {
+				if !yield(n, nil) {
+					return
+				}
+			}
+
+			// Stop when the API signals the last page (no cursor) or hands
+			// back an empty page. Without the empty-page guard, a filter that
+			// matches nothing but still returns a cursor would spin this loop
+			// forever making no progress.
+			if page.After == "" || len(page.Nodes) == 0 {
+				return
+			}
+			opts.After = page.After
+		}
+	}
+}
