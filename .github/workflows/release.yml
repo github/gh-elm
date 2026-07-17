@@ -18,3 +18,8 @@ jobs:
           # Build cross-platform binaries with the Go version from go.mod and
           # attach them to the release for `gh extension install`/upgrade.
           go_version_file: go.mod
+          # Stamp the release tag into main.version so `gh elm --version` reports
+          # the published tag instead of the default "dev". The precompile action
+          # builds with a hardcoded `-ldflags="-s -w"`; repeating -ldflags here
+          # overrides it (last one wins), so we keep -s -w and append the stamp.
+          go_build_options: '-ldflags=-s -w -X main.version=${{ github.ref_name }}'

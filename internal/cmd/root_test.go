@@ -30,6 +30,26 @@ func TestPingCommands(t *testing.T) {
 	}
 }
 
+func TestUnknownSubcommandFails(t *testing.T) {
+	for _, group := range []string{"migration", "target"} {
+		t.Run(group, func(t *testing.T) {
+			root := NewRootCmd("test")
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&out)
+			root.SetArgs([]string{group, "definitely-not-a-command"})
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("expected an error for an unknown %s subcommand", group)
+			}
+			if !strings.Contains(err.Error(), "unknown command") {
+				t.Errorf("expected an \"unknown command\" error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestRootVersion(t *testing.T) {
 	root := NewRootCmd("1.2.3")
 

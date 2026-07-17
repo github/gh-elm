@@ -15,7 +15,9 @@ func newMigrationCmd() *cobra.Command {
 		Short: "Manage migrations via the GHES REST API",
 		Long: "Create, start, monitor, and control Enterprise Live Migrations through the\n" +
 			"GitHub Enterprise Server REST API.",
-		// With no subcommand, show help instead of erroring.
+		// No subcommand shows help; an unknown subcommand (e.g. a typo) fails
+		// via NoArgs rather than being swallowed as a positional argument.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
