@@ -52,6 +52,12 @@ func (s *fileStore) write(m map[string]string) error {
 	if err := os.WriteFile(s.path, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", s.path, err)
 	}
+	// os.WriteFile applies the mode only when creating; a pre-existing file
+	// keeps its old permissions. Explicitly tighten so a restored or
+	// miscreated 0644 file doesn't stay world-readable with tokens in it.
+	if err := os.Chmod(s.path, 0o600); err != nil {
+		return fmt.Errorf("setting permissions on %s: %w", s.path, err)
+	}
 	return nil
 }
 

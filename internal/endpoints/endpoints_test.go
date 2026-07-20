@@ -10,6 +10,7 @@ import (
 func newTestResolver(t *testing.T) *Resolver {
 	t.Helper()
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file") // Force file backend to avoid real keyring.
 	r, err := NewResolver()
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -20,6 +21,7 @@ func newTestResolver(t *testing.T) *Resolver {
 func TestSourcePrecedence(t *testing.T) {
 	// Stored config + credentials are the lowest precedence.
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file") // Force file backend to avoid polluting real keyring.
 	if err := (&config.Config{SourceURL: "https://stored"}).Save(); err != nil {
 		t.Fatal(err)
 	}

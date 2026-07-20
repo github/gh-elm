@@ -28,24 +28,28 @@ func newConfigureCmd() *cobra.Command {
 		Short: "Interactively set up credentials for gh elm",
 		Long: "Configure the source (GHES) and target (GHEC/Proxima) API URLs and tokens that\n" +
 			"gh elm uses.\n\n" +
-			"URLs are saved to gh-elm's config file; tokens are saved to a separate 0600\n" +
-			"credentials file. Environment variables (GHES_URL/GHES_TOKEN,\n" +
-			"MIGRATION_TARGET_URL/MIGRATION_TARGET_TOKEN) and command flags override the\n" +
-			"stored values, so scripts and CI can skip this command entirely.",
+			"URLs are saved to gh-elm's config file. Tokens are stored in your OS keyring\n" +
+			"(macOS Keychain, Linux Secret Service, Windows Credential Manager) when one is\n" +
+			"available, otherwise in a 0600 credentials file; set GH_ELM_CREDENTIAL_STORE to\n" +
+			"\"file\" or \"keyring\" to force a backend.\n\n" +
+			"Environment variables (GHES_URL/GHES_TOKEN, MIGRATION_TARGET_URL/\n" +
+			"MIGRATION_TARGET_TOKEN) and command flags override the stored values, so scripts\n" +
+			"and CI can skip this command entirely.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Reset must clear every backend, so it doesn't depend on the single
+			// store NewStore would select for this invocation.
+			if resetFlag {
+				return runConfigureReset(cmd)
+			}
 			store, err := creds.NewStore()
 			if err != nil {
 				return err
 			}
-			switch {
-			case showFlag:
+			if showFlag {
 				return runConfigureShow(cmd, store)
-			case resetFlag:
-				return runConfigureReset(cmd, store)
-			default:
-				return runConfigureInteractive(cmd, store)
 			}
+			return runConfigureInteractive(cmd, store)
 		},
 	}
 
@@ -157,27 +161,38 @@ func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
 		return err
 	}
 
+	// Resolve both token statuses first so a backend read error is reported as
+	// an error rather than being masked as "not set" in the printed output.
+	sourceToken, err := tokenStatus(store, creds.SourceToken)
+	if err != nil {
+		return err
+	}
+	targetToken, err := tokenStatus(store, creds.TargetToken)
+	if err != nil {
+		return err
+	}
+
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "Source (GHES):")
 	fmt.Fprintf(out, "  url:   %s\n", orUnset(cfg.SourceURL))
-	fmt.Fprintf(out, "  token: %s\n", tokenStatus(store, creds.SourceToken))
+	fmt.Fprintf(out, "  token: %s\n", sourceToken)
 	fmt.Fprintln(out, "Target (GHEC/Proxima):")
 	fmt.Fprintf(out, "  url:   %s\n", orUnset(cfg.TargetURL))
-	fmt.Fprintf(out, "  token: %s\n", tokenStatus(store, creds.TargetToken))
+	fmt.Fprintf(out, "  token: %s\n", targetToken)
 	fmt.Fprintf(out, "\nStored at:\n  config:      %s\n  credentials: %s\n",
 		configPathOrUnknown(), store.Location())
 	return nil
 }
 
-func runConfigureReset(cmd *cobra.Command, store creds.Store) error {
+func runConfigureReset(cmd *cobra.Command) error {
 	empty := &config.Config{}
 	if err := empty.Save(); err != nil {
 		return err
 	}
-	for _, key := range []string{creds.SourceToken, creds.TargetToken} {
-		if err := store.Delete(key); err != nil {
-			return err
-		}
+	// Clear both persistent backends so a token written to one (e.g. the
+	// keyring) isn't left behind when this run's selected backend is the other.
+	if err := creds.ClearAll(creds.SourceToken, creds.TargetToken); err != nil {
+		return err
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "Cleared gh elm configuration and credentials.")
 	return nil
@@ -229,12 +244,15 @@ func orUnset(s string) string {
 	return s
 }
 
-func tokenStatus(store creds.Store, key string) string {
+func tokenStatus(store creds.Store, key string) (string, error) {
 	v, err := store.Get(key)
-	if err != nil || v == "" {
-		return "not set"
+	if err != nil {
+		return "", fmt.Errorf("reading %s token from %s: %w", key, store.Location(), err)
 	}
-	return "set (hidden)"
+	if v == "" {
+		return "not set", nil
+	}
+	return "set (hidden)", nil
 }
 
 func configPathOrUnknown() string {
