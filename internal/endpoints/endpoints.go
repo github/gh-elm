@@ -63,7 +63,7 @@ func (r *Resolver) Target(flagURL, flagToken string) (Endpoint, error) {
 }
 
 func (r *Resolver) resolve(flagURL, flagToken, envURL, envToken, storedURL, tokenKey string) (Endpoint, error) {
-	url := firstNonEmpty(flagURL, os.Getenv(envURL), storedURL)
+	endpointURL := firstNonEmpty(flagURL, os.Getenv(envURL), storedURL)
 
 	token := firstNonEmpty(flagToken, os.Getenv(envToken))
 	if token == "" {
@@ -74,7 +74,7 @@ func (r *Resolver) resolve(flagURL, flagToken, envURL, envToken, storedURL, toke
 		token = stored
 	}
 
-	return Endpoint{URL: normalizeBaseURL(url), Token: token}, nil
+	return Endpoint{URL: normalizeBaseURL(endpointURL), Token: token}, nil
 }
 
 // normalizeBaseURL makes a resolved base URL usable by the HTTP client. The

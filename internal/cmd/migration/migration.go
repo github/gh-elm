@@ -6,6 +6,7 @@ package migration
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -71,13 +72,12 @@ func sourceClient(sourceURL, sourceToken string) (*elmapi.Client, string, error)
 }
 
 // sourceFlags registers the shared --source-url/--source-token overrides on a
-// command and returns pointers to their backing values.
-func sourceFlags(cmd *cobra.Command) (sourceURL, sourceToken *string) {
-	sourceURL = new(string)
-	sourceToken = new(string)
+// command. The flag values are read back via cmd.Flags().GetString at call time.
+func sourceFlags(cmd *cobra.Command) {
+	sourceURL := new(string)
+	sourceToken := new(string)
 	cmd.Flags().StringVar(sourceURL, "source-url", "", "Override the source (GHES) API base URL.")
 	cmd.Flags().StringVar(sourceToken, "source-token", "", "Override the source (GHES) API token.")
-	return sourceURL, sourceToken
 }
 
 // resolveTargetEndpoint returns the configured target (GHEC) API base URL
@@ -122,7 +122,7 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 			if watch && !start {
-				return fmt.Errorf("--watch requires --start: a migration must be started before it can be watched")
+				return errors.New("--watch requires --start: a migration must be started before it can be watched")
 			}
 
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))

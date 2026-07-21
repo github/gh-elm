@@ -21,8 +21,8 @@ import (
 func annotateAuthError(err error, sourceURL string) error {
 	var httpErr *elmapi.HTTPError
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
-		return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s\n"+
-			"Check the source token with `gh elm configure --show`. Note the %s and %s environment variables override stored config.",
+		return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s; "+
+			"check the source token with `gh elm configure --show`. Note the %s and %s environment variables override stored config",
 			httpErr.StatusCode, sourceURL, httpErr.Message, config.EnvSourceURL, config.EnvSourceToken)
 	}
 	return err

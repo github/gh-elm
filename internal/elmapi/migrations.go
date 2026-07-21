@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Live-migration REST endpoints live on the source (GHES) API under
@@ -178,11 +179,15 @@ func (c *Client) ResumeMigration(ctx context.Context, migrationID string) error 
 // migrationPath builds /enterprise/live-migrations/{id}[/{action}], escaping the
 // migration ID for use in a URL path segment.
 func (c *Client) migrationPath(migrationID string, action ...string) string {
-	p := migrationsBasePath + "/" + url.PathEscape(migrationID)
+	var p strings.Builder
+	p.WriteString(migrationsBasePath)
+	p.WriteString("/")
+	p.WriteString(url.PathEscape(migrationID))
 	for _, a := range action {
-		p += "/" + a
+		p.WriteString("/")
+		p.WriteString(a)
 	}
-	return p
+	return p.String()
 }
 
 // --- Typed views over the GET status document, used by `watch`. ---

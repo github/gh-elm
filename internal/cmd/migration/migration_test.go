@@ -214,7 +214,9 @@ func TestActions(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			args := append(tc.args, "--source-url", srv.URL, "--source-token", "tok")
+			args := make([]string, len(tc.args), len(tc.args)+4)
+			copy(args, tc.args)
+			args = append(args, "--source-url", srv.URL, "--source-token", "tok")
 			out := run(t, args...)
 
 			if gotMethod != http.MethodPost {
