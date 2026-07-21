@@ -20,11 +20,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+          # setup-go caches by default; disable it here because this workflow
+          # also runs on tags and has id-token: write.
+          cache: false
 
       - name: OIDC Setup for goproxy
         uses: github/setup-goproxy@5e60e1074d42316dfe2949ebf9a92bf77b24645b # v1.1.0

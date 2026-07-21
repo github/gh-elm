@@ -1,4 +1,12 @@
-name: release
+# Builds cross-platform binaries with GoReleaser and attaches them to the
+# GitHub Release for the pushed tag, making the extension installable via
+# `gh extension install github/gh-elm`.
+#
+# Flow: release-drafter maintains a draft release on main. When a maintainer
+# publishes that draft, GitHub creates the "v*" tag, which triggers this
+# workflow. GoReleaser (release.mode: append) uploads the binaries onto that
+# existing release.
+name: Release
 
 on:
   push:
@@ -9,17 +17,22 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  goreleaser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: cli/gh-extension-precompile@76961aa3bd1123d0a6fd42d0a41aca0696937c39 # v2.2.0
         with:
-          # Build cross-platform binaries with the Go version from go.mod and
-          # attach them to the release for `gh extension install`/upgrade.
-          go_version_file: go.mod
-          # Stamp the release tag into main.version so `gh elm --version` reports
-          # the published tag instead of the default "dev". The precompile action
-          # builds with a hardcoded `-ldflags="-s -w"`; repeating -ldflags here
-          # overrides it (last one wins), so we keep -s -w and append the stamp.
-          go_build_options: '-ldflags=-s -w -X main.version=${{ github.ref_name }}'
+          persist-credentials: false
+          fetch-depth: 0 # GoReleaser needs full history/tags for versioning
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          # No build cache in the release job: it publishes artifacts, so a
+          # shared cache would be a cache-poisoning vector.
+          cache: false
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

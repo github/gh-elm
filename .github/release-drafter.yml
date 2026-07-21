@@ -1,0 +1,103 @@
+# release-drafter keeps a draft GitHub Release up to date on every merge to
+# main, computing the next semantic version from PR labels and building the
+# changelog from merged PR titles. Publishing the draft creates the tag, which
+# triggers the goreleaser release workflow (.github/workflows/release.yml).
+#
+# Uses the current categories schema (release-drafter/release-drafter#1558):
+# labels live under each category's `when` condition, version bumps are set via
+# `semver-increment`, and exclusions use a `pre-exclude` category.
+# https://github.com/release-drafter/release-drafter
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  # Changelog categories: render the notes and contribute their
+  # `semver-increment` to $RESOLVED_VERSION for matching PRs.
+  - title: "🚀 Features"
+    semver-increment: minor
+    when:
+      labels:
+        - "feature"
+        - "enhancement"
+  - title: "🐛 Bug Fixes"
+    semver-increment: patch
+    when:
+      labels:
+        - "fix"
+        - "bug"
+  - title: "🧰 Maintenance"
+    semver-increment: patch
+    when:
+      labels:
+        - "chore"
+        - "maintenance"
+        - "refactor"
+  - title: "📦 Dependencies"
+    semver-increment: patch
+    when:
+      labels:
+        - "dependencies"
+
+  # Drop PRs labelled skip-changelog before generating notes or resolving the
+  # version.
+  - type: "pre-exclude"
+    when:
+      labels:
+        - "skip-changelog"
+
+  # Explicit version-bump labels that don't map to a changelog category.
+  - type: "version-resolver"
+    semver-increment: major
+    when:
+      labels:
+        - "major"
+        - "breaking"
+  - type: "version-resolver"
+    semver-increment: minor
+    when:
+      labels:
+        - "minor"
+  - type: "version-resolver"
+    semver-increment: patch
+    when:
+      labels:
+        - "patch"
+  # Default bump when nothing above matches.
+  - type: "version-resolver"
+    semver-increment: patch
+
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+change-title-escapes: '\<*_&' # avoid rendering issues in the release body
+
+# Auto-apply labels to PRs from branch names and titles so the categories and
+# version resolver above have labels to work with. A label is applied if any
+# matcher matches. Applied by the `autolabeler` job in
+# .github/workflows/release-drafter.yml.
+autolabeler:
+  - label: "feature"
+    branch:
+      - '/^(feat|feature)\/.+/'
+    title:
+      - "/^(feat|feature)(\\(.+\\))?:/i"
+  - label: "fix"
+    branch:
+      - '/^fix\/.+/'
+    title:
+      - "/^fix(\\(.+\\))?:/i"
+  - label: "chore"
+    branch:
+      - '/^(chore|refactor|docs?)\/.+/'
+    title:
+      - "/^(chore|refactor|docs)(\\(.+\\))?:/i"
+  - label: "dependencies"
+    branch:
+      - '/^(deps|dependabot)\/.+/'
+    title:
+      - "/^(deps|build\\(deps\\)):/i"
+
+template: |
+  ## Changes
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/github/gh-elm/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
