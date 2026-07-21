@@ -1,4 +1,6 @@
-package cmd
+// Package migration implements the `gh elm migration` command group, which
+// drives the migration lifecycle against the source (GHES) REST API.
+package migration
 
 import (
 	"fmt"
@@ -6,10 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newMigrationCmd builds the `gh elm migration` command group, which drives the
-// migration lifecycle against the GHES REST API. Subcommands mirror the
+// NewCommand builds the `gh elm migration` command group. Subcommands mirror the
 // `elm migration *` group in elm-exporter (cmd/elm/cmd/migration.go).
-func newMigrationCmd() *cobra.Command {
+func NewCommand() *cobra.Command {
 	migrationCmd := &cobra.Command{
 		Use:   "migration",
 		Short: "Manage migrations via the GHES REST API",
@@ -23,14 +24,14 @@ func newMigrationCmd() *cobra.Command {
 		},
 	}
 
-	migrationCmd.AddCommand(newMigrationPingCmd())
+	migrationCmd.AddCommand(newPingCmd())
 
 	return migrationCmd
 }
 
-// newMigrationPingCmd is a scaffolding/connectivity check for the migration
-// command group. It responds "pong" and makes no network calls.
-func newMigrationPingCmd() *cobra.Command {
+// newPingCmd is a scaffolding/connectivity check for the migration command
+// group. It responds "pong" and makes no network calls.
+func newPingCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ping",
 		Short: "Check that the migration command group is wired up",
