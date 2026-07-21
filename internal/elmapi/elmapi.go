@@ -9,6 +9,7 @@
 package elmapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -92,8 +93,33 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	if len(query) > 0 {
 		endpoint += "?" + query.Encode()
 	}
+	return c.do(ctx, http.MethodGet, endpoint, nil, http.StatusOK, out)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
+// post issues a POST request with a JSON body and decodes a JSON response into
+// out. wantStatus is the success status to accept (the reports endpoint returns
+// 202 Accepted rather than 200 OK).
+func (c *Client) post(ctx context.Context, path string, body, out any, wantStatus int) error {
+	var payload []byte
+	if body != nil {
+		var err error
+		payload, err = json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encoding request body: %w", err)
+		}
+	}
+	return c.do(ctx, http.MethodPost, c.baseURL+path, payload, wantStatus, out)
+}
+
+// do performs an HTTP request and decodes a JSON response into out, treating any
+// status other than wantStatus as an error.
+func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, wantStatus int, out any) error {
+	var reqBody io.Reader = http.NoBody
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reqBody)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -101,6 +127,9 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	req.Header.Set("Accept", acceptHeader)
 	req.Header.Set(apiVersionHeader, apiVersion)
 	req.Header.Set("User-Agent", c.userAgent)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -108,21 +137,21 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != wantStatus {
 		return &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Message:    truncate(strings.TrimSpace(string(body)), maxErrorBody),
+			Message:    truncate(strings.TrimSpace(string(respBody)), maxErrorBody),
 		}
 	}
 
 	if out != nil {
-		if err := json.Unmarshal(body, out); err != nil {
+		if err := json.Unmarshal(respBody, out); err != nil {
 			return fmt.Errorf("decoding response: %w", err)
 		}
 	}
