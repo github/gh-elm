@@ -203,9 +203,10 @@ func TestActions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var gotPath string
+			var gotPath, gotMethod string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath = r.URL.Path
+				gotMethod = r.Method
 				w.WriteHeader(tc.respCode)
 				if tc.respBody != "" {
 					_, _ = w.Write([]byte(tc.respBody))
@@ -216,6 +217,9 @@ func TestActions(t *testing.T) {
 			args := append(tc.args, "--source-url", srv.URL, "--source-token", "tok")
 			out := run(t, args...)
 
+			if gotMethod != http.MethodPost {
+				t.Errorf("method = %q, want %q", gotMethod, http.MethodPost)
+			}
 			if !strings.HasSuffix(gotPath, tc.wantPath) {
 				t.Errorf("path = %q, want %q", gotPath, tc.wantPath)
 			}
