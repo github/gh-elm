@@ -39,7 +39,8 @@ gh elm target ping       # scaffolding check for the target group -> "pong"
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API. Currently: `ping`.
 - `gh elm target ...` — read and write migration-target (GHEC/Proxima) resources such as
-  nodes and mannequins. Currently: `ping`.
+  nodes and mannequins. Currently: `ping`, `resources`, `create-report`, `report-status`,
+  `report-url`.
 
 ## Configuration
 
