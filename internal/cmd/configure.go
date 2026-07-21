@@ -32,8 +32,8 @@ func newConfigureCmd() *cobra.Command {
 			"(macOS Keychain, Linux Secret Service, Windows Credential Manager) when one is\n" +
 			"available, otherwise in a 0600 credentials file; set GH_ELM_CREDENTIAL_STORE to\n" +
 			"\"file\" or \"keyring\" to force a backend.\n\n" +
-			"Environment variables (GHES_URL/GHES_TOKEN, MIGRATION_TARGET_URL/\n" +
-			"MIGRATION_TARGET_TOKEN) and command flags override the stored values, so scripts\n" +
+			"Environment variables (GH_SOURCE_HOST/GH_SOURCE_TOKEN, GH_TARGET_HOST/\n" +
+			"GH_TARGET_TOKEN) and command flags override the stored values, so scripts\n" +
 			"and CI can skip this command entirely.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -63,8 +63,8 @@ func newConfigureCmd() *cobra.Command {
 func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return errors.New("gh elm configure is interactive and needs a terminal; " +
-			"in non-interactive environments set GHES_URL/GHES_TOKEN (and " +
-			"MIGRATION_TARGET_URL/MIGRATION_TARGET_TOKEN)")
+			"in non-interactive environments set GH_SOURCE_HOST/GH_SOURCE_TOKEN (and " +
+			"GH_TARGET_HOST/GH_TARGET_TOKEN)")
 	}
 
 	cfg, err := config.Load()

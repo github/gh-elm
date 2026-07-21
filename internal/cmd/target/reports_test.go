@@ -88,7 +88,7 @@ func TestCreateReport(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error on 401")
 		}
-		for _, want := range []string{"authentication failed", "401", "MIGRATION_TARGET_URL"} {
+		for _, want := range []string{"authentication failed", "401", "GH_TARGET_TOKEN"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("error %q missing %q", err.Error(), want)
 			}

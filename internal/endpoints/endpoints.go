@@ -3,9 +3,9 @@
 //
 //	explicit flag  >  environment variable  >  stored config/credentials
 //
-// This keeps the elm CLI's environment variables (GHES_URL/GHES_TOKEN,
-// MIGRATION_TARGET_URL/MIGRATION_TARGET_TOKEN) as a working override so scripts
-// and CI can bypass `gh elm configure` entirely.
+// The environment variables (GH_SOURCE_HOST/GH_SOURCE_TOKEN,
+// GH_TARGET_HOST/GH_TARGET_TOKEN) are a working override so scripts and CI can
+// bypass `gh elm configure` entirely.
 package endpoints
 
 import (

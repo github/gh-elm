@@ -71,14 +71,14 @@ Every command resolves each URL and token in this order, so scripts and CI can s
 --flag  >  environment variable  >  stored config/credentials
 ```
 
-The environment variables match the `elm` CLI:
+The environment variables use a unified `GH_SOURCE_*` / `GH_TARGET_*` scheme:
 
 | Purpose | Env var |
 | --- | --- |
-| Source URL | `GHES_URL` |
-| Source token | `GHES_TOKEN` |
-| Target URL | `MIGRATION_TARGET_URL` |
-| Target token | `MIGRATION_TARGET_TOKEN` |
+| Source host | `GH_SOURCE_HOST` |
+| Source token | `GH_SOURCE_TOKEN` |
+| Target host | `GH_TARGET_HOST` |
+| Target token | `GH_TARGET_TOKEN` |
 
 Other overrides:
 

@@ -131,8 +131,8 @@ func resolveOrigins(s string) ([]string, error) {
 }
 
 // annotateAuthError turns a 401/403 from the target API into an actionable
-// message. Auth failures are commonly caused by a stale MIGRATION_TARGET_URL or
-// MIGRATION_TARGET_TOKEN environment variable overriding the configured values,
+// message. Auth failures are commonly caused by a stale GH_TARGET_HOST or
+// GH_TARGET_TOKEN environment variable overriding the configured values,
 // so we call that out explicitly rather than leaving a bare HTTP error.
 func annotateAuthError(err error, targetURL string) error {
 	var httpErr *elmapi.HTTPError
