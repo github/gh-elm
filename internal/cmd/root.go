@@ -20,6 +20,7 @@ func NewRootCmd(version string) *cobra.Command {
 
 	rootCmd.SetVersionTemplate("gh elm {{.Version}}\n")
 
+	rootCmd.AddCommand(newConfigureCmd())
 	rootCmd.AddCommand(newMigrationCmd())
 	rootCmd.AddCommand(newTargetCmd())
 

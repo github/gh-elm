@@ -26,6 +26,10 @@ gh extension upgrade elm
 gh elm --help            # list available commands
 gh elm --version         # print the extension version
 
+gh elm configure         # interactively set up credentials
+gh elm configure --show  # print current config (tokens redacted)
+gh elm configure --reset # remove stored config and credentials
+
 gh elm migration ping    # scaffolding check for the migration group -> "pong"
 gh elm target ping       # scaffolding check for the target group -> "pong"
 ```
@@ -36,6 +40,49 @@ gh elm target ping       # scaffolding check for the target group -> "pong"
   cancel, cutover) against the GHES REST API. Currently: `ping`.
 - `gh elm target ...` — read and write migration-target (GHEC/Proxima) resources such as
   nodes and mannequins. Currently: `ping`.
+
+## Configuration
+
+`gh elm configure` walks you through the two systems `gh elm` talks to:
+
+- **Source** — your GitHub Enterprise Server (GHES) appliance (URL + a PAT with the
+  `admin:enterprise` scope).
+- **Target** — the GitHub Enterprise Cloud (Proxima) migration target (URL + a PAT). Optional;
+  only needed for `gh elm target` commands.
+
+Where values are stored:
+
+- **URLs** (non-secret) → `~/.config/gh-elm/config.json`
+- **Tokens** (secret) → the **OS keyring** when one is available (macOS Keychain, Linux Secret
+  Service, Windows Credential Manager), otherwise a `~/.config/gh-elm/credentials.json` file
+  created `0600`. The file fallback is what's used in keyring-less environments such as
+  **Codespaces and CI** (matching how `gh` itself behaves).
+
+Force a specific backend with `GH_ELM_CREDENTIAL_STORE=keyring` or `GH_ELM_CREDENTIAL_STORE=file`.
+`gh elm configure --show` prints which backend is active.
+
+### Environment variables and precedence
+
+Every command resolves each URL and token in this order, so scripts and CI can skip
+`gh elm configure` entirely:
+
+```
+--flag  >  environment variable  >  stored config/credentials
+```
+
+The environment variables match the `elm` CLI:
+
+| Purpose | Env var |
+| --- | --- |
+| Source URL | `GHES_URL` |
+| Source token | `GHES_TOKEN` |
+| Target URL | `MIGRATION_TARGET_URL` |
+| Target token | `MIGRATION_TARGET_TOKEN` |
+
+Other overrides:
+
+- `GH_ELM_CONFIG_DIR` — config directory (otherwise follows `GH_CONFIG_DIR` / `XDG_CONFIG_HOME`).
+- `GH_ELM_CREDENTIAL_STORE` — force the token backend: `keyring` or `file`.
 
 ## Development
 
