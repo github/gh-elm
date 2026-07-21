@@ -72,7 +72,7 @@ func sourceClient(sourceURL, sourceToken string) (*elmapi.Client, string, error)
 }
 
 // sourceFlags registers the shared --source-url/--source-token overrides on a
-// command and returns pointers to their backing values.
+// command. The flag values are read back via cmd.Flags().GetString at call time.
 func sourceFlags(cmd *cobra.Command) {
 	sourceURL := new(string)
 	sourceToken := new(string)
