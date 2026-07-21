@@ -93,7 +93,7 @@ Requires [Go](https://go.dev) (version pinned in [`go.mod`](go.mod)) and the `gh
 make build     # build the ./gh-elm binary
 make install   # build and install this checkout as a local gh extension
 make test      # run unit tests (with -race)
-make audit     # fmt + vet + test (what CI runs)
+make audit     # fmt + vet + lint + test (what CI runs)
 gh elm --version  # verify your local build is installed
 ```
 

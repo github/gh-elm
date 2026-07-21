@@ -4,6 +4,9 @@
 # Release artifacts
 /dist/
 
+# Development tools
+/bin/
+
 # OS / editor cruft
 .DS_Store
 *.exe

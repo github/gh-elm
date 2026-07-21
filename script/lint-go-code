@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Do not use set -e here, as we want to continue even if the first linter fails.
+set -u
+set -o pipefail
+
+CDPATH="" cd -- "$(dirname -- "$0")/.."
+
+# Ensure revive sees the same GOROOT locally and in GitHub Actions.
+GOROOT=$(go env GOROOT)
+export GOROOT
+
+echo '> Linting code using golangci-lint...'
+script/golangci-lint run --config .golangci.toml
+golangci_lint_exit_code=$?
+
+if [ "$golangci_lint_exit_code" -ne 0 ]; then
+    echo "> Linting failed with exit code: $golangci_lint_exit_code"
+    exit 1
+fi
+
+echo "> Linting completed successfully."
