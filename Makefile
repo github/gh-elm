@@ -32,7 +32,11 @@ tidy: ## Tidy go.mod/go.sum
 	go mod tidy
 
 .PHONY: audit
-audit: fmt vet test ## Run the checks CI runs
+audit: fmt vet lint test ## Run the checks CI runs
+
+.PHONY: lint
+lint: ## Run golangci-lint
+	script/lint-go-code
 
 .PHONY: clean
 clean: ## Remove build artifacts
