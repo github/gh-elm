@@ -9,7 +9,9 @@
 package endpoints
 
 import (
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/creds"
@@ -41,9 +43,17 @@ func NewResolver() (*Resolver, error) {
 }
 
 // Source resolves the source (GHES) endpoint. flagURL and flagToken take highest
-// precedence; pass "" when they are not set.
+// precedence; pass "" when they are not set. The resolved base URL is normalized
+// to the GHES REST root (scheme defaulted to https, /api/v3 appended when the
+// URL carries no path) so a bare host such as GH_SOURCE_HOST=ghes.example.com is
+// usable directly.
 func (r *Resolver) Source(flagURL, flagToken string) (Endpoint, error) {
-	return r.resolve(flagURL, flagToken, config.EnvSourceURL, config.EnvSourceToken, r.cfg.SourceURL, creds.SourceToken)
+	ep, err := r.resolve(flagURL, flagToken, config.EnvSourceURL, config.EnvSourceToken, r.cfg.SourceURL, creds.SourceToken)
+	if err != nil {
+		return ep, err
+	}
+	ep.URL = ensureGHESRESTBase(ep.URL)
+	return ep, nil
 }
 
 // Target resolves the target (GHEC/Proxima) endpoint. flagURL and flagToken take
@@ -64,7 +74,23 @@ func (r *Resolver) resolve(flagURL, flagToken, envURL, envToken, storedURL, toke
 		token = stored
 	}
 
-	return Endpoint{URL: url, Token: token}, nil
+	return Endpoint{URL: normalizeBaseURL(url), Token: token}, nil
+}
+
+// normalizeBaseURL makes a resolved base URL usable by the HTTP client. The
+// GH_SOURCE_HOST/GH_TARGET_HOST variables (and their configure equivalents) may
+// be given as a bare host with no scheme; default those to https so the client
+// does not fail with an "unsupported protocol scheme" error. A URL that already
+// carries a scheme is returned unchanged.
+func normalizeBaseURL(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	return s
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -74,4 +100,24 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// ensureGHESRESTBase turns a GHES appliance base URL into its REST API root by
+// appending /api/v3 when the URL carries no path. GH_SOURCE_HOST is typically a
+// bare host (for example ghes.example.com); the GHES REST API is served under
+// /api/v3, so a base without a path would otherwise hit the web frontend and
+// fail (a 302 redirect, or 406 for a JSON Accept header). A base that already
+// carries a path (for example .../api/v3) is left untouched.
+func ensureGHESRESTBase(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/api/v3"
+	}
+	return u.String()
 }

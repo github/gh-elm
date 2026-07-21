@@ -43,7 +43,7 @@ func TestSourcePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ep.URL != "https://stored" || ep.Token != "stored-token" {
+	if ep.URL != "https://stored/api/v3" || ep.Token != "stored-token" {
 		t.Fatalf("stored resolution = %+v", ep)
 	}
 
@@ -51,14 +51,33 @@ func TestSourcePrecedence(t *testing.T) {
 	t.Setenv(config.EnvSourceURL, "https://env")
 	t.Setenv(config.EnvSourceToken, "env-token")
 	ep, _ = r.Source("", "")
-	if ep.URL != "https://env" || ep.Token != "env-token" {
+	if ep.URL != "https://env/api/v3" || ep.Token != "env-token" {
 		t.Fatalf("env should override stored, got %+v", ep)
 	}
 
 	// Flag overrides env.
 	ep, _ = r.Source("https://flag", "flag-token")
-	if ep.URL != "https://flag" || ep.Token != "flag-token" {
+	if ep.URL != "https://flag/api/v3" || ep.Token != "flag-token" {
 		t.Fatalf("flag should override env, got %+v", ep)
+	}
+}
+
+func TestSourceNormalizesBareHost(t *testing.T) {
+	r := newTestResolver(t)
+
+	// A scheme-less bare host gains https:// and the /api/v3 REST prefix.
+	ep, err := r.Source("ghes.example.com", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.URL != "https://ghes.example.com/api/v3" {
+		t.Fatalf("bare host normalization = %q", ep.URL)
+	}
+
+	// A URL that already carries the REST path is left untouched.
+	ep, _ = r.Source("https://ghes.example.com/api/v3", "tok")
+	if ep.URL != "https://ghes.example.com/api/v3" {
+		t.Fatalf("explicit /api/v3 should be preserved, got %q", ep.URL)
 	}
 }
 
