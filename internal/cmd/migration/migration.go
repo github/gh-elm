@@ -223,8 +223,8 @@ func newStartCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to start (required).")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After starting, enter live watch mode.")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to start (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -254,7 +254,7 @@ func newStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to get status for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -330,7 +330,7 @@ func newCancelCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to cancel (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to cancel (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -368,9 +368,9 @@ func newCutoverCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to initiate cutover for (required).")
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass the cutover readiness check and proceed immediately.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After triggering cutover, enter live watch mode.")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to initiate cutover for (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -403,7 +403,7 @@ func newCutoverStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to get cutover status for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get cutover status for (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -434,7 +434,7 @@ func newRevertCutoverCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to revert cutover for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to revert cutover for (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -465,7 +465,7 @@ func newPauseCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to pause (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to pause (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -494,7 +494,7 @@ func newResumeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to resume (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to resume (required).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
