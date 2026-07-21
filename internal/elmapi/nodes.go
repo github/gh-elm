@@ -2,6 +2,7 @@ package elmapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"net/url"
@@ -26,7 +27,10 @@ const (
 // nodesPageSize is the page size used when following pagination.
 const nodesPageSize = 100
 
-// Node represents a migration node as exposed by the target API.
+// Node represents a migration node as exposed by the target API. Raw holds the
+// exact JSON object the API returned for this node, so callers rendering JSON
+// can echo the API's response verbatim — preserving fields this struct does not
+// model and avoiding zero-valued fields that re-marshaling would inject.
 type Node struct {
 	ID        string    `json:"id"`
 	Type      string    `json:"type"`
@@ -35,6 +39,24 @@ type Node struct {
 	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+
+	// Raw is the original JSON object for this node. It is populated on decode
+	// and excluded from (re-)marshaling.
+	Raw json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON decodes the typed fields and retains the node's original JSON
+// bytes in Raw. The bytes are copied because the decoder may reuse the buffer
+// backing data after this call returns.
+func (n *Node) UnmarshalJSON(data []byte) error {
+	type nodeFields Node // strip methods to avoid recursing into this method
+	var f nodeFields
+	if err := json.Unmarshal(data, &f); err != nil {
+		return err
+	}
+	*n = Node(f)
+	n.Raw = append(json.RawMessage(nil), data...)
+	return nil
 }
 
 // ListMigrationNodesResponse is a single page of migration nodes. After is the
@@ -91,6 +113,7 @@ func (c *Client) IterNodes(ctx context.Context, migrationID int64, opts ListNode
 		opts.PageSize = nodesPageSize
 		opts.After = ""
 
+		seen := make(map[string]bool)
 		for ctx.Err() == nil {
 			page, err := c.ListMigrationNodes(ctx, migrationID, opts)
 			if err != nil {
@@ -104,13 +127,17 @@ func (c *Client) IterNodes(ctx context.Context, migrationID int64, opts ListNode
 				}
 			}
 
-			// Stop when the API signals the last page (no cursor) or hands
-			// back an empty page. Without the empty-page guard, a filter that
-			// matches nothing but still returns a cursor would spin this loop
-			// forever making no progress.
-			if page.After == "" || len(page.Nodes) == 0 {
+			// A non-empty cursor is pagination progress even when this page
+			// has no nodes: a filtered request can return an empty page that
+			// still points at later pages containing matching nodes, so we
+			// must keep following the cursor rather than stop on an empty
+			// page. Stop only when the cursor is empty, or when the API hands
+			// back a cursor we've already followed, which would otherwise spin
+			// this loop forever making no progress.
+			if page.After == "" || seen[page.After] {
 				return
 			}
+			seen[page.After] = true
 			opts.After = page.After
 		}
 	}

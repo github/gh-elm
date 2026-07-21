@@ -1,6 +1,7 @@
 package target
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,12 +180,29 @@ func printResource(w io.Writer, n elmapi.Node) {
 	fmt.Fprintln(w)
 }
 
+// printResourceJSON writes a node's raw API JSON as one NDJSON line. Emitting
+// the preserved raw bytes (rather than re-marshaling the typed Node) echoes the
+// API response verbatim: it keeps fields Node does not model and omits the
+// zero-valued fields re-marshaling would otherwise inject.
 func printResourceJSON(w io.Writer, n elmapi.Node) error {
-	b, err := json.Marshal(n)
-	if err != nil {
-		return fmt.Errorf("marshaling resource: %w", err)
+	raw := n.Raw
+	if len(raw) == 0 {
+		// Fallback for nodes that were not decoded from an API response (for
+		// example constructed in tests); marshal the typed representation.
+		var err error
+		raw, err = json.Marshal(n)
+		if err != nil {
+			return fmt.Errorf("marshaling resource: %w", err)
+		}
 	}
-	_, err = fmt.Fprintln(w, string(b))
+
+	// Compact to a single line so multi-line raw JSON stays valid NDJSON.
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return fmt.Errorf("compacting resource JSON: %w", err)
+	}
+	buf.WriteByte('\n')
+	_, err := w.Write(buf.Bytes())
 	return err
 }
 

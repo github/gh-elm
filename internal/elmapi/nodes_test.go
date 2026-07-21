@@ -152,14 +152,43 @@ func TestIterNodes(t *testing.T) {
 		}
 	})
 
-	t.Run("stops on an empty page even when a cursor is returned", func(t *testing.T) {
-		// A migration/repo filter with no matching resources can return an
-		// empty page with a non-empty cursor; the loop must not spin forever.
+	t.Run("follows the cursor past an empty page to later matching nodes", func(t *testing.T) {
+		// A migration/repo filter can return an early page with no matching
+		// nodes but a non-empty cursor pointing at later pages that do match.
+		// Iteration must keep following the cursor rather than stop early.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Query().Get("after") {
+			case "":
+				_, _ = w.Write([]byte(`{"nodes":[],"after":"page2"}`))
+			case "page2":
+				_, _ = w.Write([]byte(`{"nodes":[{"id":"n1"}],"after":""}`))
+			default:
+				t.Errorf("unexpected after cursor %q", r.URL.Query().Get("after"))
+			}
+		}))
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "tok")
+		var ids []string
+		for node, err := range c.IterNodes(t.Context(), 7, ListNodesOptions{}) {
+			if err != nil {
+				t.Fatalf("iter: %v", err)
+			}
+			ids = append(ids, node.ID)
+		}
+		if want := []string{"n1"}; !equal(ids, want) {
+			t.Errorf("ids = %v, want %v", ids, want)
+		}
+	})
+
+	t.Run("stops when the API repeats a cursor to prevent a loop", func(t *testing.T) {
+		// A misbehaving filter that returns the same cursor forever must not
+		// spin the loop indefinitely; a already-seen cursor ends iteration.
 		calls := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
 			if calls > 5 {
-				t.Fatalf("IterNodes did not stop on an empty page (called %d times)", calls)
+				t.Fatalf("IterNodes did not stop on a repeated cursor (called %d times)", calls)
 			}
 			_, _ = w.Write([]byte(`{"nodes":[],"after":"never-ending"}`))
 		}))
@@ -173,8 +202,10 @@ func TestIterNodes(t *testing.T) {
 		if count != 0 {
 			t.Errorf("count = %d, want 0", count)
 		}
-		if calls != 1 {
-			t.Errorf("expected exactly 1 request, got %d", calls)
+		// One request advances to "never-ending"; the second sees it repeated
+		// and stops.
+		if calls != 2 {
+			t.Errorf("expected exactly 2 requests, got %d", calls)
 		}
 	})
 }

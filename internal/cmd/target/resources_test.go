@@ -48,6 +48,28 @@ func TestResources(t *testing.T) {
 		}
 	})
 
+	t.Run("--json echoes the raw API JSON verbatim", func(t *testing.T) {
+		// The API response carries a field Node does not model (correlationId)
+		// and omits others (no timestamps). The --json output must preserve the
+		// unknown field and must not inject zero-valued/absent fields.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"nodes":[{"id":"n1","type":"issue","correlationId":"abc-123"}],"after":""}`))
+		}))
+		defer srv.Close()
+
+		out := strings.TrimSpace(runResources(t, "--migration-id", "1", "--origin", "backfill", "--json",
+			"--target-url", srv.URL, "--target-token", "tok"))
+
+		if !strings.Contains(out, `"correlationId":"abc-123"`) {
+			t.Errorf("expected unknown field preserved, got:\n%s", out)
+		}
+		for _, absent := range []string{"createdAt", "updatedAt", "origin", "state"} {
+			if strings.Contains(out, absent) {
+				t.Errorf("re-marshaled zero field %q leaked into output:\n%s", absent, out)
+			}
+		}
+	})
+
 	t.Run("respects --max-results", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"nodes":[{"id":"a"},{"id":"b"},{"id":"c"}],"after":""}`))
