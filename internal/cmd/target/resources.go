@@ -137,6 +137,7 @@ func resolveOrigins(s string) ([]string, error) {
 func annotateAuthError(err error, targetURL string) error {
 	var httpErr *elmapi.HTTPError
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
+		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
 		return fmt.Errorf("authentication failed (HTTP %d) for target %s: %s\n"+
 			"Check the target token with `gh elm configure --show`. Note the %s and %s environment variables override stored config.",
 			httpErr.StatusCode, targetURL, httpErr.Message, config.EnvTargetURL, config.EnvTargetToken)

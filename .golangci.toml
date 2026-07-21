@@ -161,11 +161,15 @@ arguments = [
   'fmt.Print',
   'fmt.Printf',
   'fmt.Println',
+  'fmt.Fprint',
+  'fmt.Fprintf',
+  'fmt.Fprintln',
   'os.Setenv',
   'os.Unsetenv',
   'strings.Builder.WriteString',
   'strings.Builder.WriteRune',
   'bytes.Buffer.Write',
+  'bytes.Buffer.WriteByte',
   'sql.Tx.Rollback',
 ]
 disabled = false

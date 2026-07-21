@@ -61,6 +61,7 @@ func newConfigureCmd() *cobra.Command {
 }
 
 func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
+	//nolint:gosec // os.Stdin.Fd() returns a small, non-negative file descriptor that always fits in an int
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return errors.New("gh elm configure is interactive and needs a terminal; " +
 			"in non-interactive environments set GHES_URL/GHES_TOKEN (and " +

@@ -66,7 +66,7 @@ func TestDirPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d != filepath.Join("/tmp/gh", "gh-elm") {
+	if d != "/tmp/gh/gh-elm" {
 		t.Errorf("GH_CONFIG_DIR should be used, got %q", d)
 	}
 }
