@@ -29,6 +29,7 @@ func NewCommand() *cobra.Command {
 	targetCmd.AddCommand(newCreateReportCmd())
 	targetCmd.AddCommand(newReportStatusCmd())
 	targetCmd.AddCommand(newReportURLCmd())
+	targetCmd.AddCommand(newMannequinCmd())
 
 	return targetCmd
 }
