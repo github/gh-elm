@@ -102,12 +102,12 @@ func newResourcesCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to list resources for (required).")
-	cmd.Flags().StringVar(&repository, "repository", "", "Filter resources by repository in owner/repo format.")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Migration ID to list resources for (required).")
+	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Filter resources by repository in owner/repo format.")
 	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live_update (default: both).")
 	cmd.Flags().StringVar(&stateFlag, "state", "", "Filter by state: pending, processed, failed, or eligible (default: all).")
 	cmd.Flags().IntVar(&maxResults, "max-results", 0, "Maximum number of resources to return (0 = all).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output resources as newline-delimited JSON.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output resources as newline-delimited JSON.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
