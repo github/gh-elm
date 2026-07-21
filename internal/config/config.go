@@ -19,11 +19,13 @@ import (
 // scheme for the source (GHES) and target (GHEC/Proxima) host and token, so
 // scripts and CI can override the stored config without gh elm configure.
 const (
-	EnvSourceURL   = "GH_SOURCE_HOST"
-	// #nosec G101 -- This is the name of an environment variable, not a credential.
+	EnvSourceURL = "GH_SOURCE_HOST"
+	// EnvSourceToken is an environment variable name, not a credential.
+	// #nosec G101
 	EnvSourceToken = "GH_SOURCE_TOKEN"
 	EnvTargetURL   = "GH_TARGET_HOST"
-	// #nosec G101 -- This is the name of an environment variable, not a credential.
+	// EnvTargetToken is an environment variable name, not a credential.
+	// #nosec G101
 	EnvTargetToken = "GH_TARGET_TOKEN"
 )
 

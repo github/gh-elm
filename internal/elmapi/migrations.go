@@ -181,10 +181,10 @@ func (c *Client) ResumeMigration(ctx context.Context, migrationID string) error 
 func (c *Client) migrationPath(migrationID string, action ...string) string {
 	var p strings.Builder
 	p.WriteString(migrationsBasePath)
-	p.WriteByte('/')
+	p.WriteString("/")
 	p.WriteString(url.PathEscape(migrationID))
 	for _, a := range action {
-		p.WriteByte('/')
+		p.WriteString("/")
 		p.WriteString(a)
 	}
 	return p.String()
