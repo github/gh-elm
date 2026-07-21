@@ -8,10 +8,8 @@ import (
 	"github.com/github/gh-elm/internal/elmapi"
 )
 
-func sp(s string) *string { return &s }
-
 func combined(status string) *elmapi.MigrationDetail {
-	return &elmapi.MigrationDetail{CombinedState: &elmapi.CombinedState{Status: sp(status)}}
+	return &elmapi.MigrationDetail{CombinedState: &elmapi.CombinedState{Status: new(status)}}
 }
 
 func TestDerivePhase_FromCombinedStatus(t *testing.T) {
@@ -45,7 +43,7 @@ func TestDerivePhase_OverlayInfersBasePhase(t *testing.T) {
 	// A failed migration mid-backfill should infer PhaseBackfilling under the
 	// failed overlay from target progress.
 	detail := &elmapi.MigrationDetail{
-		CombinedState: &elmapi.CombinedState{Status: sp(combinedFailed)},
+		CombinedState: &elmapi.CombinedState{Status: new(combinedFailed)},
 		TargetState: &elmapi.TargetState{
 			RepositoryProgress: []elmapi.RepositoryProgress{{
 				BackfillResourcesAdded:     100,
@@ -62,7 +60,7 @@ func TestDerivePhase_OverlayInfersBasePhase(t *testing.T) {
 func TestDerivePhase_Fallback(t *testing.T) {
 	// No combined state: fall back to migration.status.
 	detail := &elmapi.MigrationDetail{
-		Migration: &elmapi.MigrationSummary{Status: sp(statusCutoverPending)},
+		Migration: &elmapi.MigrationSummary{Status: new(statusCutoverPending)},
 	}
 	phase, overlay := DerivePhase(detail)
 	if phase != PhaseCuttingOver || overlay != OverlayNone {
@@ -71,7 +69,7 @@ func TestDerivePhase_Fallback(t *testing.T) {
 
 	// in_progress with backfill progress and all sent -> ready for cutover.
 	detail = &elmapi.MigrationDetail{
-		Migration: &elmapi.MigrationSummary{Status: sp(statusInProgress)},
+		Migration: &elmapi.MigrationSummary{Status: new(statusInProgress)},
 		TargetState: &elmapi.TargetState{
 			RepositoryProgress: []elmapi.RepositoryProgress{{
 				BackfillResourcesAdded:     10,
@@ -100,12 +98,12 @@ func TestView_RendersTimelineAndProgress(t *testing.T) {
 			SourceRepositoryName:    "web",
 			TargetOrganizationLogin: "acme-cloud",
 			TargetRepositoryName:    "web",
-			TargetVisibility:        sp("internal"),
-			Status:                  sp(statusInProgress),
-			CreatedAt:               sp("2024-01-01T00:00:00Z"),
-			StartedAt:               sp("2024-01-01T00:01:00Z"),
+			TargetVisibility:        new("internal"),
+			Status:                  new(statusInProgress),
+			CreatedAt:               new("2024-01-01T00:00:00Z"),
+			StartedAt:               new("2024-01-01T00:01:00Z"),
 		},
-		CombinedState: &elmapi.CombinedState{Status: sp(combinedProcessing)},
+		CombinedState: &elmapi.CombinedState{Status: new(combinedProcessing)},
 		TargetState: &elmapi.TargetState{
 			RepositoryProgress: []elmapi.RepositoryProgress{{
 				RepositoryNWO:              "acme/web",

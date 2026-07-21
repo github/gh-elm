@@ -20,8 +20,10 @@ import (
 // scripts and CI can override the stored config without gh elm configure.
 const (
 	EnvSourceURL   = "GH_SOURCE_HOST"
+	// #nosec G101 -- This is the name of an environment variable, not a credential.
 	EnvSourceToken = "GH_SOURCE_TOKEN"
 	EnvTargetURL   = "GH_TARGET_HOST"
+	// #nosec G101 -- This is the name of an environment variable, not a credential.
 	EnvTargetToken = "GH_TARGET_TOKEN"
 )
 
