@@ -95,7 +95,7 @@ func newWatchCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&migrationID, "migration-id", "", "Migration ID (UUID) to watch (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to watch (required).")
 	cmd.Flags().StringVarP(&intervalStr, "interval", "i", "2s", "Refresh interval (e.g. 2s, 5s, 1m).")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
