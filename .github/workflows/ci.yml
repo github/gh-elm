@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
@@ -28,3 +30,44 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go test -race ./...
+
+  # Build unreleased ("snapshot") cross-platform binaries so they can be
+  # downloaded and smoke-tested before a release is published. These are
+  # workflow artifacts only — they are never attached to a GitHub Release and
+  # are versioned as 0.0.0-SNAPSHOT-<sha>.
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # GoReleaser needs full history/tags for versioning
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          # No build cache: this job uploads artifacts, so a shared cache is a
+          # cache-poisoning vector.
+          cache: false
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+      - name: Stage platform-named binaries
+        run: |
+          # GoReleaser leaves the raw binaries under dist/<target>/gh-elm; the
+          # release asset names (gh-elm_<ver>_<os>-<arch>) only exist as upload
+          # metadata in artifacts.json. Copy them into flat, named files, then
+          # tar them up so the executable bit survives the artifact round-trip
+          # (actions/upload-artifact does not preserve file permissions).
+          mkdir -p snapshot
+          jq -r '.[]
+            | select(.type == "Binary" and (.name | test("_(linux|darwin|windows)-")))
+            | "\(.path)\t\(.name)"' dist/artifacts.json \
+            | while IFS=$'\t' read -r path name; do cp "$path" "snapshot/$name"; done
+          cp dist/checksums.txt snapshot/
+          tar -czf gh-elm-snapshot-binaries.tar.gz -C snapshot .
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gh-elm-snapshot-binaries
+          path: gh-elm-snapshot-binaries.tar.gz
+          if-no-files-found: error

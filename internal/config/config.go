@@ -15,13 +15,18 @@ import (
 	"path/filepath"
 )
 
-// Environment variable names. These are identical to the ones the elm CLI reads,
-// so existing scripts and CI keep working without gh elm configure.
+// Environment variable names. gh-elm uses a unified GH_SOURCE_*/GH_TARGET_*
+// scheme for the source (GHES) and target (GHEC/Proxima) host and token, so
+// scripts and CI can override the stored config without gh elm configure.
 const (
-	EnvSourceURL   = "GHES_URL"
-	EnvSourceToken = "GHES_TOKEN"
-	EnvTargetURL   = "MIGRATION_TARGET_URL"
-	EnvTargetToken = "MIGRATION_TARGET_TOKEN"
+	EnvSourceURL = "GH_SOURCE_HOST"
+	// EnvSourceToken is an environment variable name, not a credential.
+	// #nosec G101
+	EnvSourceToken = "GH_SOURCE_TOKEN"
+	EnvTargetURL   = "GH_TARGET_HOST"
+	// EnvTargetToken is an environment variable name, not a credential.
+	// #nosec G101
+	EnvTargetToken = "GH_TARGET_TOKEN"
 )
 
 // Config is gh-elm's persisted, non-secret configuration.

@@ -102,12 +102,12 @@ func newResourcesCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to list resources for (required).")
-	cmd.Flags().StringVar(&repository, "repository", "", "Filter resources by repository in owner/repo format.")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Migration ID to list resources for (required).")
+	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Filter resources by repository in owner/repo format.")
 	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live_update (default: both).")
 	cmd.Flags().StringVar(&stateFlag, "state", "", "Filter by state: pending, processed, failed, or eligible (default: all).")
 	cmd.Flags().IntVar(&maxResults, "max-results", 0, "Maximum number of resources to return (0 = all).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output resources as newline-delimited JSON.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output resources as newline-delimited JSON.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -131,12 +131,13 @@ func resolveOrigins(s string) ([]string, error) {
 }
 
 // annotateAuthError turns a 401/403 from the target API into an actionable
-// message. Auth failures are commonly caused by a stale MIGRATION_TARGET_URL or
-// MIGRATION_TARGET_TOKEN environment variable overriding the configured values,
+// message. Auth failures are commonly caused by a stale GH_TARGET_HOST or
+// GH_TARGET_TOKEN environment variable overriding the configured values,
 // so we call that out explicitly rather than leaving a bare HTTP error.
 func annotateAuthError(err error, targetURL string) error {
 	var httpErr *elmapi.HTTPError
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
+		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
 		return fmt.Errorf("authentication failed (HTTP %d) for target %s: %s\n"+
 			"Check the target token with `gh elm configure --show`. Note the %s and %s environment variables override stored config.",
 			httpErr.StatusCode, targetURL, httpErr.Message, config.EnvTargetURL, config.EnvTargetToken)

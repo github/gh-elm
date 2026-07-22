@@ -32,11 +32,20 @@ tidy: ## Tidy go.mod/go.sum
 	go mod tidy
 
 .PHONY: audit
-audit: fmt vet test ## Run the checks CI runs
+audit: fmt vet lint test ## Run the checks CI runs
+
+.PHONY: lint
+lint: ## Run golangci-lint
+	script/lint-go-code
+
+.PHONY: release-snapshot
+release-snapshot: ## Build a local GoReleaser snapshot into dist/ (no publish)
+	goreleaser release --snapshot --clean --skip=publish
 
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -f $(BINARY)
+	rm -rf dist
 
 .PHONY: help
 help: ## Show this help

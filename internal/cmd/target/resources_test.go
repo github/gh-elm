@@ -104,7 +104,7 @@ func TestResources(t *testing.T) {
 			t.Fatal("expected an error on 401")
 		}
 		msg := err.Error()
-		for _, want := range []string{"authentication failed", "401", "MIGRATION_TARGET_URL", "MIGRATION_TARGET_TOKEN"} {
+		for _, want := range []string{"authentication failed", "401", "GH_TARGET_HOST", "GH_TARGET_TOKEN"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("error %q missing %q", msg, want)
 			}

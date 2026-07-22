@@ -1,0 +1,39 @@
+#!/bin/bash
+# golangci-lint installs and runs golangci-lint
+
+set -euo pipefail
+
+GOLANGCI_LINT_VERSION="2.11.4"
+
+REPO_ROOT="$(CDPATH="" cd -- "$(dirname -- "$0")/.." && pwd -P)"
+REPO_BIN="$REPO_ROOT/bin"
+
+mkdir -p "$REPO_BIN"
+
+install_golangci_lint() {
+    local lint_bin_directory="$1"
+    local version="$2"
+
+    echo '> Installing golangci-lint...'
+    mkdir -p "$lint_bin_directory"
+
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/2d4621cb8b6d8cd07d9cd2127427561bde60fc95/install.sh |
+        sh -s -- -b "$lint_bin_directory" "v$version" || {
+        echo "Failed to install golangci-lint version $version"
+        exit 1
+    }
+
+    echo "> golangci-lint version $version installed successfully."
+}
+
+if [ -x "$REPO_BIN/golangci-lint" ]; then
+    installed_version="$("$REPO_BIN/golangci-lint" --version 2>/dev/null | awk -F 'has version | built with' '{print $2}' || true)"
+    if [ "$installed_version" != "$GOLANGCI_LINT_VERSION" ]; then
+        echo "golangci-lint version mismatch: expected $GOLANGCI_LINT_VERSION, but found $installed_version. Reinstalling..."
+        install_golangci_lint "$REPO_BIN" "$GOLANGCI_LINT_VERSION"
+    fi
+else
+    install_golangci_lint "$REPO_BIN" "$GOLANGCI_LINT_VERSION"
+fi
+
+exec "$REPO_BIN/golangci-lint" "$@"

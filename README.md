@@ -133,14 +133,14 @@ Every command resolves each URL and token in this order, so scripts and CI can s
 --flag  >  environment variable  >  stored config/credentials
 ```
 
-The environment variables match the `elm` CLI:
+The environment variables use a unified `GH_SOURCE_*` / `GH_TARGET_*` scheme:
 
 | Purpose | Env var |
 | --- | --- |
-| Source URL | `GHES_URL` |
-| Source token | `GHES_TOKEN` |
-| Target URL | `MIGRATION_TARGET_URL` |
-| Target token | `MIGRATION_TARGET_TOKEN` |
+| Source host | `GH_SOURCE_HOST` |
+| Source token | `GH_SOURCE_TOKEN` |
+| Target host | `GH_TARGET_HOST` |
+| Target token | `GH_TARGET_TOKEN` |
 
 Other overrides:
 
@@ -155,7 +155,7 @@ Requires [Go](https://go.dev) (version pinned in [`go.mod`](go.mod)) and the `gh
 make build     # build the ./gh-elm binary
 make install   # build and install this checkout as a local gh extension
 make test      # run unit tests (with -race)
-make audit     # fmt + vet + test (what CI runs)
+make audit     # fmt + vet + lint + test (what CI runs)
 gh elm --version  # verify your local build is installed
 ```
 
@@ -164,12 +164,21 @@ local build. Rebuild with `make build` to pick up changes.
 
 ## Releasing
 
-Pushing a `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
-which uses [`cli/gh-extension-precompile`](https://github.com/cli/gh-extension-precompile) to
-build cross-platform binaries and attach them to a GitHub release. `gh` installs and upgrades
-the correct binary for each user's platform.
+Releases are drafted automatically and built with GoReleaser:
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
+1. On every merge to `main`, [`release-drafter`](https://github.com/release-drafter/release-drafter)
+   ([`.github/workflows/release-drafter.yml`](.github/workflows/release-drafter.yml)) keeps a
+   **draft** GitHub Release up to date. The next version is derived from PR labels
+   (`major`/`minor`/`patch`, plus `feature`, `fix`, etc.) and the changelog from merged PR
+   titles (see [`.github/release-drafter.yml`](.github/release-drafter.yml)). PRs are
+   auto-labelled from their branch name and title (e.g. `feat/…`, `fix:`), so labels usually
+   don't need to be applied by hand.
+2. When you're ready to ship, **publish** the draft release from the GitHub UI. Publishing
+   creates the `v*` tag.
+3. The tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which runs
+   [GoReleaser](https://goreleaser.com) ([`.goreleaser.yaml`](.goreleaser.yaml)) to build
+   cross-platform binaries and attach them to that release. `gh` installs and upgrades the
+   correct binary for each user's platform.
+
+The published binaries are named `gh-elm_<version>_<os>-<arch>` so that
+`gh extension install github/gh-elm` and `gh extension upgrade` can pick the right asset.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -211,12 +212,7 @@ func TestIterNodes(t *testing.T) {
 }
 
 func containsQuery(raw, want string) bool {
-	for _, part := range splitAmp(raw) {
-		if part == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(splitAmp(raw), want)
 }
 
 func splitAmp(s string) []string {

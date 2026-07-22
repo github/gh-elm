@@ -1,0 +1,42 @@
+# Keeps a draft GitHub Release continuously updated as PRs merge to main, and
+# auto-labels PRs so the draft's version/changelog can be resolved from labels.
+# The draft's version and changelog come from .github/release-drafter.yml.
+# Publishing the draft creates the git tag, which triggers the goreleaser build
+# in .github/workflows/release.yml.
+name: Release Drafter
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  # Update the draft release. Only meaningful on push to main; on pull_request
+  # merge refs release-drafter forces dry-run, so we restrict it to push.
+  update_release_draft:
+    if: github.event_name == 'push'
+    permissions:
+      contents: write # create/update the draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@eada3c96a64734dd381cfbda23511034e328ddb0 # v7.6.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Apply labels to PRs (per the `autolabeler` rules in
+  # .github/release-drafter.yml) so version resolution has something to work
+  # with. Runs only on pull_request events.
+  autolabel:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write # apply labels to the PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter/autolabeler@eada3c96a64734dd381cfbda23511034e328ddb0 # v7.6.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

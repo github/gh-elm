@@ -8,7 +8,6 @@ import (
 
 func TestPingCommands(t *testing.T) {
 	for _, args := range [][]string{
-		{"migration", "ping"},
 		{"target", "ping"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
