@@ -1,0 +1,60 @@
+# GoReleaser config for the gh-elm CLI extension.
+#
+# `gh extension install` / `gh extension upgrade` locate a release asset by
+# matching the running platform string "<goos>-<goarch>" (for example
+# "darwin-arm64") against the asset file name, trimming any ".exe" suffix
+# first. We therefore publish the raw binaries (not tar/zip archives) with a
+# name template ending in "<Os>-<Arch>".
+#
+# https://goreleaser.com/customization/
+version: 2
+
+project_name: gh-elm
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gh-elm
+    binary: gh-elm
+    main: .
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # Stamp the published tag into main.version so `gh elm --version`
+      # reports the release tag instead of the default "dev".
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # gh runs extensions on many platforms; skip only combinations Go can't
+    # target. (All linux/darwin/windows amd64+arm64 combos are valid.)
+
+archives:
+  # Publish raw binaries so `gh extension install` can consume them directly.
+  - id: gh-elm
+    formats:
+      - binary
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  # The release is created (as a draft) and titled by release-drafter; when a
+  # maintainer publishes that draft GitHub creates the tag, which triggers the
+  # release workflow. `append` uploads the binaries onto that existing release
+  # instead of trying to recreate it.
+  mode: append
+
+changelog:
+  # Release notes come from release-drafter, so keep GoReleaser's own
+  # changelog out of the release body.
+  disable: true
