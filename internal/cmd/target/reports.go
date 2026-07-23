@@ -1,10 +1,12 @@
 package target
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -13,23 +15,43 @@ import (
 	"github.com/github/gh-elm/internal/endpoints"
 )
 
-// newCreateReportCmd builds `gh elm target create-report`, which requests a node
+// newReportCmd builds the `gh elm target report` command group — `create`,
+// `status`, and `url` — for a migration's node reports.
+func newReportCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "report",
+		Short: "Create, check, and download a migration's node reports",
+		Long: "Work with a migration's node reports on the target (GHEC/Proxima) side:\n" +
+			"`create` requests one, `status` polls it, and `url` returns a signed download URL.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(newReportCreateCmd())
+	cmd.AddCommand(newReportStatusCmd())
+	cmd.AddCommand(newReportURLCmd())
+	return cmd
+}
+
+// newReportCreateCmd builds `gh elm target report create`, which requests a node
 // report for a migration. POST /enterprise/migration/:id/reports.
-func newCreateReportCmd() *cobra.Command {
+func newReportCreateCmd() *cobra.Command {
 	var (
 		migrationID int64
 		stageFlag   string
 		stateFlag   string
+		asJSON      bool
 		targetURL   string
 		targetToken string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "create-report",
-		Short: "Request a node report for a migration from the target",
+		Use:   "create",
+		Short: "Request a node report for a migration",
 		Long: "Request a node report for a migration from the target (GHEC/Proxima) REST API.\n" +
-			"The report is generated asynchronously; poll `gh elm target report-status` and\n" +
-			"then download it with `gh elm target report-url`. Prints the API's raw JSON response.",
+			"The report is generated asynchronously; poll `gh elm target report status` and\n" +
+			"then download it with `gh elm target report url`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stage, err := resolveReportStage(stageFlag)
@@ -50,13 +72,14 @@ func newCreateReportCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
 			}
-			return writeRaw(cmd.OutOrStdout(), raw)
+			return renderReport(cmd.OutOrStdout(), raw, asJSON, printReportCreate)
 		},
 	}
 
 	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to request a report for (required).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage the report should cover: backfill or live_updates (required).")
 	cmd.Flags().StringVar(&stateFlag, "state", "all", "Node states the report should cover: migrated, unmigrated, or all.")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -65,20 +88,21 @@ func newCreateReportCmd() *cobra.Command {
 	return cmd
 }
 
-// newReportStatusCmd builds `gh elm target report-status`, which queries the
+// newReportStatusCmd builds `gh elm target report status`, which queries the
 // status of a node report. GET /enterprise/migration/:id/reports/status.
 func newReportStatusCmd() *cobra.Command {
 	var (
 		migrationID int64
 		stageFlag   string
+		asJSON      bool
 		targetURL   string
 		targetToken string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "report-status",
+		Use:   "status",
 		Short: "Query the status of a migration's node report",
-		Long:  "Query the status of a migration's node report from the target (GHEC/Proxima) REST API. Prints the API's raw JSON response.",
+		Long:  "Query the status of a migration's node report from the target (GHEC/Proxima) REST API.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stage, err := resolveReportStage(stageFlag)
@@ -95,12 +119,13 @@ func newReportStatusCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
 			}
-			return writeRaw(cmd.OutOrStdout(), raw)
+			return renderReport(cmd.OutOrStdout(), raw, asJSON, printReportStatus)
 		},
 	}
 
 	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to query the report for (required).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live_updates (required).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -109,22 +134,23 @@ func newReportStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// newReportURLCmd builds `gh elm target report-url`, which returns a short-lived
+// newReportURLCmd builds `gh elm target report url`, which returns a short-lived
 // signed download URL for a finished report. GET /enterprise/migration/:id/reports/url.
 func newReportURLCmd() *cobra.Command {
 	var (
 		migrationID int64
 		stageFlag   string
+		asJSON      bool
 		targetURL   string
 		targetToken string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "report-url",
+		Use:   "url",
 		Short: "Get a signed download URL for a finished report",
 		Long: "Get a short-lived, read-only signed URL to download a finished node report\n" +
 			"archive directly from blob storage. The report must be finished; check with\n" +
-			"`gh elm target report-status` first. Prints the API's raw JSON response.",
+			"`gh elm target report status` first.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stage, err := resolveReportStage(stageFlag)
@@ -141,12 +167,13 @@ func newReportURLCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
 			}
-			return writeRaw(cmd.OutOrStdout(), raw)
+			return renderReport(cmd.OutOrStdout(), raw, asJSON, printReportURL)
 		},
 	}
 
 	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to download the report for (required).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live_updates (required).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -215,4 +242,99 @@ func writeRaw(w io.Writer, raw json.RawMessage) error {
 	}
 	_, err := fmt.Fprintln(w)
 	return err
+}
+
+// renderReport writes either the API's raw JSON (asJSON) or a human-readable
+// rendering parsed from it. The raw path echoes the response verbatim so unknown
+// fields survive and no zero values are fabricated; the human path only reads
+// the fields it displays.
+func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, render func(io.Writer, T)) error {
+	if asJSON {
+		return writeRaw(out, raw)
+	}
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return fmt.Errorf("parsing report response: %w", err)
+	}
+	// Render into a buffer first, then write to out once so a failed output
+	// stream (e.g. a closed pipe) surfaces as an error instead of a silently
+	// truncated success. Writes to a bytes.Buffer can't fail, so the render
+	// callbacks don't need to return errors.
+	var buf bytes.Buffer
+	render(&buf, v)
+	_, err := out.Write(buf.Bytes())
+	return err
+}
+
+// reportCreateView is the human-facing subset of the create-report response.
+type reportCreateView struct {
+	RequestedAt       time.Time `json:"requestedAt"`
+	AlreadyInProgress bool      `json:"alreadyInProgress"`
+}
+
+func printReportCreate(w io.Writer, v reportCreateView) {
+	if v.AlreadyInProgress {
+		fmt.Fprintln(w, "A report for this stage was already in progress; reusing it.")
+	} else {
+		fmt.Fprintln(w, "Report requested.")
+	}
+	if !v.RequestedAt.IsZero() {
+		fmt.Fprintf(w, "Requested at: %s\n", v.RequestedAt.Format(time.RFC3339))
+	}
+}
+
+// reportStatusView is the human-facing subset of the report-status response.
+type reportStatusView struct {
+	Status         string    `json:"status"`
+	TotalSizeBytes string    `json:"totalSizeBytes"`
+	Stage          string    `json:"stage"`
+	State          string    `json:"state"`
+	RequestedAt    time.Time `json:"requestedAt"`
+	FinishedAt     time.Time `json:"finishedAt"`
+	Format         string    `json:"format"`
+	Files          []struct {
+		Name      string `json:"name"`
+		SizeBytes string `json:"sizeBytes"`
+	} `json:"files"`
+}
+
+func printReportStatus(w io.Writer, v reportStatusView) {
+	fmt.Fprintf(w, "Status: %s\n", friendlyEnum(v.Status, "REPORT_STATUS_"))
+	if v.Stage != "" {
+		fmt.Fprintf(w, "Stage:  %s\n", friendlyEnum(v.Stage, "REPORT_STAGE_"))
+	}
+	if v.State != "" {
+		fmt.Fprintf(w, "State:  %s\n", friendlyEnum(v.State, "REPORT_STATE_"))
+	}
+	if !v.RequestedAt.IsZero() {
+		fmt.Fprintf(w, "Requested: %s\n", v.RequestedAt.Format(time.RFC3339))
+	}
+	if !v.FinishedAt.IsZero() {
+		fmt.Fprintf(w, "Finished:  %s\n", v.FinishedAt.Format(time.RFC3339))
+	}
+	if v.Format != "" {
+		fmt.Fprintf(w, "Format: %s\n", v.Format)
+	}
+	if v.TotalSizeBytes != "" {
+		fmt.Fprintf(w, "Total size (bytes): %s\n", v.TotalSizeBytes)
+	}
+	for _, f := range v.Files {
+		fmt.Fprintf(w, "  - %s (%s bytes)\n", f.Name, f.SizeBytes)
+	}
+}
+
+// reportURLView is the human-facing subset of the report-url response.
+type reportURLView struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// printReportURL prints the signed URL on its own first line, intentionally
+// unlabeled (unlike the other human-readable fields) so callers can grab it with
+// `head -1` without switching to --json. The expiry follows on a labeled line.
+func printReportURL(w io.Writer, v reportURLView) {
+	fmt.Fprintln(w, v.URL)
+	if !v.ExpiresAt.IsZero() {
+		fmt.Fprintf(w, "Expires at: %s\n", v.ExpiresAt.Format(time.RFC3339))
+	}
 }
