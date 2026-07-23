@@ -124,8 +124,12 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, lines []string, 
 
 		claimantID, err := s.client.UserID(ctx, p.targetUser)
 		if err != nil {
-			s.log.Warnf("Claimant %q not found. Skipping.", p.targetUser)
-			continue
+			if errors.Is(err, ErrUserNotFound) {
+				s.log.Warnf("Claimant %q not found. Skipping.", p.targetUser)
+				continue
+			}
+			// Auth/network/other failures must not be silently skipped.
+			return err
 		}
 
 		m := Mannequin{ID: p.id, Login: p.login}
@@ -179,15 +183,20 @@ func (s *ReclaimService) handleReattribution(m Mannequin, targetUser, targetUser
 	return true
 }
 
-// isSkipInvitationUnavailable reports whether err indicates the target org lacks
-// the reattributeMannequinToUser mutation (non-EMU orgs).
+// isSkipInvitationUnavailable reports whether err indicates --skip-invitation is
+// unavailable for the target org. This has two forms: older orgs where the
+// reattributeMannequinToUser mutation doesn't exist at all, and orgs where the
+// mutation exists but rejects the call because the org is not EMU. Both must be
+// treated as fail-fast (not a soft per-mannequin skip) so a batch can't report
+// success while reclaiming nothing.
 func isSkipInvitationUnavailable(err error) bool {
 	var gqlErr *GraphQLError
 	if !errors.As(err, &gqlErr) {
 		return false
 	}
 	for _, m := range gqlErr.Messages {
-		if strings.Contains(m, "reattributeMannequinToUser") && strings.Contains(m, "doesn't exist") {
+		if (strings.Contains(m, "reattributeMannequinToUser") && strings.Contains(m, "doesn't exist")) ||
+			strings.Contains(m, "is not an Enterprise Managed Users (EMU) organization") {
 			return true
 		}
 	}

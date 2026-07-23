@@ -21,6 +21,11 @@ func graphQLServer(t *testing.T, respond func(query string, vars map[string]any)
 		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
 			t.Errorf("Authorization = %q", got)
 		}
+		// The mannequin_claiming_emu feature must be requested so the
+		// reattributeMannequinToUser mutation (--skip-invitation) exists.
+		if got := r.Header.Get("GraphQL-Features"); got != "mannequin_claiming_emu" {
+			t.Errorf("GraphQL-Features = %q, want mannequin_claiming_emu", got)
+		}
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
 			Query     string         `json:"query"`
@@ -107,7 +112,7 @@ func TestMannequins(t *testing.T) {
 			t.Fatalf("got %d mannequins, want 3: %+v", len(got), got)
 		}
 		if got[0].MappedUser != nil {
-			t.Errorf("alice should be unclaimed")
+			t.Error("alice should be unclaimed")
 		}
 		if got[1].MappedUser == nil || got[1].MappedUser.Login != "bob-target" {
 			t.Errorf("bob claimant = %+v", got[1].MappedUser)

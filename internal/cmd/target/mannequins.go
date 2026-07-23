@@ -137,7 +137,7 @@ func newMannequinClaimCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if csvPath == "" && (mannequinUser == "" || targetUser == "") {
-				return fmt.Errorf("either --csv or both --mannequin-user and --target-user must be specified")
+				return errors.New("either --csv or both --mannequin-user and --target-user must be specified")
 			}
 
 			client, targetURLResolved, err := mannequinClient(targetURL, targetToken)
@@ -209,7 +209,7 @@ func ensureSkipInvitationAllowed(cmd *cobra.Command, client *ghapi.Client, githu
 	}
 	if !confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),
 		"Claiming mannequins with --skip-invitation is immediate and irreversible. Continue? [y/N]") {
-		return fmt.Errorf("aborted")
+		return errors.New("aborted")
 	}
 	return nil
 }
@@ -267,6 +267,7 @@ func mannequinClient(targetURL, targetToken string) (*ghapi.Client, string, erro
 func annotateMannequinAuthError(err error, targetURL string) error {
 	var httpErr *ghapi.HTTPError
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
+		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
 		return fmt.Errorf("authentication failed (HTTP %d) for target %s: %s\n"+
 			"Check the target token with `gh elm configure --show`. Note the %s and %s environment variables override stored config.",
 			httpErr.StatusCode, targetURL, httpErr.Message, config.EnvTargetURL, config.EnvTargetToken)

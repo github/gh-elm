@@ -2,9 +2,16 @@ package ghapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 )
+
+// ErrUserNotFound is returned (wrapped) by UserID when the target login does not
+// resolve to a user. Callers can distinguish it with errors.Is to skip a missing
+// claimant while still propagating auth/network/other failures.
+var ErrUserNotFound = errors.New("user not found")
 
 // Claimant is the user a mannequin has been mapped to (its "target user").
 type Claimant struct {
@@ -99,12 +106,31 @@ func (c *Client) UserID(ctx context.Context, login string) (string, error) {
 	}
 	vars := map[string]any{"login": login}
 	if err := c.graphQL(ctx, `query($login: String!) { user(login: $login) { id name } }`, vars, &data); err != nil {
+		if isUserNotFound(err) {
+			return "", fmt.Errorf("user %q not found: %w", login, ErrUserNotFound)
+		}
 		return "", fmt.Errorf("looking up user ID for %q: %w", login, err)
 	}
 	if data.User.ID == "" {
-		return "", fmt.Errorf("user %q not found", login)
+		return "", fmt.Errorf("user %q not found: %w", login, ErrUserNotFound)
 	}
 	return data.User.ID, nil
+}
+
+// isUserNotFound reports whether err is GitHub's GraphQL "could not resolve to a
+// User" response, i.e. the login simply does not exist (as opposed to an auth,
+// network, or other transient failure).
+func isUserNotFound(err error) bool {
+	var gqlErr *GraphQLError
+	if !errors.As(err, &gqlErr) {
+		return false
+	}
+	for _, m := range gqlErr.Messages {
+		if strings.Contains(m, "Could not resolve to a User with the login") {
+			return true
+		}
+	}
+	return false
 }
 
 // LoginName returns the login of the authenticated user (the token's viewer).

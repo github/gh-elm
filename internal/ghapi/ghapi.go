@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -22,6 +23,15 @@ const (
 	acceptHeader     = "application/vnd.github+json"
 	apiVersionHeader = "X-GitHub-Api-Version"
 	apiVersion       = "2022-11-28"
+
+	// graphQLFeaturesHeader opts into preview GraphQL schema features. The
+	// mannequin_claiming_emu feature exposes the reattributeMannequinToUser
+	// mutation used by `mannequin claim --skip-invitation`; without it the
+	// mutation is absent from the schema and the call fails with "doesn't exist
+	// on type 'Mutation'". gh-gei sends this header on every request (it is
+	// ignored by REST), so we do the same.
+	graphQLFeaturesHeader = "GraphQL-Features"
+	graphQLFeatures       = "mannequin_claiming_emu"
 
 	// graphQLPageSize is the number of nodes requested per mannequins page.
 	graphQLPageSize = 100
@@ -159,6 +169,7 @@ func (c *Client) doJSONStatus(ctx context.Context, method, endpoint string, body
 	req.Header.Set("Accept", acceptHeader)
 	req.Header.Set(apiVersionHeader, apiVersion)
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set(graphQLFeaturesHeader, graphQLFeatures)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -196,12 +207,7 @@ func statusAccepted(code int, want []int) bool {
 	if len(want) == 0 {
 		return code >= 200 && code < 300
 	}
-	for _, w := range want {
-		if code == w {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(want, code)
 }
 
 func truncate(s string, n int) string {

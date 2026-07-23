@@ -2,6 +2,7 @@ package ghapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,23 +10,28 @@ import (
 
 // fakeClient implements reclaimClient for service tests.
 type fakeClient struct {
-	orgID          string
-	mannequins     []Mannequin
-	byLogin        map[string][]Mannequin
-	userIDs        map[string]string
-	invitations    []string // "sourceID->targetID"
-	reattributions []string
-	inviteErr      error
-	reattributeErr error
+	orgID               string
+	mannequins          []Mannequin
+	byLogin             map[string][]Mannequin
+	userIDs             map[string]string
+	userIDErr           error    // when set, UserID returns this for every lookup
+	invitations         []string // "sourceID->targetID"
+	reattributions      []string
+	inviteErr           error
+	reattributeErr      error
+	reattributeAttempts int
 }
 
 func (f *fakeClient) OrganizationID(_ context.Context, _ string) (string, error) {
 	return f.orgID, nil
 }
 func (f *fakeClient) UserID(_ context.Context, login string) (string, error) {
+	if f.userIDErr != nil {
+		return "", f.userIDErr
+	}
 	id, ok := f.userIDs[login]
 	if !ok {
-		return "", fmt.Errorf("user %q not found", login)
+		return "", fmt.Errorf("user %q not found: %w", login, ErrUserNotFound)
 	}
 	return id, nil
 }
@@ -43,6 +49,7 @@ func (f *fakeClient) CreateAttributionInvitation(_ context.Context, _, mannequin
 	return &AttributionResult{SourceID: mannequinID, TargetID: targetUserID}, nil
 }
 func (f *fakeClient) ReattributeMannequinToUser(_ context.Context, _, mannequinID, targetUserID string) (*AttributionResult, error) {
+	f.reattributeAttempts++
 	if f.reattributeErr != nil {
 		return nil, f.reattributeErr
 	}
@@ -214,6 +221,74 @@ func TestReclaimMannequins(t *testing.T) {
 			t.Errorf("invitations = %v", f.invitations)
 		}
 	})
+
+	t.Run("skips a row whose claimant does not resolve", func(t *testing.T) {
+		f := &fakeClient{
+			orgID: "ORG",
+			mannequins: []Mannequin{
+				{ID: "m1", Login: "alice"},
+				{ID: "m2", Login: "bob"},
+			},
+			userIDs: map[string]string{"bob-t": "u2"}, // alice-t is absent -> ErrUserNotFound
+		}
+		svc, log := newService(f)
+
+		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
+		if err != nil {
+			t.Fatalf("ReclaimMannequins: %v", err)
+		}
+		// alice-t is skipped; bob-t still reclaimed.
+		if len(f.invitations) != 1 || f.invitations[0] != "m2->u2" {
+			t.Errorf("invitations = %v", f.invitations)
+		}
+		if !log.contains("Claimant \"alice-t\" not found") {
+			t.Errorf("missing not-found warning: %v", log.lines)
+		}
+	})
+
+	t.Run("propagates a non-not-found UserID error", func(t *testing.T) {
+		authErr := &HTTPError{StatusCode: 401, Status: "401 Unauthorized", Message: "Bad credentials"}
+		f := &fakeClient{
+			orgID:      "ORG",
+			mannequins: []Mannequin{{ID: "m1", Login: "alice"}},
+			userIDErr:  authErr,
+		}
+		svc, _ := newService(f)
+
+		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t"), "octo", false, false)
+		if !errors.Is(err, authErr) {
+			t.Fatalf("expected the auth error to propagate, got %v", err)
+		}
+		if len(f.invitations) != 0 {
+			t.Errorf("should not have reclaimed on a hard error: %v", f.invitations)
+		}
+	})
+
+	t.Run("skip-invitation fails fast when unavailable (non-EMU)", func(t *testing.T) {
+		f := &fakeClient{
+			orgID: "ORG",
+			mannequins: []Mannequin{
+				{ID: "m1", Login: "alice"},
+				{ID: "m2", Login: "bob"},
+			},
+			userIDs:        map[string]string{"alice-t": "u1", "bob-t": "u2"},
+			reattributeErr: &GraphQLError{Messages: []string{"acme is not an Enterprise Managed Users (EMU) organization"}},
+		}
+		svc, log := newService(f)
+
+		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true)
+		if err != nil {
+			t.Fatalf("ReclaimMannequins: %v", err)
+		}
+		// Must stop after the first row rather than treating it as a soft skip
+		// and continuing through the batch.
+		if f.reattributeAttempts != 1 {
+			t.Errorf("reattributeAttempts = %d, want 1 (fail-fast)", f.reattributeAttempts)
+		}
+		if !log.contains("not enabled") {
+			t.Errorf("missing unavailability warning: %v", log.lines)
+		}
+	})
 }
 
 func TestWriteCSV(t *testing.T) {
@@ -251,11 +326,23 @@ func TestWriteCSV(t *testing.T) {
 }
 
 func TestIsSkipInvitationUnavailable(t *testing.T) {
-	err := &GraphQLError{Messages: []string{"Field 'reattributeMannequinToUser' doesn't exist on type 'Mutation'"}}
-	if !isSkipInvitationUnavailable(err) {
-		t.Error("expected true for the missing-mutation error")
-	}
-	if isSkipInvitationUnavailable(&GraphQLError{Messages: []string{"other"}}) {
-		t.Error("expected false for an unrelated error")
-	}
+	t.Run("missing mutation", func(t *testing.T) {
+		err := &GraphQLError{Messages: []string{"Field 'reattributeMannequinToUser' doesn't exist on type 'Mutation'"}}
+		if !isSkipInvitationUnavailable(err) {
+			t.Error("expected true for the missing-mutation error")
+		}
+	})
+
+	t.Run("non-EMU organization", func(t *testing.T) {
+		err := &GraphQLError{Messages: []string{"acme is not an Enterprise Managed Users (EMU) organization"}}
+		if !isSkipInvitationUnavailable(err) {
+			t.Error("expected true for the non-EMU rejection")
+		}
+	})
+
+	t.Run("unrelated error", func(t *testing.T) {
+		if isSkipInvitationUnavailable(&GraphQLError{Messages: []string{"other"}}) {
+			t.Error("expected false for an unrelated error")
+		}
+	})
 }

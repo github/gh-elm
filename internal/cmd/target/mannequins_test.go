@@ -174,4 +174,34 @@ func TestMannequinClaim(t *testing.T) {
 			t.Fatalf("expected admin error, got %v", err)
 		}
 	})
+
+	t.Run("skip-invitation aborts when the admin declines the prompt", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/orgs/") {
+				_, _ = io.WriteString(w, `{"role":"admin"}`)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			var req struct {
+				Query string `json:"query"`
+			}
+			_ = json.Unmarshal(body, &req)
+			if strings.Contains(req.Query, "viewer") {
+				_, _ = io.WriteString(w, `{"data":{"viewer":{"login":"alice"}}}`)
+				return
+			}
+			t.Errorf("unexpected query (should abort before any reclaim): %s", req.Query)
+		}))
+		defer srv.Close()
+
+		// Admin passes the eligibility check, but declines the confirmation
+		// prompt ("n"); the command must abort before any reclaim call.
+		_, err := runMannequin(t, newMannequinClaimCmd, "n\n",
+			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
+			"--skip-invitation",
+			"--target-url", srv.URL, "--target-token", "tok")
+		if err == nil || !strings.Contains(err.Error(), "aborted") {
+			t.Fatalf("expected aborted error, got %v", err)
+		}
+	})
 }
