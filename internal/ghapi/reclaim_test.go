@@ -144,8 +144,13 @@ func TestReclaimMannequin(t *testing.T) {
 }
 
 func TestReclaimMannequins(t *testing.T) {
-	csv := func(rows ...string) []string {
-		return append([]string{CSVHeader}, rows...)
+	recs := func(rows ...string) []MannequinRecord {
+		out := make([]MannequinRecord, 0, len(rows))
+		for _, r := range rows {
+			fields := strings.Split(r, ",")
+			out = append(out, MannequinRecord{MannequinUser: fields[0], MannequinID: fields[1], TargetUser: fields[2]})
+		}
+		return out
 	}
 
 	t.Run("reclaims each unique unclaimed row", func(t *testing.T) {
@@ -159,22 +164,12 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
+		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
 		if err != nil {
 			t.Fatalf("ReclaimMannequins: %v", err)
 		}
 		if len(f.invitations) != 2 {
 			t.Errorf("invitations = %v", f.invitations)
-		}
-	})
-
-	t.Run("rejects a bad header", func(t *testing.T) {
-		f := &fakeClient{orgID: "ORG"}
-		svc, _ := newService(f)
-
-		err := svc.ReclaimMannequins(t.Context(), []string{"nope", "alice,m1,alice-t"}, "octo", false, false)
-		if err == nil || !strings.Contains(err.Error(), "invalid CSV header") {
-			t.Fatalf("expected header error, got %v", err)
 		}
 	})
 
@@ -189,7 +184,7 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, log := newService(f)
 
-		lines := csv(
+		lines := recs(
 			"alice,m1,alice-t", // claimed -> skipped
 			"ghost,m9,x",       // not found -> skipped
 			"bob,m2,bob-t",     // duplicate below -> both skipped
@@ -214,7 +209,7 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		if err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t"), "octo", true, false); err != nil {
+		if err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t"), "octo", true, false); err != nil {
 			t.Fatalf("ReclaimMannequins: %v", err)
 		}
 		if len(f.invitations) != 1 {
@@ -233,7 +228,7 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, log := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
+		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
 		if err != nil {
 			t.Fatalf("ReclaimMannequins: %v", err)
 		}
@@ -255,7 +250,7 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t"), "octo", false, false)
+		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t"), "octo", false, false)
 		if !errors.Is(err, authErr) {
 			t.Fatalf("expected the auth error to propagate, got %v", err)
 		}
@@ -276,7 +271,7 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, log := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), csv("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true)
+		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true)
 		if err != nil {
 			t.Fatalf("ReclaimMannequins: %v", err)
 		}
@@ -287,40 +282,6 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		if !log.contains("not enabled") {
 			t.Errorf("missing unavailability warning: %v", log.lines)
-		}
-	})
-}
-
-func TestWriteCSV(t *testing.T) {
-	mannequins := []Mannequin{
-		{ID: "m1", Login: "alice"},
-		{ID: "m2", Login: "bob", MappedUser: &Claimant{Login: "bob-target"}},
-	}
-
-	t.Run("excludes reclaimed by default", func(t *testing.T) {
-		var sb strings.Builder
-		if err := WriteCSV(&sb, mannequins, false); err != nil {
-			t.Fatalf("WriteCSV: %v", err)
-		}
-		out := sb.String()
-		if !strings.Contains(out, CSVHeader) {
-			t.Errorf("missing header:\n%s", out)
-		}
-		if !strings.Contains(out, "alice,m1,") {
-			t.Errorf("missing alice:\n%s", out)
-		}
-		if strings.Contains(out, "bob") {
-			t.Errorf("should exclude reclaimed bob:\n%s", out)
-		}
-	})
-
-	t.Run("includes reclaimed with the target login", func(t *testing.T) {
-		var sb strings.Builder
-		if err := WriteCSV(&sb, mannequins, true); err != nil {
-			t.Fatalf("WriteCSV: %v", err)
-		}
-		if !strings.Contains(sb.String(), "bob,m2,bob-target") {
-			t.Errorf("missing reclaimed bob row:\n%s", sb.String())
 		}
 	})
 }

@@ -83,20 +83,22 @@ func newMannequinListCmd() *cobra.Command {
 			}
 			log.Infof("Found %d mannequin(s); %d already reclaimed.", len(mannequins), reclaimed)
 
+			records := ghapi.ToMannequinRecords(mannequins, includeReclaimed)
+
 			if output != "" {
 				f, err := os.Create(output)
 				if err != nil {
 					return fmt.Errorf("creating %s: %w", output, err)
 				}
 				defer func() { _ = f.Close() }()
-				if err := ghapi.WriteCSV(f, mannequins, includeReclaimed); err != nil {
+				if err := ghapi.WriteMannequinCSV(f, records); err != nil {
 					return fmt.Errorf("writing %s: %w", output, err)
 				}
 				log.Infof("Wrote CSV to %s.", output)
 				return nil
 			}
 
-			return ghapi.WriteCSV(cmd.OutOrStdout(), mannequins, includeReclaimed)
+			return ghapi.WriteMannequinCSV(cmd.OutOrStdout(), records)
 		},
 	}
 
@@ -155,11 +157,16 @@ func newMannequinClaimCmd() *cobra.Command {
 
 			if csvPath != "" {
 				log.Infof("Claiming mannequins from CSV...")
-				lines, err := readLines(csvPath)
+				f, err := os.Open(csvPath)
+				if err != nil {
+					return fmt.Errorf("opening %s: %w", csvPath, err)
+				}
+				defer func() { _ = f.Close() }()
+				records, err := ghapi.ReadMannequinCSV(f)
 				if err != nil {
 					return err
 				}
-				if err := svc.ReclaimMannequins(cmd.Context(), lines, githubOrg, force, skipInvitation); err != nil {
+				if err := svc.ReclaimMannequins(cmd.Context(), records, githubOrg, force, skipInvitation); err != nil {
 					return annotateMannequinAuthError(err, targetURLResolved)
 				}
 				return nil
@@ -224,20 +231,6 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	default:
 		return false
 	}
-}
-
-// readLines reads a file into trimmed lines, dropping a trailing empty line.
-func readLines(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	text := strings.ReplaceAll(string(data), "\r\n", "\n")
-	text = strings.TrimRight(text, "\n")
-	if text == "" {
-		return nil, nil
-	}
-	return strings.Split(text, "\n"), nil
 }
 
 // mannequinClient resolves the target endpoint (flag > env > stored config) and

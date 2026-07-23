@@ -4,13 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 )
-
-// CSVHeader is the header row of the mannequin CSV, shared by fetch-mannequins
-// (which writes it) and reclaim-mannequin (which validates it).
-const CSVHeader = "mannequin-user,mannequin-id,target-user"
 
 // reclaimClient is the subset of *Client the ReclaimService needs. It exists so
 // the service can be unit-tested with a fake.
@@ -83,15 +78,14 @@ func (s *ReclaimService) ReclaimMannequin(ctx context.Context, mannequinUser, ma
 	return nil
 }
 
-// ReclaimMannequins reclaims mannequins listed in a parsed CSV (including the
-// header line).
-func (s *ReclaimService) ReclaimMannequins(ctx context.Context, lines []string, githubOrg string, force, skipInvitation bool) error {
-	if len(lines) == 0 {
-		s.log.Warnf("File is empty. Nothing to reclaim.")
+// ReclaimMannequins reclaims the mannequins described by records (already parsed
+// from CSV via ReadMannequinCSV). It applies the reclaim policy: skip rows with a
+// missing field, already-claimed mannequins (unless force), unknown mannequins,
+// and duplicates.
+func (s *ReclaimService) ReclaimMannequins(ctx context.Context, records []MannequinRecord, githubOrg string, force, skipInvitation bool) error {
+	if len(records) == 0 {
+		s.log.Warnf("No mannequins to reclaim.")
 		return nil
-	}
-	if !strings.EqualFold(strings.TrimSpace(lines[0]), CSVHeader) {
-		return fmt.Errorf("invalid CSV header, should be: %s", CSVHeader)
 	}
 
 	orgID, err := s.client.OrganizationID(ctx, githubOrg)
@@ -103,37 +97,36 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, lines []string, 
 		return err
 	}
 
-	parsed := s.parseCSV(lines[1:])
+	for _, r := range records {
+		if r.MannequinUser == "" || r.MannequinID == "" || r.TargetUser == "" {
+			s.log.Warnf("Skipping row with a missing field: %q,%q,%q", r.MannequinUser, r.MannequinID, r.TargetUser)
+			continue
+		}
+		if !force && claimedByLoginID(all, r.MannequinUser, r.MannequinID) {
+			s.log.Warnf("%s is already claimed. Skipping (use --force to reclaim).", r.MannequinUser)
+			continue
+		}
+		if findByLoginID(all, r.MannequinUser, r.MannequinID) == nil {
+			s.log.Warnf("Mannequin %s not found. Skipping.", r.MannequinUser)
+			continue
+		}
+		if countRecords(records, r.MannequinUser, r.MannequinID) > 1 {
+			s.log.Warnf("Mannequin %s is a duplicate. Skipping.", r.MannequinUser)
+			continue
+		}
 
-	for _, p := range parsed {
-		if p.login == "" {
-			continue
-		}
-		if !force && claimedByLoginID(all, p.login, p.id) {
-			s.log.Warnf("%s is already claimed. Skipping (use --force to reclaim).", p.login)
-			continue
-		}
-		if findByLoginID(all, p.login, p.id) == nil {
-			s.log.Warnf("Mannequin %s not found. Skipping.", p.login)
-			continue
-		}
-		if countByLoginID(parsed, p.login, p.id) > 1 {
-			s.log.Warnf("Mannequin %s is a duplicate. Skipping.", p.login)
-			continue
-		}
-
-		claimantID, err := s.client.UserID(ctx, p.targetUser)
+		claimantID, err := s.client.UserID(ctx, r.TargetUser)
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
-				s.log.Warnf("Claimant %q not found. Skipping.", p.targetUser)
+				s.log.Warnf("Claimant %q not found. Skipping.", r.TargetUser)
 				continue
 			}
 			// Auth/network/other failures must not be silently skipped.
 			return err
 		}
 
-		m := Mannequin{ID: p.id, Login: p.login}
-		if !s.reclaimOne(ctx, orgID, m, p.targetUser, claimantID, skipInvitation) && skipInvitation {
+		m := Mannequin{ID: r.MannequinID, Login: r.MannequinUser}
+		if !s.reclaimOne(ctx, orgID, m, r.TargetUser, claimantID, skipInvitation) && skipInvitation {
 			// Fail-fast for skip-invitation, matching gh-gei.
 			return nil
 		}
@@ -203,58 +196,6 @@ func isSkipInvitationUnavailable(err error) bool {
 	return false
 }
 
-// csvRow is one parsed, trimmed CSV line.
-type csvRow struct {
-	login      string
-	id         string
-	targetUser string
-}
-
-// parseCSV parses data rows (no header), warning on and skipping malformed rows.
-func (s *ReclaimService) parseCSV(lines []string) []csvRow {
-	var rows []csvRow
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		fields := strings.Split(line, ",")
-		if len(fields) != 3 {
-			s.log.Warnf("Invalid line: %q. Will ignore it.", line)
-			continue
-		}
-		login := strings.TrimSpace(fields[0])
-		id := strings.TrimSpace(fields[1])
-		target := strings.TrimSpace(fields[2])
-		if login == "" || id == "" || target == "" {
-			s.log.Warnf("Invalid line: %q. Missing a required field. Will ignore it.", line)
-			continue
-		}
-		rows = append(rows, csvRow{login: login, id: id, targetUser: target})
-	}
-	return rows
-}
-
-// WriteCSV writes mannequins as CSV to w. When includeReclaimed is false, only
-// unclaimed mannequins are written.
-func WriteCSV(w io.Writer, mannequins []Mannequin, includeReclaimed bool) error {
-	if _, err := fmt.Fprintln(w, CSVHeader); err != nil {
-		return err
-	}
-	for _, m := range mannequins {
-		if !includeReclaimed && m.MappedUser != nil {
-			continue
-		}
-		target := ""
-		if m.MappedUser != nil {
-			target = m.MappedUser.Login
-		}
-		if _, err := fmt.Fprintf(w, "%s,%s,%s\n", m.Login, m.ID, target); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func filterByLoginID(mannequins []Mannequin, login, id string) []Mannequin {
 	var out []Mannequin
 	for _, m := range mannequins {
@@ -292,10 +233,12 @@ func anyClaimed(mannequins []Mannequin) bool {
 	return false
 }
 
-func countByLoginID(rows []csvRow, login, id string) int {
+// countRecords counts how many CSV records target the same mannequin identity
+// (login + id), used to skip ambiguous duplicates.
+func countRecords(records []MannequinRecord, user, id string) int {
 	n := 0
-	for _, r := range rows {
-		if r.login == login && r.id == id {
+	for _, r := range records {
+		if r.MannequinUser == user && r.MannequinID == id {
 			n++
 		}
 	}
