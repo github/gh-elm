@@ -3,11 +3,33 @@ package target
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// failWriter is an io.Writer that always fails, to prove output errors surface.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestRenderReportSurfacesWriterError(t *testing.T) {
+	raw := json.RawMessage(`{"status":"REPORT_STATUS_FINISHED"}`)
+
+	t.Run("human path", func(t *testing.T) {
+		if err := renderReport(failWriter{}, raw, false, printReportStatus); err == nil {
+			t.Fatal("expected the writer error to propagate from the human path")
+		}
+	})
+
+	t.Run("json path", func(t *testing.T) {
+		if err := renderReport(failWriter{}, raw, true, printReportStatus); err == nil {
+			t.Fatal("expected the writer error to propagate from the --json path")
+		}
+	})
+}
 
 func TestReportCreate(t *testing.T) {
 	t.Run("requests a report and prints human-readable confirmation", func(t *testing.T) {

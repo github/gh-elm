@@ -1,6 +1,7 @@
 package target
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -255,8 +256,14 @@ func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, render
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return fmt.Errorf("parsing report response: %w", err)
 	}
-	render(out, v)
-	return nil
+	// Render into a buffer first, then write to out once so a failed output
+	// stream (e.g. a closed pipe) surfaces as an error instead of a silently
+	// truncated success. Writes to a bytes.Buffer can't fail, so the render
+	// callbacks don't need to return errors.
+	var buf bytes.Buffer
+	render(&buf, v)
+	_, err := out.Write(buf.Bytes())
+	return err
 }
 
 // reportCreateView is the human-facing subset of the create-report response.
@@ -322,6 +329,9 @@ type reportURLView struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+// printReportURL prints the signed URL on its own first line, intentionally
+// unlabeled (unlike the other human-readable fields) so callers can grab it with
+// `head -1` without switching to --json. The expiry follows on a labeled line.
 func printReportURL(w io.Writer, v reportURLView) {
 	fmt.Fprintln(w, v.URL)
 	if !v.ExpiresAt.IsZero() {
