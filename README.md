@@ -40,7 +40,69 @@ gh elm target ping       # scaffolding check for the target group -> "pong"
   cancel, cutover) against the GHES REST API. Currently: `ping`.
 - `gh elm target ...` — read and write migration-target (GHEC/Proxima) resources such as
   nodes and mannequins. Currently: `ping`, `resources`, `create-report`, `report-status`,
-  `report-url`.
+  `report-url`, `mannequin`.
+- `gh elm target mannequin list` — list a target org's mannequins and write them as CSV (to
+  stdout, or a file with `--output`).
+- `gh elm target mannequin claim` — claim a single mannequin (`--mannequin-user` +
+  `--target-user`) or many via `--csv`. Use `--skip-invitation` to reattribute immediately
+  without the invitation email (EMU organizations only).
+
+### Examples
+
+Resolve the target endpoint via `gh elm configure` (or `MIGRATION_TARGET_URL` /
+`MIGRATION_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
+`--target-token` overrides.
+
+Migration resources — `gh elm target resources`:
+
+```sh
+# All resources for a migration (both backfill and live_update origins)
+gh elm target resources --migration-id 42
+
+# Filter by repository, origin, and state
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo
+gh elm target resources --migration-id 42 --origin backfill
+gh elm target resources --migration-id 42 --state failed
+
+# Cap results and emit newline-delimited JSON for scripting
+gh elm target resources --migration-id 42 --max-results 20
+gh elm target resources --migration-id 42 --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
+```
+
+Node reports — `gh elm target create-report`, `report-status`, `report-url`:
+
+```sh
+# Request a backfill report over all nodes (default --state all)
+gh elm target create-report --migration-id 42 --stage backfill
+
+# Request a live-updates report over only unmigrated nodes
+gh elm target create-report --migration-id 42 --stage live_updates --state unmigrated
+
+# Poll status (raw API JSON — pipe to jq)
+gh elm target report-status --migration-id 42 --stage backfill
+gh elm target report-status --migration-id 42 --stage backfill | jq -r .status
+
+# Grab the signed download URL and fetch the finished archive
+URL=$(gh elm target report-url --migration-id 42 --stage backfill | jq -r .url)
+curl -sSL "$URL" -o report.zip
+```
+
+Mannequins — `gh elm target mannequin list` / `claim`:
+
+```sh
+# List unclaimed mannequins to stdout, or all of them to a file
+gh elm target mannequin list --github-org octo-org
+gh elm target mannequin list --github-org octo-org --include-reclaimed --output mannequins.csv
+
+# Claim a single mannequin via the invitation email flow
+gh elm target mannequin claim --github-org octo-org --mannequin-user octocat --target-user real-user
+
+# Claim in bulk from an edited CSV
+gh elm target mannequin claim --github-org octo-org --csv mannequins.csv
+
+# Immediate reattribution (EMU orgs only); prompts unless --no-prompt
+gh elm target mannequin claim --github-org octo-org --csv mannequins.csv --skip-invitation
+```
 
 ## Configuration
 
