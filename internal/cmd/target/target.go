@@ -16,8 +16,6 @@ func NewCommand() *cobra.Command {
 		Short: "Work with migration-target (GHEC/Proxima) resources",
 		Long: "Read and write migration-target resources (for example migration resources\n" +
 			"and mannequins) on the GitHub Enterprise Cloud (Proxima) side of a migration.",
-		// No subcommand shows help; an unknown subcommand (e.g. a typo) fails
-		// via NoArgs rather than being swallowed as a positional argument.
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
