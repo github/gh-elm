@@ -5,8 +5,7 @@ against the GitHub Enterprise Server (GHES) REST API.
 
 `gh elm` is the customer-facing command-line surface for ELM. It talks to the GHES
 `/enterprise/live-migrations` REST API with a normal personal access token, so it runs from
-your own machine — no SSH into the appliance required. See the design in
-[ADR 0007](https://github.com/github/elm-exporter/blob/main/docs/adrs/0007-gh-cli-extension-over-rest.md).
+your own machine — no SSH into the appliance required.
 
 ## Installation
 
@@ -38,19 +37,15 @@ gh elm target ping       # scaffolding check for the target group -> "pong"
 
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API. Currently: `ping`.
-- `gh elm target ...` — read and write migration-target (GHEC/Proxima) resources such as
-  nodes and mannequins. Currently: `ping`, `resources`, `create-report`, `report-status`,
-  `report-url`, `mannequin`.
-- `gh elm target mannequin list` — list a target org's mannequins and write them as CSV (to
-  stdout, or a file with `--output`).
-- `gh elm target mannequin claim` — claim a single mannequin (`--mannequin-user` +
-  `--target-user`) or many via `--csv`. Use `--skip-invitation` to reattribute immediately
-  without the invitation email (EMU organizations only).
+- `gh elm target report create|status|url` — request a migration's node report, poll its
+  status, and get a signed download URL. Human-readable by default; add `--json` for the
+  raw API response.
+- `gh elm target mannequin list|claim` — manage mannequins for a target org. Use --output on list command to save mannequins to a CSV, then edit and feed that CSV to the claim command via the --csv flag. See the `gh elm target mannequin` help for details.
 
 ### Examples
 
-Resolve the target endpoint via `gh elm configure` (or `MIGRATION_TARGET_URL` /
-`MIGRATION_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
+Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
+`GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
 
 Migration resources — `gh elm target resources`:
@@ -69,21 +64,22 @@ gh elm target resources --migration-id 42 --max-results 20
 gh elm target resources --migration-id 42 --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
 ```
 
-Node reports — `gh elm target create-report`, `report-status`, `report-url`:
+Node reports — `gh elm target report create|status|url` (human-readable by default; add
+`--json` for the raw API response):
 
 ```sh
 # Request a backfill report over all nodes (default --state all)
-gh elm target create-report --migration-id 42 --stage backfill
+gh elm target report create --migration-id 42 --stage backfill
 
 # Request a live-updates report over only unmigrated nodes
-gh elm target create-report --migration-id 42 --stage live_updates --state unmigrated
+gh elm target report create --migration-id 42 --stage live_updates --state unmigrated
 
-# Poll status (raw API JSON — pipe to jq)
-gh elm target report-status --migration-id 42 --stage backfill
-gh elm target report-status --migration-id 42 --stage backfill | jq -r .status
+# Poll status (human-readable), or as raw JSON piped to jq
+gh elm target report status --migration-id 42 --stage backfill
+gh elm target report status --migration-id 42 --stage backfill --json | jq -r .status
 
 # Grab the signed download URL and fetch the finished archive
-URL=$(gh elm target report-url --migration-id 42 --stage backfill | jq -r .url)
+URL=$(gh elm target report url --migration-id 42 --stage backfill --json | jq -r .url)
 curl -sSL "$URL" -o report.zip
 ```
 
