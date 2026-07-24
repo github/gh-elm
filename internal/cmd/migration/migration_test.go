@@ -287,6 +287,67 @@ func TestAuthErrorAnnotation(t *testing.T) {
 	}
 }
 
+func TestLookupTargetID(t *testing.T) {
+	const withTargetID = `{"migration":{"migration_id":"mig-1","target_migration_id":12345},"target_state":null,"combined_state":null,"messages":[]}`
+
+	t.Run("prints the target migration ID (human)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1") {
+				t.Errorf("path = %q", r.URL.Path)
+			}
+			_, _ = w.Write([]byte(withTargetID))
+		}))
+		defer srv.Close()
+
+		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		if !strings.Contains(out, "Target migration ID: 12345") {
+			t.Errorf("output = %q", out)
+		}
+	})
+
+	t.Run("--json emits a machine-readable object", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(withTargetID))
+		}))
+		defer srv.Close()
+
+		out := run(t, "lookup-target-id", "--migration-id", "mig-1", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		var got targetIDView
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+		}
+		if got.MigrationID != "mig-1" || got.TargetMigrationID != 12345 {
+			t.Errorf("got = %+v", got)
+		}
+	})
+
+	t.Run("reports when the target ID is not yet assigned", func(t *testing.T) {
+		const noTargetID = `{"migration":{"migration_id":"mig-1","target_migration_id":0},"target_state":null,"combined_state":null,"messages":[]}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(noTargetID))
+		}))
+		defer srv.Close()
+
+		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		if !strings.Contains(out, "not yet assigned") {
+			t.Errorf("output = %q", out)
+		}
+	})
+
+	t.Run("requires --migration-id", func(t *testing.T) {
+		err := runErr(t, "lookup-target-id", "--source-url", "https://x", "--source-token", "tok")
+		if err == nil || !strings.Contains(err.Error(), "required") {
+			t.Fatalf("expected required-flag error, got %v", err)
+		}
+	})
+}
+
 // elmapiCreateBody mirrors the create request body for assertions.
 type elmapiCreateBody struct {
 	SourceRepositoryName string `json:"source_repository_name"`

@@ -37,6 +37,7 @@ func NewCommand() *cobra.Command {
 		newCreateCmd(),
 		newStartCmd(),
 		newStatusCmd(),
+		newLookupTargetIDCmd(),
 		newListCmd(),
 		newCancelCmd(),
 		newCutoverCmd(),
@@ -255,6 +256,46 @@ func newStatusCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (required).")
+	sourceFlags(cmd)
+	_ = cmd.MarkFlagRequired("migration-id")
+
+	return cmd
+}
+
+// newLookupTargetIDCmd builds `gh elm migration lookup-target-id`. It fetches the
+// migration's status document from the GHES REST API and surfaces the target
+// (destination) migration ID that ELM assigned on the GHEC side.
+func newLookupTargetIDCmd() *cobra.Command {
+	var (
+		migrationID string
+		asJSON      bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "lookup-target-id",
+		Short: "Look up the target (destination) migration ID for a migration",
+		Long: "Fetch a migration's status from the GHES REST API and report the target\n" +
+			"migration ID that ELM assigned on the destination (GHEC) side. Human-readable\n" +
+			"by default; add --json for a machine-readable object.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			if err != nil {
+				return err
+			}
+			detail, err := client.GetMigrationDetail(cmd.Context(), migrationID)
+			if err != nil {
+				return annotateAuthError(err, srcURL)
+			}
+			if detail.Migration == nil {
+				return fmt.Errorf("migration %s returned no migration record", migrationID)
+			}
+			return writeTargetID(cmd.OutOrStdout(), migrationID, detail.Migration.TargetMigrationID, asJSON)
+		},
+	}
+
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to look up the target ID for (required).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output a machine-readable JSON object instead of human-readable text.")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -557,5 +598,27 @@ func writeJSON(w io.Writer, v any) error {
 		return fmt.Errorf("encoding response: %w", err)
 	}
 	_, err = fmt.Fprintln(w, string(b))
+	return err
+}
+
+// targetIDView is the machine-readable shape emitted by `lookup-target-id --json`.
+type targetIDView struct {
+	MigrationID       string `json:"migration_id"`
+	TargetMigrationID int64  `json:"target_migration_id"`
+}
+
+// writeTargetID renders the target migration ID as JSON (--json) or human-readable
+// text. A zero target ID means the destination migration has not been assigned
+// yet; the human output says so, while the JSON path keeps the numeric 0 so it
+// stays machine-consumable.
+func writeTargetID(w io.Writer, migrationID string, targetID int64, asJSON bool) error {
+	if asJSON {
+		return writeJSON(w, targetIDView{MigrationID: migrationID, TargetMigrationID: targetID})
+	}
+	if targetID == 0 {
+		_, err := fmt.Fprintln(w, "Target migration ID: not yet assigned")
+		return err
+	}
+	_, err := fmt.Fprintf(w, "Target migration ID: %d\n", targetID)
 	return err
 }
