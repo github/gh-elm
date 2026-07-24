@@ -3,6 +3,9 @@ package ghapi
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestToMannequinRecords(t *testing.T) {
@@ -13,19 +16,13 @@ func TestToMannequinRecords(t *testing.T) {
 
 	t.Run("excludes reclaimed by default", func(t *testing.T) {
 		got := ToMannequinRecords(mannequins, false)
-		if len(got) != 1 || got[0] != (MannequinRecord{MannequinUser: "alice", MannequinID: "m1"}) {
-			t.Errorf("records = %+v", got)
-		}
+		assert.Equal(t, []MannequinRecord{{MannequinUser: "alice", MannequinID: "m1"}}, got)
 	})
 
 	t.Run("includes reclaimed with the target login", func(t *testing.T) {
 		got := ToMannequinRecords(mannequins, true)
-		if len(got) != 2 {
-			t.Fatalf("records = %+v", got)
-		}
-		if got[1] != (MannequinRecord{MannequinUser: "bob", MannequinID: "m2", TargetUser: "bob-target"}) {
-			t.Errorf("reclaimed record = %+v", got[1])
-		}
+		require.Len(t, got, 2)
+		assert.Equal(t, MannequinRecord{MannequinUser: "bob", MannequinID: "m2", TargetUser: "bob-target"}, got[1])
 	})
 }
 
@@ -35,72 +32,50 @@ func TestWriteMannequinCSV(t *testing.T) {
 		{MannequinUser: "alice", MannequinID: "m1"},
 		{MannequinUser: "bob", MannequinID: "m2", TargetUser: "bob-target"},
 	}
-	if err := WriteMannequinCSV(&sb, records); err != nil {
-		t.Fatalf("WriteMannequinCSV: %v", err)
-	}
+	require.NoError(t, WriteMannequinCSV(&sb, records), "WriteMannequinCSV")
 	out := sb.String()
-	if !strings.Contains(out, "mannequin-user,mannequin-id,target-user") {
-		t.Errorf("missing header:\n%s", out)
-	}
-	if !strings.Contains(out, "alice,m1,") {
-		t.Errorf("missing alice row:\n%s", out)
-	}
-	if !strings.Contains(out, "bob,m2,bob-target") {
-		t.Errorf("missing bob row:\n%s", out)
-	}
+	assert.Contains(t, out, "mannequin-user,mannequin-id,target-user")
+	assert.Contains(t, out, "alice,m1,")
+	assert.Contains(t, out, "bob,m2,bob-target")
 }
 
 func TestReadMannequinCSV(t *testing.T) {
 	t.Run("parses data rows and trims whitespace", func(t *testing.T) {
 		in := "mannequin-user,mannequin-id,target-user\nalice, m1 ,alice-t\nbob,m2,bob-t\n"
 		got, err := ReadMannequinCSV(strings.NewReader(in))
-		if err != nil {
-			t.Fatalf("ReadMannequinCSV: %v", err)
-		}
-		want := []MannequinRecord{
+		require.NoError(t, err, "ReadMannequinCSV")
+		assert.Equal(t, []MannequinRecord{
 			{MannequinUser: "alice", MannequinID: "m1", TargetUser: "alice-t"},
 			{MannequinUser: "bob", MannequinID: "m2", TargetUser: "bob-t"},
-		}
-		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Errorf("records = %+v, want %+v", got, want)
-		}
+		}, got)
 	})
 
 	t.Run("handles CRLF and quoted fields", func(t *testing.T) {
 		in := "mannequin-user,mannequin-id,target-user\r\n\"al, ice\",m1,\"target\"\r\n"
 		got, err := ReadMannequinCSV(strings.NewReader(in))
-		if err != nil {
-			t.Fatalf("ReadMannequinCSV: %v", err)
-		}
-		if len(got) != 1 || got[0].MannequinUser != "al, ice" || got[0].TargetUser != "target" {
-			t.Errorf("records = %+v", got)
-		}
+		require.NoError(t, err, "ReadMannequinCSV")
+		require.Len(t, got, 1)
+		assert.Equal(t, "al, ice", got[0].MannequinUser)
+		assert.Equal(t, "target", got[0].TargetUser)
 	})
 
 	t.Run("rejects a bad header", func(t *testing.T) {
 		in := "nope,mannequin-id,target-user\nalice,m1,alice-t\n"
 		_, err := ReadMannequinCSV(strings.NewReader(in))
-		if err == nil || !strings.Contains(err.Error(), "invalid CSV header") {
-			t.Fatalf("expected header error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid CSV header")
 	})
 
 	t.Run("rejects an inconsistent field count", func(t *testing.T) {
 		in := "mannequin-user,mannequin-id,target-user\nalice,m1\n"
 		_, err := ReadMannequinCSV(strings.NewReader(in))
-		if err == nil {
-			t.Fatal("expected an error for a row with the wrong number of fields")
-		}
+		assert.Error(t, err, "expected an error for a row with the wrong number of fields")
 	})
 
 	t.Run("empty input yields no records", func(t *testing.T) {
 		got, err := ReadMannequinCSV(strings.NewReader(""))
-		if err != nil {
-			t.Fatalf("ReadMannequinCSV: %v", err)
-		}
-		if len(got) != 0 {
-			t.Errorf("records = %+v, want none", got)
-		}
+		require.NoError(t, err, "ReadMannequinCSV")
+		assert.Empty(t, got)
 	})
 }
 
@@ -110,14 +85,8 @@ func TestMannequinCSVRoundTrip(t *testing.T) {
 		{MannequinUser: "bob", MannequinID: "m2", TargetUser: "bob-t"},
 	}
 	var sb strings.Builder
-	if err := WriteMannequinCSV(&sb, records); err != nil {
-		t.Fatalf("WriteMannequinCSV: %v", err)
-	}
+	require.NoError(t, WriteMannequinCSV(&sb, records), "WriteMannequinCSV")
 	got, err := ReadMannequinCSV(strings.NewReader(sb.String()))
-	if err != nil {
-		t.Fatalf("ReadMannequinCSV: %v", err)
-	}
-	if len(got) != len(records) || got[0] != records[0] || got[1] != records[1] {
-		t.Errorf("round-trip = %+v, want %+v", got, records)
-	}
+	require.NoError(t, err, "ReadMannequinCSV")
+	assert.Equal(t, records, got)
 }

@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreate(t *testing.T) {
@@ -26,23 +29,15 @@ func TestCreate(t *testing.T) {
 			"--target-org", "acme-cloud", "--target-repo", "web",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if gotMethod != http.MethodPost || !strings.HasSuffix(gotPath, "/enterprise/live-migrations") {
-			t.Errorf("request = %s %s", gotMethod, gotPath)
-		}
+		assert.Equal(t, http.MethodPost, gotMethod)
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations"), "path suffix: %q", gotPath)
 		// The target endpoint is derived from GH_TARGET_HOST (API-defect workaround).
-		if gotBody.TargetAPIEndpoint != "https://api.example.ghe.com" {
-			t.Errorf("target_api_endpoint = %q", gotBody.TargetAPIEndpoint)
-		}
+		assert.Equal(t, "https://api.example.ghe.com", gotBody.TargetAPIEndpoint)
 		// pat_name is stubbed with a sentinel (API-defect workaround).
-		if gotBody.PATName != "BOGON" {
-			t.Errorf("pat_name = %q", gotBody.PATName)
-		}
-		if gotBody.SourceRepositoryName != "web" || gotBody.TargetVisibility != "internal" {
-			t.Errorf("body = %+v", gotBody)
-		}
-		if !strings.Contains(out, `"migration_id": "mig-1"`) {
-			t.Errorf("output missing migration_id:\n%s", out)
-		}
+		assert.Equal(t, "BOGON", gotBody.PATName)
+		assert.Equal(t, "web", gotBody.SourceRepositoryName)
+		assert.Equal(t, "internal", gotBody.TargetVisibility)
+		assert.Contains(t, out, `"migration_id": "mig-1"`, "output missing migration_id")
 	})
 
 	t.Run("create --start posts start and reports success", func(t *testing.T) {
@@ -63,37 +58,30 @@ func TestCreate(t *testing.T) {
 			"--target-org", "b", "--target-repo", "r",
 			"--start", "--source-url", srv.URL, "--source-token", "tok")
 
-		if !startCalled {
-			t.Error("start endpoint was not called")
-		}
-		if !strings.Contains(out, "created and started") {
-			t.Errorf("output = %q", out)
-		}
+		assert.True(t, startCalled, "start endpoint was not called")
+		assert.Contains(t, out, "created and started")
 	})
 
 	t.Run("rejects public visibility", func(t *testing.T) {
 		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
 			"--target-org", "b", "--target-repo", "r", "--target-visibility", "public",
 			"--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "private or internal") {
-			t.Fatalf("expected visibility error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "private or internal")
 	})
 
 	t.Run("--watch requires --start", func(t *testing.T) {
 		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
 			"--target-org", "b", "--target-repo", "r",
 			"--watch", "--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "--watch requires --start") {
-			t.Fatalf("expected watch/start error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--watch requires --start")
 	})
 
 	t.Run("requires the core flags", func(t *testing.T) {
 		err := runErr(t, "create", "--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "required") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required")
 	})
 
 	t.Run("errors when no target host is configured (API-defect workaround)", func(t *testing.T) {
@@ -101,9 +89,8 @@ func TestCreate(t *testing.T) {
 		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
 			"--target-org", "b", "--target-repo", "r",
 			"--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "requires a target endpoint") {
-			t.Fatalf("expected target-endpoint error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires a target endpoint")
 	})
 }
 
@@ -119,19 +106,14 @@ func TestStart(t *testing.T) {
 		out := run(t, "start", "--migration-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if !strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/start") {
-			t.Errorf("path = %q", gotPath)
-		}
-		if !strings.Contains(out, "started") {
-			t.Errorf("output = %q", out)
-		}
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/start"), "path = %q", gotPath)
+		assert.Contains(t, out, "started")
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
 		err := runErr(t, "start", "--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "migration-id") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migration-id")
 	})
 }
 
@@ -139,9 +121,7 @@ func TestStatus(t *testing.T) {
 	t.Run("prints the raw API JSON", func(t *testing.T) {
 		const respBody = `{"migration":{"migration_id":"mig-1","status":"in_progress"},"target_state":null,"combined_state":null,"messages":[]}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1") {
-				t.Errorf("path = %q", r.URL.Path)
-			}
+			assert.True(t, strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1"), "path = %q", r.URL.Path)
 			_, _ = w.Write([]byte(respBody))
 		}))
 		defer srv.Close()
@@ -149,9 +129,7 @@ func TestStatus(t *testing.T) {
 		out := run(t, "status", "--migration-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if strings.TrimSpace(out) != respBody {
-			t.Errorf("output = %q, want raw JSON %q", out, respBody)
-		}
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
 	})
 }
 
@@ -168,20 +146,16 @@ func TestList(t *testing.T) {
 		out := run(t, "list", "--status", "in_progress", "--page-size", "25",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if !strings.Contains(gotQuery, "status=in_progress") || !strings.Contains(gotQuery, "page_size=25") {
-			t.Errorf("query = %q", gotQuery)
-		}
-		if strings.TrimSpace(out) != respBody {
-			t.Errorf("output = %q", out)
-		}
+		assert.Contains(t, gotQuery, "status=in_progress")
+		assert.Contains(t, gotQuery, "page_size=25")
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
 	})
 
 	t.Run("rejects an invalid status", func(t *testing.T) {
 		err := runErr(t, "list", "--status", "bogus",
 			"--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "invalid --status") {
-			t.Fatalf("expected status error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid --status")
 	})
 }
 
@@ -219,15 +193,9 @@ func TestActions(t *testing.T) {
 			args = append(args, "--source-url", srv.URL, "--source-token", "tok")
 			out := run(t, args...)
 
-			if gotMethod != http.MethodPost {
-				t.Errorf("method = %q, want %q", gotMethod, http.MethodPost)
-			}
-			if !strings.HasSuffix(gotPath, tc.wantPath) {
-				t.Errorf("path = %q, want %q", gotPath, tc.wantPath)
-			}
-			if !strings.Contains(out, tc.wantOut) {
-				t.Errorf("output = %q, want to contain %q", out, tc.wantOut)
-			}
+			assert.Equal(t, http.MethodPost, gotMethod)
+			assert.True(t, strings.HasSuffix(gotPath, tc.wantPath), "path = %q, want suffix %q", gotPath, tc.wantPath)
+			assert.Contains(t, out, tc.wantOut)
 		})
 	}
 }
@@ -248,9 +216,7 @@ func TestCutover(t *testing.T) {
 		run(t, "cutover-to-destination", "--migration-id", "m", "--force",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if !gotForce {
-			t.Error("expected force=true in cutover body")
-		}
+		assert.True(t, gotForce, "expected force=true in cutover body")
 	})
 }
 
@@ -266,9 +232,7 @@ func TestCutoverStatus(t *testing.T) {
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		for _, want := range []string{"Ready for cutover: false", "backfill incomplete", "acme/web"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("output missing %q:\n%s", want, out)
-			}
+			assert.Contains(t, out, want)
 		}
 	})
 }
@@ -282,9 +246,8 @@ func TestAuthErrorAnnotation(t *testing.T) {
 
 	err := runErr(t, "status", "--migration-id", "m",
 		"--source-url", srv.URL, "--source-token", "tok")
-	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
-		t.Fatalf("expected annotated auth error, got %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication failed")
 }
 
 func TestLookupTargetID(t *testing.T) {
@@ -292,9 +255,7 @@ func TestLookupTargetID(t *testing.T) {
 
 	t.Run("prints the target migration ID (human)", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1") {
-				t.Errorf("path = %q", r.URL.Path)
-			}
+			assert.True(t, strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1"), "path = %q", r.URL.Path)
 			_, _ = w.Write([]byte(withTargetID))
 		}))
 		defer srv.Close()
@@ -302,9 +263,7 @@ func TestLookupTargetID(t *testing.T) {
 		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if !strings.Contains(out, "Target migration ID: 12345") {
-			t.Errorf("output = %q", out)
-		}
+		assert.Contains(t, out, "Target migration ID: 12345")
 	})
 
 	t.Run("--json emits a machine-readable object", func(t *testing.T) {
@@ -317,12 +276,9 @@ func TestLookupTargetID(t *testing.T) {
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		var got targetIDView
-		if err := json.Unmarshal([]byte(out), &got); err != nil {
-			t.Fatalf("output is not valid JSON: %v\n%s", err, out)
-		}
-		if got.MigrationID != "mig-1" || got.TargetMigrationID != 12345 {
-			t.Errorf("got = %+v", got)
-		}
+		require.NoError(t, json.Unmarshal([]byte(out), &got), "output is not valid JSON: %s", out)
+		assert.Equal(t, "mig-1", got.MigrationID)
+		assert.Equal(t, int64(12345), got.TargetMigrationID)
 	})
 
 	t.Run("errors on a migration ID that does not exist", func(t *testing.T) {
@@ -337,22 +293,15 @@ func TestLookupTargetID(t *testing.T) {
 
 		out, err := exec(t, "lookup-target-id", "--migration-id", "does-not-exist",
 			"--source-url", srv.URL, "--source-token", "tok")
-		if err == nil {
-			t.Fatalf("expected an error for a missing migration, got output:\n%s", out)
-		}
-		if !strings.Contains(err.Error(), "404") {
-			t.Errorf("expected a 404 error, got %v", err)
-		}
-		if strings.Contains(out, "Target migration ID") {
-			t.Errorf("missing migration must not print a target ID:\n%s", out)
-		}
+		require.Error(t, err, "expected an error for a missing migration, got output:\n%s", out)
+		assert.Contains(t, err.Error(), "404")
+		assert.NotContains(t, out, "Target migration ID", "missing migration must not print a target ID")
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
 		err := runErr(t, "lookup-target-id", "--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "required") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required")
 	})
 }
 
@@ -368,21 +317,17 @@ type elmapiCreateBody struct {
 func run(t *testing.T, args ...string) string {
 	t.Helper()
 	out, err := exec(t, args...)
-	if err != nil {
-		t.Fatalf("migration %v: %v\noutput:\n%s", args, err, out)
-	}
+	require.NoErrorf(t, err, "migration %v output:\n%s", args, out)
 	return out
 }
 
 // runErr executes a `migration` subcommand and returns the error (if any).
 func runErr(t *testing.T, args ...string) error {
-	t.Helper()
 	_, err := exec(t, args...)
 	return err
 }
 
 func exec(t *testing.T, args ...string) (string, error) {
-	t.Helper()
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 

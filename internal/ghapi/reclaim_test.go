@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeClient implements reclaimClient for service tests.
@@ -89,13 +92,8 @@ func TestReclaimMannequin(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		err := svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, false)
-		if err != nil {
-			t.Fatalf("ReclaimMannequin: %v", err)
-		}
-		if len(f.invitations) != 1 || f.invitations[0] != "m1->u1" {
-			t.Errorf("invitations = %v", f.invitations)
-		}
+		require.NoError(t, svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, false), "ReclaimMannequin")
+		assert.Equal(t, []string{"m1->u1"}, f.invitations)
 	})
 
 	t.Run("errors when the login is not a mannequin", func(t *testing.T) {
@@ -103,9 +101,8 @@ func TestReclaimMannequin(t *testing.T) {
 		svc, _ := newService(f)
 
 		err := svc.ReclaimMannequin(t.Context(), "ghost", "", "t", "octo", false, false)
-		if err == nil || !strings.Contains(err.Error(), "not a mannequin") {
-			t.Fatalf("expected not-a-mannequin error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a mannequin")
 	})
 
 	t.Run("errors when already claimed without force", func(t *testing.T) {
@@ -117,12 +114,9 @@ func TestReclaimMannequin(t *testing.T) {
 		svc, _ := newService(f)
 
 		err := svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, false)
-		if err == nil || !strings.Contains(err.Error(), "already mapped") {
-			t.Fatalf("expected already-mapped error, got %v", err)
-		}
-		if len(f.invitations) != 0 {
-			t.Errorf("should not have invited: %v", f.invitations)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already mapped")
+		assert.Empty(t, f.invitations, "should not have invited")
 	})
 
 	t.Run("uses reattribution for skip-invitation", func(t *testing.T) {
@@ -133,13 +127,9 @@ func TestReclaimMannequin(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		err := svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, true)
-		if err != nil {
-			t.Fatalf("ReclaimMannequin: %v", err)
-		}
-		if len(f.reattributions) != 1 || len(f.invitations) != 0 {
-			t.Errorf("reattributions=%v invitations=%v", f.reattributions, f.invitations)
-		}
+		require.NoError(t, svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, true), "ReclaimMannequin")
+		assert.Len(t, f.reattributions, 1)
+		assert.Empty(t, f.invitations)
 	})
 }
 
@@ -164,13 +154,8 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
-		if err != nil {
-			t.Fatalf("ReclaimMannequins: %v", err)
-		}
-		if len(f.invitations) != 2 {
-			t.Errorf("invitations = %v", f.invitations)
-		}
+		require.NoError(t, svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false), "ReclaimMannequins")
+		assert.Len(t, f.invitations, 2)
 	})
 
 	t.Run("skips claimed, missing, and duplicate rows", func(t *testing.T) {
@@ -190,15 +175,11 @@ func TestReclaimMannequins(t *testing.T) {
 			"bob,m2,bob-t",     // duplicate below -> both skipped
 			"bob,m2,dup-t",
 		)
-		if err := svc.ReclaimMannequins(t.Context(), lines, "octo", false, false); err != nil {
-			t.Fatalf("ReclaimMannequins: %v", err)
-		}
-		if len(f.invitations) != 0 {
-			t.Errorf("expected no reclaims, got %v", f.invitations)
-		}
-		if !log.contains("already claimed") || !log.contains("not found") || !log.contains("duplicate") {
-			t.Errorf("missing skip warnings: %v", log.lines)
-		}
+		require.NoError(t, svc.ReclaimMannequins(t.Context(), lines, "octo", false, false), "ReclaimMannequins")
+		assert.Empty(t, f.invitations, "expected no reclaims")
+		assert.True(t, log.contains("already claimed"), "missing already-claimed warning: %v", log.lines)
+		assert.True(t, log.contains("not found"), "missing not-found warning: %v", log.lines)
+		assert.True(t, log.contains("duplicate"), "missing duplicate warning: %v", log.lines)
 	})
 
 	t.Run("force reclaims an already-claimed row", func(t *testing.T) {
@@ -209,12 +190,8 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, _ := newService(f)
 
-		if err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t"), "octo", true, false); err != nil {
-			t.Fatalf("ReclaimMannequins: %v", err)
-		}
-		if len(f.invitations) != 1 {
-			t.Errorf("invitations = %v", f.invitations)
-		}
+		require.NoError(t, svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t"), "octo", true, false), "ReclaimMannequins")
+		assert.Len(t, f.invitations, 1)
 	})
 
 	t.Run("skips a row whose claimant does not resolve", func(t *testing.T) {
@@ -228,17 +205,10 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, log := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false)
-		if err != nil {
-			t.Fatalf("ReclaimMannequins: %v", err)
-		}
+		require.NoError(t, svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, false), "ReclaimMannequins")
 		// alice-t is skipped; bob-t still reclaimed.
-		if len(f.invitations) != 1 || f.invitations[0] != "m2->u2" {
-			t.Errorf("invitations = %v", f.invitations)
-		}
-		if !log.contains("Claimant \"alice-t\" not found") {
-			t.Errorf("missing not-found warning: %v", log.lines)
-		}
+		assert.Equal(t, []string{"m2->u2"}, f.invitations)
+		assert.True(t, log.contains("Claimant \"alice-t\" not found"), "missing not-found warning: %v", log.lines)
 	})
 
 	t.Run("propagates a non-not-found UserID error", func(t *testing.T) {
@@ -251,12 +221,8 @@ func TestReclaimMannequins(t *testing.T) {
 		svc, _ := newService(f)
 
 		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t"), "octo", false, false)
-		if !errors.Is(err, authErr) {
-			t.Fatalf("expected the auth error to propagate, got %v", err)
-		}
-		if len(f.invitations) != 0 {
-			t.Errorf("should not have reclaimed on a hard error: %v", f.invitations)
-		}
+		require.True(t, errors.Is(err, authErr), "expected the auth error to propagate, got %v", err)
+		assert.Empty(t, f.invitations, "should not have reclaimed on a hard error")
 	})
 
 	t.Run("skip-invitation fails fast when unavailable (non-EMU)", func(t *testing.T) {
@@ -271,39 +237,26 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, log := newService(f)
 
-		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true)
-		if err != nil {
-			t.Fatalf("ReclaimMannequins: %v", err)
-		}
+		require.NoError(t, svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true), "ReclaimMannequins")
 		// Must stop after the first row rather than treating it as a soft skip
 		// and continuing through the batch.
-		if f.reattributeAttempts != 1 {
-			t.Errorf("reattributeAttempts = %d, want 1 (fail-fast)", f.reattributeAttempts)
-		}
-		if !log.contains("not enabled") {
-			t.Errorf("missing unavailability warning: %v", log.lines)
-		}
+		assert.Equal(t, 1, f.reattributeAttempts, "reattributeAttempts (fail-fast)")
+		assert.True(t, log.contains("not enabled"), "missing unavailability warning: %v", log.lines)
 	})
 }
 
 func TestIsSkipInvitationUnavailable(t *testing.T) {
 	t.Run("missing mutation", func(t *testing.T) {
 		err := &GraphQLError{Messages: []string{"Field 'reattributeMannequinToUser' doesn't exist on type 'Mutation'"}}
-		if !isSkipInvitationUnavailable(err) {
-			t.Error("expected true for the missing-mutation error")
-		}
+		assert.True(t, isSkipInvitationUnavailable(err))
 	})
 
 	t.Run("non-EMU organization", func(t *testing.T) {
 		err := &GraphQLError{Messages: []string{"acme is not an Enterprise Managed Users (EMU) organization"}}
-		if !isSkipInvitationUnavailable(err) {
-			t.Error("expected true for the non-EMU rejection")
-		}
+		assert.True(t, isSkipInvitationUnavailable(err))
 	})
 
 	t.Run("unrelated error", func(t *testing.T) {
-		if isSkipInvitationUnavailable(&GraphQLError{Messages: []string{"other"}}) {
-			t.Error("expected false for an unrelated error")
-		}
+		assert.False(t, isSkipInvitationUnavailable(&GraphQLError{Messages: []string{"other"}}))
 	})
 }

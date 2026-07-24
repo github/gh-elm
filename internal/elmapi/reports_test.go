@@ -2,10 +2,12 @@ package elmapi
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateReport(t *testing.T) {
@@ -27,28 +29,15 @@ func TestCreateReport(t *testing.T) {
 
 		c := NewClient(srv.URL, "tok")
 		raw, err := c.CreateReport(t.Context(), 42, ReportStageBackfill, ReportStateAll)
-		if err != nil {
-			t.Fatalf("CreateReport: %v", err)
-		}
+		require.NoError(t, err, "CreateReport")
 
-		if gotMethod != http.MethodPost {
-			t.Errorf("method = %q", gotMethod)
-		}
-		if gotPath != "/enterprise/migration/42/reports" {
-			t.Errorf("path = %q", gotPath)
-		}
-		if gotAuth != "Bearer tok" {
-			t.Errorf("Authorization = %q", gotAuth)
-		}
-		if gotContentType != "application/json" {
-			t.Errorf("Content-Type = %q", gotContentType)
-		}
-		if gotBody.Stage != ReportStageBackfill || gotBody.State != ReportStateAll {
-			t.Errorf("body = %+v", gotBody)
-		}
-		if string(raw) != respBody {
-			t.Errorf("raw = %s, want %s", raw, respBody)
-		}
+		assert.Equal(t, http.MethodPost, gotMethod)
+		assert.Equal(t, "/enterprise/migration/42/reports", gotPath)
+		assert.Equal(t, "Bearer tok", gotAuth)
+		assert.Equal(t, "application/json", gotContentType)
+		assert.Equal(t, ReportStageBackfill, gotBody.Stage)
+		assert.Equal(t, ReportStateAll, gotBody.State)
+		assert.Equal(t, respBody, string(raw)) //nolint:testifylint // encoded-compare
 	})
 
 	t.Run("returns HTTPError when the API rejects a non-202", func(t *testing.T) {
@@ -59,16 +48,10 @@ func TestCreateReport(t *testing.T) {
 
 		c := NewClient(srv.URL, "tok")
 		_, err := c.CreateReport(t.Context(), 1, ReportStageBackfill, ReportStateAll)
-		if err == nil {
-			t.Fatal("expected error")
-		}
+		require.Error(t, err)
 		var httpErr *HTTPError
-		if !errors.As(err, &httpErr) {
-			t.Fatalf("expected *HTTPError, got %T", err)
-		}
-		if httpErr.StatusCode != http.StatusBadRequest {
-			t.Errorf("StatusCode = %d", httpErr.StatusCode)
-		}
+		require.ErrorAs(t, err, &httpErr, "expected *HTTPError")
+		assert.Equal(t, http.StatusBadRequest, httpErr.StatusCode)
 	})
 
 	t.Run("treats a 200 as an error since the API returns 202", func(t *testing.T) {
@@ -78,9 +61,8 @@ func TestCreateReport(t *testing.T) {
 		defer srv.Close()
 
 		c := NewClient(srv.URL, "tok")
-		if _, err := c.CreateReport(t.Context(), 1, ReportStageBackfill, ReportStateAll); err == nil {
-			t.Fatal("expected error on unexpected 200")
-		}
+		_, err := c.CreateReport(t.Context(), 1, ReportStageBackfill, ReportStateAll)
+		assert.Error(t, err, "expected error on unexpected 200")
 	})
 }
 
@@ -97,18 +79,10 @@ func TestGetReportStatus(t *testing.T) {
 
 		c := NewClient(srv.URL, "tok")
 		raw, err := c.GetReportStatus(t.Context(), 7, ReportStageBackfill)
-		if err != nil {
-			t.Fatalf("GetReportStatus: %v", err)
-		}
-		if gotPath != "/enterprise/migration/7/reports/status" {
-			t.Errorf("path = %q", gotPath)
-		}
-		if gotStage != ReportStageBackfill {
-			t.Errorf("stage = %q", gotStage)
-		}
-		if string(raw) != respBody {
-			t.Errorf("raw = %s, want %s", raw, respBody)
-		}
+		require.NoError(t, err, "GetReportStatus")
+		assert.Equal(t, "/enterprise/migration/7/reports/status", gotPath)
+		assert.Equal(t, ReportStageBackfill, gotStage)
+		assert.Equal(t, respBody, string(raw)) //nolint:testifylint // encoded-compare
 	})
 }
 
@@ -125,17 +99,9 @@ func TestGetReportURL(t *testing.T) {
 
 		c := NewClient(srv.URL, "tok")
 		raw, err := c.GetReportURL(t.Context(), 9, ReportStageLiveUpdates)
-		if err != nil {
-			t.Fatalf("GetReportURL: %v", err)
-		}
-		if gotPath != "/enterprise/migration/9/reports/url" {
-			t.Errorf("path = %q", gotPath)
-		}
-		if gotStage != ReportStageLiveUpdates {
-			t.Errorf("stage = %q", gotStage)
-		}
-		if string(raw) != respBody {
-			t.Errorf("raw = %s, want %s", raw, respBody)
-		}
+		require.NoError(t, err, "GetReportURL")
+		assert.Equal(t, "/enterprise/migration/9/reports/url", gotPath)
+		assert.Equal(t, ReportStageLiveUpdates, gotStage)
+		assert.Equal(t, respBody, string(raw)) //nolint:testifylint // encoded-compare
 	})
 }

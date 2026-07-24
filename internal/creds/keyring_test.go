@@ -3,6 +3,8 @@ package creds
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zalando/go-keyring"
 )
 
@@ -10,32 +12,24 @@ func TestKeyringStoreRoundTrip(t *testing.T) {
 	keyring.MockInit() // in-memory keyring so this runs without a real Secret Service
 
 	store, err := NewStore()
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	if _, ok := store.(keyringStore); !ok {
-		t.Fatalf("expected keyringStore when keyring is available, got %T", store)
-	}
+	require.NoError(t, err, "NewStore")
+	require.IsType(t, keyringStore{}, store, "expected keyringStore when keyring is available")
 
-	if v, err := store.Get(SourceToken); err != nil || v != "" {
-		t.Fatalf("Get missing = (%q, %v), want empty", v, err)
-	}
-	if err := store.Set(SourceToken, "ghp_secret"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	if v, err := store.Get(SourceToken); err != nil || v != "ghp_secret" {
-		t.Fatalf("Get = (%q, %v), want ghp_secret", v, err)
-	}
-	if err := store.Delete(SourceToken); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if v, _ := store.Get(SourceToken); v != "" {
-		t.Errorf("token present after delete: %q", v)
-	}
+	v, err := store.Get(SourceToken)
+	require.NoError(t, err)
+	assert.Empty(t, v, "missing key should be empty")
+
+	require.NoError(t, store.Set(SourceToken, "ghp_secret"))
+	v, err = store.Get(SourceToken)
+	require.NoError(t, err)
+	assert.Equal(t, "ghp_secret", v)
+
+	require.NoError(t, store.Delete(SourceToken))
+	v, _ = store.Get(SourceToken)
+	assert.Empty(t, v, "token present after delete")
+
 	// Deleting a missing key is not an error.
-	if err := store.Delete(SourceToken); err != nil {
-		t.Errorf("Delete of missing key = %v, want nil", err)
-	}
+	assert.NoError(t, store.Delete(SourceToken), "Delete of missing key")
 }
 
 func TestNewStoreForcesFileBackend(t *testing.T) {
@@ -44,10 +38,6 @@ func TestNewStoreForcesFileBackend(t *testing.T) {
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file") // ...but the env var forces the file store
 
 	store, err := NewStore()
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	if _, ok := store.(*fileStore); !ok {
-		t.Fatalf("expected *fileStore when forced, got %T", store)
-	}
+	require.NoError(t, err, "NewStore")
+	assert.IsType(t, &fileStore{}, store, "expected *fileStore when forced")
 }
