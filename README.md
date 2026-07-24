@@ -33,7 +33,8 @@ gh elm configure --reset # remove stored config and credentials
 ### Command groups
 
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
-  cancel, cutover) against the GHES REST API.
+  cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
+  migration's destination (GHEC) migration ID for use with the `gh elm target *` commands.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -44,6 +45,24 @@ gh elm configure --reset # remove stored config and credentials
 Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
+
+Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`
+(human-readable by default; add `--json` for a machine-readable object). The numeric target
+migration ID it returns is the `--migration-id` value the `gh elm target *` commands (for
+example `gh elm target resources` and `gh elm target report`) expect, so use this to bridge
+from a migration's source UUID to the target ID those commands need:
+
+```sh
+# Human-readable
+gh elm migration lookup-target-id --migration-id <uuid>
+
+# Machine-readable, e.g. piped to jq
+gh elm migration lookup-target-id --migration-id <uuid> --json | jq .target_migration_id
+
+# Resolve the target ID and feed it straight into a target command
+TARGET_ID=$(gh elm migration lookup-target-id --migration-id <uuid> --json | jq .target_migration_id)
+gh elm target resources --migration-id "$TARGET_ID"
+```
 
 Migration resources — `gh elm target resources`:
 

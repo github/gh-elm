@@ -287,6 +287,75 @@ func TestAuthErrorAnnotation(t *testing.T) {
 	}
 }
 
+func TestLookupTargetID(t *testing.T) {
+	const withTargetID = `{"migration":{"migration_id":"mig-1","target_migration_id":12345},"target_state":null,"combined_state":null,"messages":[]}`
+
+	t.Run("prints the target migration ID (human)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1") {
+				t.Errorf("path = %q", r.URL.Path)
+			}
+			_, _ = w.Write([]byte(withTargetID))
+		}))
+		defer srv.Close()
+
+		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		if !strings.Contains(out, "Target migration ID: 12345") {
+			t.Errorf("output = %q", out)
+		}
+	})
+
+	t.Run("--json emits a machine-readable object", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(withTargetID))
+		}))
+		defer srv.Close()
+
+		out := run(t, "lookup-target-id", "--migration-id", "mig-1", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		var got targetIDView
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+		}
+		if got.MigrationID != "mig-1" || got.TargetMigrationID != 12345 {
+			t.Errorf("got = %+v", got)
+		}
+	})
+
+	t.Run("errors on a migration ID that does not exist", func(t *testing.T) {
+		// A mistyped / unknown migration ID returns 404 from GHES. The command
+		// must surface that as an error rather than printing a target ID, so a
+		// nonexistent migration is never mistaken for a successful lookup.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		}))
+		defer srv.Close()
+
+		out, err := exec(t, "lookup-target-id", "--migration-id", "does-not-exist",
+			"--source-url", srv.URL, "--source-token", "tok")
+		if err == nil {
+			t.Fatalf("expected an error for a missing migration, got output:\n%s", out)
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Errorf("expected a 404 error, got %v", err)
+		}
+		if strings.Contains(out, "Target migration ID") {
+			t.Errorf("missing migration must not print a target ID:\n%s", out)
+		}
+	})
+
+	t.Run("requires --migration-id", func(t *testing.T) {
+		err := runErr(t, "lookup-target-id", "--source-url", "https://x", "--source-token", "tok")
+		if err == nil || !strings.Contains(err.Error(), "required") {
+			t.Fatalf("expected required-flag error, got %v", err)
+		}
+	})
+}
+
 // elmapiCreateBody mirrors the create request body for assertions.
 type elmapiCreateBody struct {
 	SourceRepositoryName string `json:"source_repository_name"`
