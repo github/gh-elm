@@ -608,16 +608,10 @@ type targetIDView struct {
 }
 
 // writeTargetID renders the target migration ID as JSON (--json) or human-readable
-// text. A zero target ID means the destination migration has not been assigned
-// yet; the human output says so, while the JSON path keeps the numeric 0 so it
-// stays machine-consumable.
+// text.
 func writeTargetID(w io.Writer, migrationID string, targetID int64, asJSON bool) error {
 	if asJSON {
 		return writeJSON(w, targetIDView{MigrationID: migrationID, TargetMigrationID: targetID})
-	}
-	if targetID == 0 {
-		_, err := fmt.Fprintln(w, "Target migration ID: not yet assigned")
-		return err
 	}
 	_, err := fmt.Fprintf(w, "Target migration ID: %d\n", targetID)
 	return err

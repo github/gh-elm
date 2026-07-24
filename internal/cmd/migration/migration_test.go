@@ -325,18 +325,26 @@ func TestLookupTargetID(t *testing.T) {
 		}
 	})
 
-	t.Run("reports when the target ID is not yet assigned", func(t *testing.T) {
-		const noTargetID = `{"migration":{"migration_id":"mig-1","target_migration_id":0},"target_state":null,"combined_state":null,"messages":[]}`
+	t.Run("errors on a migration ID that does not exist", func(t *testing.T) {
+		// A mistyped / unknown migration ID returns 404 from GHES. The command
+		// must surface that as an error rather than printing a target ID, so a
+		// nonexistent migration is never mistaken for a successful lookup.
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(noTargetID))
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 		}))
 		defer srv.Close()
 
-		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
+		out, err := exec(t, "lookup-target-id", "--migration-id", "does-not-exist",
 			"--source-url", srv.URL, "--source-token", "tok")
-
-		if !strings.Contains(out, "not yet assigned") {
-			t.Errorf("output = %q", out)
+		if err == nil {
+			t.Fatalf("expected an error for a missing migration, got output:\n%s", out)
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Errorf("expected a 404 error, got %v", err)
+		}
+		if strings.Contains(out, "Target migration ID") {
+			t.Errorf("missing migration must not print a target ID:\n%s", out)
 		}
 	})
 
