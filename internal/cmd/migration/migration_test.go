@@ -129,7 +129,7 @@ func TestStatus(t *testing.T) {
 		out := run(t, "status", "--migration-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		assert.Equal(t, respBody, strings.TrimSpace(out)) //nolint:testifylint // encoded-compare
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
 	})
 }
 
@@ -148,7 +148,7 @@ func TestList(t *testing.T) {
 
 		assert.Contains(t, gotQuery, "status=in_progress")
 		assert.Contains(t, gotQuery, "page_size=25")
-		assert.Equal(t, respBody, strings.TrimSpace(out)) //nolint:testifylint // encoded-compare
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
 	})
 
 	t.Run("rejects an invalid status", func(t *testing.T) {
