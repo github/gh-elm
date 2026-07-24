@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -124,7 +123,7 @@ func TestOrgMembership(t *testing.T) {
 func TestReattributeMannequinToUser(t *testing.T) {
 	t.Run("returns the source/target pair", func(t *testing.T) {
 		srv := graphQLServer(t, func(q string, _ map[string]any) string {
-			assert.True(t, strings.Contains(q, "reattributeMannequinToUser"), "unexpected query: %s", q)
+			assert.Contains(t, q, "reattributeMannequinToUser", "unexpected query")
 			return `{"data":{"reattributeMannequinToUser":{"source":{"id":"m1","login":"alice"},"target":{"id":"u1","login":"alice-target"}}}}`
 		})
 		defer srv.Close()

@@ -102,17 +102,23 @@ func TestConfigureShowAndResetMutuallyExclusive(t *testing.T) {
 }
 
 func TestValidateURL(t *testing.T) {
-	valid := []string{
-		"https://ghes.example.com",
-		"http://localhost:8080",
-		"https://api.tenant.ghe.com/",
-	}
-	for _, s := range valid {
-		assert.NoErrorf(t, validateURL(s), "validateURL(%q)", s)
-	}
+	t.Run("valid", func(t *testing.T) {
+		for _, s := range []string{
+			"https://ghes.example.com",
+			"http://localhost:8080",
+			"https://api.tenant.ghe.com/",
+		} {
+			t.Run(s, func(t *testing.T) {
+				assert.NoError(t, validateURL(s))
+			})
+		}
+	})
 
-	invalid := []string{"", "   ", "ftp://host", "notaurl", "https://"}
-	for _, s := range invalid {
-		assert.Errorf(t, validateURL(s), "validateURL(%q) should have errored", s)
-	}
+	t.Run("invalid", func(t *testing.T) {
+		for _, s := range []string{"", "   ", "ftp://host", "notaurl", "https://"} {
+			t.Run(s, func(t *testing.T) {
+				require.Error(t, validateURL(s))
+			})
+		}
+	})
 }

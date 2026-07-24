@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,7 +63,7 @@ func TestReportCreate(t *testing.T) {
 		out := runReports(t, "report", "create", "--migration-id", "42", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody, strings.TrimSpace(out))
+		assert.JSONEq(t, respBody, out)
 	})
 
 	t.Run("defaults --state to all", func(t *testing.T) {
@@ -147,7 +146,7 @@ func TestReportStatus(t *testing.T) {
 		out := runReports(t, "report", "status", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody, strings.TrimSpace(out))
+		assert.JSONEq(t, respBody, out)
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
@@ -182,7 +181,7 @@ func TestReportURL(t *testing.T) {
 		out := runReports(t, "report", "url", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody, strings.TrimSpace(out))
+		assert.JSONEq(t, respBody, out)
 	})
 }
 
