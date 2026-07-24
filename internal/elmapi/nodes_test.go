@@ -3,6 +3,7 @@ package elmapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,9 +36,13 @@ func TestListMigrationNodes(t *testing.T) {
 		assert.Equal(t, "/enterprise/migration/42/nodes", gotPath)
 		assert.Equal(t, "Bearer tok", gotAuth)
 		assert.Equal(t, acceptHeader, gotAccept)
-		for _, want := range []string{"repository_nwo=octo%2Frepo", "origin=NODE_ORIGIN_BACKFILL", "state=NODE_STATE_PENDING", "page_size=100", "after=cursor"} {
-			assert.Contains(t, gotQuery, want)
-		}
+		parsed, err := url.ParseQuery(gotQuery)
+		require.NoError(t, err, "parse query")
+		assert.Equal(t, "octo/repo", parsed.Get("repository_nwo"))
+		assert.Equal(t, "NODE_ORIGIN_BACKFILL", parsed.Get("origin"))
+		assert.Equal(t, "NODE_STATE_PENDING", parsed.Get("state"))
+		assert.Equal(t, "100", parsed.Get("page_size"))
+		assert.Equal(t, "cursor", parsed.Get("after"))
 		require.Len(t, resp.Nodes, 1)
 		assert.Equal(t, "n1", resp.Nodes[0].ID)
 	})
@@ -155,7 +160,13 @@ func TestIterNodes(t *testing.T) {
 		calls := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
-			assert.LessOrEqual(t, calls, 5, "IterNodes did not stop on a repeated cursor")
+			if calls > 5 {
+				// Break the loop deterministically if the repeated-cursor guard
+				// regresses; otherwise the iterator would spin forever and the
+				// test would hang instead of failing.
+				http.Error(w, "IterNodes did not stop on a repeated cursor", http.StatusInternalServerError)
+				return
+			}
 			_, _ = w.Write([]byte(`{"nodes":[],"after":"never-ending"}`))
 		}))
 		defer srv.Close()
