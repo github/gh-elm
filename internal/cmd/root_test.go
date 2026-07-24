@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnknownSubcommandFails(t *testing.T) {
@@ -34,12 +37,8 @@ func TestUnknownSubcommandFails(t *testing.T) {
 			root.SetArgs(args)
 
 			err := root.Execute()
-			if err == nil {
-				t.Fatalf("expected an error for %v", args)
-			}
-			if !strings.Contains(err.Error(), "unknown command") {
-				t.Errorf("expected an \"unknown command\" error, got %v", err)
-			}
+			require.Error(t, err, "expected an error")
+			assert.Contains(t, err.Error(), "unknown command")
 		})
 	}
 }
@@ -55,9 +54,8 @@ func TestUnknownFlagOnLeafStillFails(t *testing.T) {
 	root.SetArgs([]string{"target", "report", "create", "--bogus", "--migration-id", "5", "--stage", "backfill"})
 
 	err := root.Execute()
-	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
-		t.Fatalf("expected an \"unknown flag\" error on a leaf command, got %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown flag")
 }
 
 // TestUnknownFlagWithoutSubcommandFails ensures a bad flag with no mistyped
@@ -77,9 +75,8 @@ func TestUnknownFlagWithoutSubcommandFails(t *testing.T) {
 			root.SetArgs(args)
 
 			err := root.Execute()
-			if err == nil || !strings.Contains(err.Error(), "unknown flag") {
-				t.Fatalf("expected an \"unknown flag\" error for %v, got %v", args, err)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unknown flag")
 		})
 	}
 }
@@ -92,11 +89,6 @@ func TestRootVersion(t *testing.T) {
 	root.SetErr(&out)
 	root.SetArgs([]string{"--version"})
 
-	if err := root.Execute(); err != nil {
-		t.Fatalf("--version returned error: %v", err)
-	}
-
-	if got := out.String(); !strings.Contains(got, "gh elm 1.2.3") {
-		t.Errorf("expected version output to contain %q; got:\n%s", "gh elm 1.2.3", got)
-	}
+	require.NoError(t, root.Execute(), "--version returned error")
+	assert.Contains(t, out.String(), "gh elm 1.2.3")
 }

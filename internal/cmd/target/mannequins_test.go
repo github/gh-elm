@@ -12,12 +12,13 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mannequinsServer builds a test server that answers OrganizationID and the
 // mannequins query, returning the org id and one page of mannequins.
 func mannequinsServer(t *testing.T, nodesJSON string) *httptest.Server {
-	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
@@ -30,7 +31,7 @@ func mannequinsServer(t *testing.T, nodesJSON string) *httptest.Server {
 		case strings.Contains(req.Query, "mannequins"):
 			_, _ = io.WriteString(w, `{"data":{"node":{"mannequins":{"pageInfo":{"endCursor":"","hasNextPage":false},"nodes":`+nodesJSON+`}}}}`)
 		default:
-			t.Errorf("unexpected query: %s", req.Query)
+			assert.Failf(t, "unexpected query", "%s", req.Query)
 		}
 	}))
 }
@@ -38,7 +39,6 @@ func mannequinsServer(t *testing.T, nodesJSON string) *httptest.Server {
 // runMannequin executes a mannequin subcommand built by newCmd with isolated
 // config/creds.
 func runMannequin(t *testing.T, newCmd func() *cobra.Command, stdin string, args ...string) (string, error) {
-	t.Helper()
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 
@@ -62,18 +62,10 @@ func TestMannequinList(t *testing.T) {
 
 		out, err := runMannequin(t, newMannequinListCmd, "",
 			"--github-org", "octo", "--target-url", srv.URL, "--target-token", "tok")
-		if err != nil {
-			t.Fatalf("list: %v\n%s", err, out)
-		}
-		if !strings.Contains(out, "mannequin-user,mannequin-id,target-user") {
-			t.Errorf("missing header:\n%s", out)
-		}
-		if !strings.Contains(out, "alice,m1,") {
-			t.Errorf("missing alice:\n%s", out)
-		}
-		if strings.Contains(out, "bob,m2") {
-			t.Errorf("reclaimed bob should be excluded:\n%s", out)
-		}
+		require.NoErrorf(t, err, "list output:\n%s", out)
+		assert.Contains(t, out, "mannequin-user,mannequin-id,target-user", "missing header")
+		assert.Contains(t, out, "alice,m1,", "missing alice")
+		assert.NotContains(t, out, "bob,m2", "reclaimed bob should be excluded")
 	})
 
 	t.Run("writes CSV to a file with --output", func(t *testing.T) {
@@ -81,25 +73,19 @@ func TestMannequinList(t *testing.T) {
 		defer srv.Close()
 
 		path := filepath.Join(t.TempDir(), "mannequins.csv")
-		if _, err := runMannequin(t, newMannequinListCmd, "",
+		_, err := runMannequin(t, newMannequinListCmd, "",
 			"--github-org", "octo", "--output", path,
-			"--target-url", srv.URL, "--target-token", "tok"); err != nil {
-			t.Fatalf("list: %v", err)
-		}
+			"--target-url", srv.URL, "--target-token", "tok")
+		require.NoError(t, err, "list")
 		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read output: %v", err)
-		}
-		if !strings.Contains(string(data), "alice,m1,") {
-			t.Errorf("output file missing alice:\n%s", data)
-		}
+		require.NoError(t, err, "read output")
+		assert.Contains(t, string(data), "alice,m1,", "output file missing alice")
 	})
 
 	t.Run("requires --github-org", func(t *testing.T) {
 		_, err := runMannequin(t, newMannequinListCmd, "", "--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "github-org") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "github-org")
 	})
 }
 
@@ -107,9 +93,8 @@ func TestMannequinClaim(t *testing.T) {
 	t.Run("requires csv or user+target", func(t *testing.T) {
 		_, err := runMannequin(t, newMannequinClaimCmd, "",
 			"--github-org", "octo", "--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "either --csv") {
-			t.Fatalf("expected validation error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "either --csv")
 	})
 
 	t.Run("reclaims a single mannequin via invitation", func(t *testing.T) {
@@ -131,7 +116,7 @@ func TestMannequinClaim(t *testing.T) {
 				invited = true
 				_, _ = io.WriteString(w, `{"data":{"createAttributionInvitation":{"source":{"id":"m1","login":"alice"},"target":{"id":"u1","login":"alice-t"}}}}`)
 			default:
-				t.Errorf("unexpected query: %s", req.Query)
+				assert.Failf(t, "unexpected query", "%s", req.Query)
 			}
 		}))
 		defer srv.Close()
@@ -139,12 +124,8 @@ func TestMannequinClaim(t *testing.T) {
 		out, err := runMannequin(t, newMannequinClaimCmd, "",
 			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
 			"--target-url", srv.URL, "--target-token", "tok")
-		if err != nil {
-			t.Fatalf("claim: %v\n%s", err, out)
-		}
-		if !invited {
-			t.Error("expected createAttributionInvitation to be called")
-		}
+		require.NoErrorf(t, err, "claim output:\n%s", out)
+		assert.True(t, invited, "expected createAttributionInvitation to be called")
 	})
 
 	t.Run("skip-invitation requires org admin", func(t *testing.T) {
@@ -162,7 +143,7 @@ func TestMannequinClaim(t *testing.T) {
 				_, _ = io.WriteString(w, `{"data":{"viewer":{"login":"alice"}}}`)
 				return
 			}
-			t.Errorf("unexpected query: %s", req.Query)
+			assert.Failf(t, "unexpected query", "%s", req.Query)
 		}))
 		defer srv.Close()
 
@@ -170,9 +151,8 @@ func TestMannequinClaim(t *testing.T) {
 			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
 			"--skip-invitation", "--no-prompt",
 			"--target-url", srv.URL, "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "not an org admin") {
-			t.Fatalf("expected admin error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not an org admin")
 	})
 
 	t.Run("skip-invitation aborts when the admin declines the prompt", func(t *testing.T) {
@@ -190,7 +170,7 @@ func TestMannequinClaim(t *testing.T) {
 				_, _ = io.WriteString(w, `{"data":{"viewer":{"login":"alice"}}}`)
 				return
 			}
-			t.Errorf("unexpected query (should abort before any reclaim): %s", req.Query)
+			assert.Failf(t, "unexpected query (should abort before any reclaim)", "%s", req.Query)
 		}))
 		defer srv.Close()
 
@@ -200,8 +180,7 @@ func TestMannequinClaim(t *testing.T) {
 			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
 			"--skip-invitation",
 			"--target-url", srv.URL, "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "aborted") {
-			t.Fatalf("expected aborted error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "aborted")
 	})
 }

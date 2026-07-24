@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // failWriter is an io.Writer that always fails, to prove output errors surface.
@@ -19,15 +22,13 @@ func TestRenderReportSurfacesWriterError(t *testing.T) {
 	raw := json.RawMessage(`{"status":"REPORT_STATUS_FINISHED"}`)
 
 	t.Run("human path", func(t *testing.T) {
-		if err := renderReport(failWriter{}, raw, false, printReportStatus); err == nil {
-			t.Fatal("expected the writer error to propagate from the human path")
-		}
+		assert.Error(t, renderReport(failWriter{}, raw, false, printReportStatus),
+			"expected the writer error to propagate from the human path")
 	})
 
 	t.Run("json path", func(t *testing.T) {
-		if err := renderReport(failWriter{}, raw, true, printReportStatus); err == nil {
-			t.Fatal("expected the writer error to propagate from the --json path")
-		}
+		assert.Error(t, renderReport(failWriter{}, raw, true, printReportStatus),
+			"expected the writer error to propagate from the --json path")
 	})
 }
 
@@ -47,12 +48,9 @@ func TestReportCreate(t *testing.T) {
 			"--stage", "backfill", "--state", "all",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if gotStage != "REPORT_STAGE_BACKFILL" || gotState != "REPORT_STATE_ALL" {
-			t.Errorf("sent stage=%q state=%q", gotStage, gotState)
-		}
-		if !strings.Contains(out, "Report requested.") {
-			t.Errorf("expected human confirmation, got:\n%s", out)
-		}
+		assert.Equal(t, "REPORT_STAGE_BACKFILL", gotStage)
+		assert.Equal(t, "REPORT_STATE_ALL", gotState)
+		assert.Contains(t, out, "Report requested.", "expected human confirmation")
 	})
 
 	t.Run("emits the raw API JSON with --json", func(t *testing.T) {
@@ -66,9 +64,7 @@ func TestReportCreate(t *testing.T) {
 		out := runReports(t, "report", "create", "--migration-id", "42", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if strings.TrimSpace(out) != respBody {
-			t.Errorf("output = %q, want raw API JSON %q", out, respBody)
-		}
+		assert.Equal(t, respBody, strings.TrimSpace(out))
 	})
 
 	t.Run("defaults --state to all", func(t *testing.T) {
@@ -85,33 +81,28 @@ func TestReportCreate(t *testing.T) {
 		runReports(t, "report", "create", "--migration-id", "1", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if gotState != "REPORT_STATE_ALL" {
-			t.Errorf("default state = %q, want REPORT_STATE_ALL", gotState)
-		}
+		assert.Equal(t, "REPORT_STATE_ALL", gotState, "default state")
 	})
 
 	t.Run("rejects an invalid stage", func(t *testing.T) {
 		err := runReportsErr(t, "report", "create", "--migration-id", "1", "--stage", "bogus",
 			"--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "invalid --stage") {
-			t.Fatalf("expected invalid stage error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid --stage")
 	})
 
 	t.Run("rejects an invalid state", func(t *testing.T) {
 		err := runReportsErr(t, "report", "create", "--migration-id", "1", "--stage", "backfill", "--state", "bogus",
 			"--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "invalid --state") {
-			t.Fatalf("expected invalid state error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid --state")
 	})
 
 	t.Run("requires --stage", func(t *testing.T) {
 		err := runReportsErr(t, "report", "create", "--migration-id", "1",
 			"--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "stage") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "stage")
 	})
 
 	t.Run("surfaces an actionable auth error on 401", func(t *testing.T) {
@@ -122,13 +113,9 @@ func TestReportCreate(t *testing.T) {
 
 		err := runReportsErr(t, "report", "create", "--migration-id", "1", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "bad")
-		if err == nil {
-			t.Fatal("expected an error on 401")
-		}
+		require.Error(t, err, "expected an error on 401")
 		for _, want := range []string{"authentication failed", "401", "GH_TARGET_TOKEN"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error %q missing %q", err.Error(), want)
-			}
+			assert.Contains(t, err.Error(), want)
 		}
 	})
 }
@@ -145,15 +132,9 @@ func TestReportStatus(t *testing.T) {
 		out := runReports(t, "report", "status", "--migration-id", "3", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if gotStage != "REPORT_STAGE_BACKFILL" {
-			t.Errorf("stage query = %q", gotStage)
-		}
-		if !strings.Contains(out, "Status: finished") {
-			t.Errorf("expected humanized status, got:\n%s", out)
-		}
-		if !strings.Contains(out, "nodes.jsonl") {
-			t.Errorf("expected file listing, got:\n%s", out)
-		}
+		assert.Equal(t, "REPORT_STAGE_BACKFILL", gotStage)
+		assert.Contains(t, out, "Status: finished", "expected humanized status")
+		assert.Contains(t, out, "nodes.jsonl", "expected file listing")
 	})
 
 	t.Run("emits the raw API JSON with --json", func(t *testing.T) {
@@ -166,17 +147,14 @@ func TestReportStatus(t *testing.T) {
 		out := runReports(t, "report", "status", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if strings.TrimSpace(out) != respBody {
-			t.Errorf("output = %q, want raw API JSON %q", out, respBody)
-		}
+		assert.Equal(t, respBody, strings.TrimSpace(out))
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
 		err := runReportsErr(t, "report", "status", "--stage", "backfill",
 			"--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "migration-id") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migration-id")
 	})
 }
 
@@ -190,12 +168,8 @@ func TestReportURL(t *testing.T) {
 		out := runReports(t, "report", "url", "--migration-id", "3", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if !strings.Contains(out, "https://blob.example/report.zip?sig=abc") {
-			t.Errorf("expected URL, got:\n%s", out)
-		}
-		if !strings.Contains(out, "Expires at:") {
-			t.Errorf("expected expiry line, got:\n%s", out)
-		}
+		assert.Contains(t, out, "https://blob.example/report.zip?sig=abc")
+		assert.Contains(t, out, "Expires at:")
 	})
 
 	t.Run("emits the raw API JSON with --json", func(t *testing.T) {
@@ -208,9 +182,7 @@ func TestReportURL(t *testing.T) {
 		out := runReports(t, "report", "url", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if strings.TrimSpace(out) != respBody {
-			t.Errorf("output = %q, want raw API JSON %q", out, respBody)
-		}
+		assert.Equal(t, respBody, strings.TrimSpace(out))
 	})
 }
 
@@ -218,21 +190,17 @@ func TestReportURL(t *testing.T) {
 func runReports(t *testing.T, args ...string) string {
 	t.Helper()
 	out, err := execReports(t, args...)
-	if err != nil {
-		t.Fatalf("target %v: %v\noutput:\n%s", args, err, out)
-	}
+	require.NoErrorf(t, err, "target %v output:\n%s", args, out)
 	return out
 }
 
 // runReportsErr executes a `target` subcommand and returns the error (if any).
 func runReportsErr(t *testing.T, args ...string) error {
-	t.Helper()
 	_, err := execReports(t, args...)
 	return err
 }
 
 func execReports(t *testing.T, args ...string) (string, error) {
-	t.Helper()
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 

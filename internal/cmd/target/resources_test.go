@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResources(t *testing.T) {
@@ -20,15 +23,9 @@ func TestResources(t *testing.T) {
 		out := runResources(t, "--migration-id", "42",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if !strings.Contains(out, "Resource ID: n1") {
-			t.Errorf("missing resource line in output:\n%s", out)
-		}
-		if !strings.Contains(out, "Found 2 resources.") {
-			t.Errorf("missing summary in output:\n%s", out)
-		}
-		if len(origins) != 2 {
-			t.Errorf("expected 2 origin queries (backfill+live_update), got %v", origins)
-		}
+		assert.Contains(t, out, "Resource ID: n1", "missing resource line")
+		assert.Contains(t, out, "Found 2 resources.", "missing summary")
+		assert.Len(t, origins, 2, "expected 2 origin queries (backfill+live_update)")
 	})
 
 	t.Run("emits newline-delimited JSON with --json", func(t *testing.T) {
@@ -40,12 +37,8 @@ func TestResources(t *testing.T) {
 		out := runResources(t, "--migration-id", "1", "--origin", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if !strings.Contains(out, `"id":"n1"`) {
-			t.Errorf("expected JSON resource, got:\n%s", out)
-		}
-		if strings.Contains(out, "Found ") {
-			t.Errorf("JSON output should not include the human summary:\n%s", out)
-		}
+		assert.Contains(t, out, `"id":"n1"`, "expected JSON resource")
+		assert.NotContains(t, out, "Found ", "JSON output should not include the human summary")
 	})
 
 	t.Run("--json echoes the raw API JSON verbatim", func(t *testing.T) {
@@ -60,13 +53,9 @@ func TestResources(t *testing.T) {
 		out := strings.TrimSpace(runResources(t, "--migration-id", "1", "--origin", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok"))
 
-		if !strings.Contains(out, `"correlationId":"abc-123"`) {
-			t.Errorf("expected unknown field preserved, got:\n%s", out)
-		}
+		assert.Contains(t, out, `"correlationId":"abc-123"`, "expected unknown field preserved")
 		for _, absent := range []string{"createdAt", "updatedAt", "origin", "state"} {
-			if strings.Contains(out, absent) {
-				t.Errorf("re-marshaled zero field %q leaked into output:\n%s", absent, out)
-			}
+			assert.NotContains(t, out, absent, "re-marshaled zero field leaked into output")
 		}
 	})
 
@@ -79,17 +68,14 @@ func TestResources(t *testing.T) {
 		out := runResources(t, "--migration-id", "1", "--origin", "backfill", "--max-results", "2",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		if strings.Count(out, "Resource ID:") != 2 {
-			t.Errorf("expected 2 resources, got:\n%s", out)
-		}
+		assert.Equal(t, 2, strings.Count(out, "Resource ID:"), "expected 2 resources")
 	})
 
 	t.Run("rejects an invalid state", func(t *testing.T) {
 		err := runResourcesErr(t, "--migration-id", "1", "--state", "bogus",
 			"--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "invalid --state") {
-			t.Fatalf("expected invalid state error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid --state")
 	})
 
 	t.Run("surfaces an actionable auth error on 401", func(t *testing.T) {
@@ -100,22 +86,17 @@ func TestResources(t *testing.T) {
 
 		err := runResourcesErr(t, "--migration-id", "1", "--origin", "backfill",
 			"--target-url", srv.URL, "--target-token", "bad")
-		if err == nil {
-			t.Fatal("expected an error on 401")
-		}
+		require.Error(t, err, "expected an error on 401")
 		msg := err.Error()
 		for _, want := range []string{"authentication failed", "401", "GH_TARGET_HOST", "GH_TARGET_TOKEN"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("error %q missing %q", msg, want)
-			}
+			assert.Contains(t, msg, want)
 		}
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
 		err := runResourcesErr(t, "--target-url", "https://x", "--target-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "migration-id") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migration-id")
 	})
 }
 
@@ -124,21 +105,17 @@ func TestResources(t *testing.T) {
 func runResources(t *testing.T, args ...string) string {
 	t.Helper()
 	out, err := execResources(t, args...)
-	if err != nil {
-		t.Fatalf("target resources %v: %v\noutput:\n%s", args, err, out)
-	}
+	require.NoErrorf(t, err, "target resources %v output:\n%s", args, out)
 	return out
 }
 
 // runResourcesErr executes `target resources` and returns the error (if any).
 func runResourcesErr(t *testing.T, args ...string) error {
-	t.Helper()
 	_, err := execResources(t, args...)
 	return err
 }
 
 func execResources(t *testing.T, args ...string) (string, error) {
-	t.Helper()
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 

@@ -1,11 +1,12 @@
 package elmapi
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestListMigrationNodes(t *testing.T) {
@@ -29,27 +30,16 @@ func TestListMigrationNodes(t *testing.T) {
 			PageSize:      100,
 			After:         "cursor",
 		})
-		if err != nil {
-			t.Fatalf("ListMigrationNodes: %v", err)
-		}
+		require.NoError(t, err, "ListMigrationNodes")
 
-		if gotPath != "/enterprise/migration/42/nodes" {
-			t.Errorf("path = %q", gotPath)
-		}
-		if gotAuth != "Bearer tok" {
-			t.Errorf("Authorization = %q", gotAuth)
-		}
-		if gotAccept != acceptHeader {
-			t.Errorf("Accept = %q", gotAccept)
-		}
+		assert.Equal(t, "/enterprise/migration/42/nodes", gotPath)
+		assert.Equal(t, "Bearer tok", gotAuth)
+		assert.Equal(t, acceptHeader, gotAccept)
 		for _, want := range []string{"repository_nwo=octo%2Frepo", "origin=NODE_ORIGIN_BACKFILL", "state=NODE_STATE_PENDING", "page_size=100", "after=cursor"} {
-			if !containsQuery(gotQuery, want) {
-				t.Errorf("query %q missing %q", gotQuery, want)
-			}
+			assert.Contains(t, gotQuery, want)
 		}
-		if len(resp.Nodes) != 1 || resp.Nodes[0].ID != "n1" {
-			t.Fatalf("unexpected nodes: %+v", resp.Nodes)
-		}
+		require.Len(t, resp.Nodes, 1)
+		assert.Equal(t, "n1", resp.Nodes[0].ID)
 	})
 
 	t.Run("omits empty filters", func(t *testing.T) {
@@ -61,12 +51,9 @@ func TestListMigrationNodes(t *testing.T) {
 		defer srv.Close()
 
 		c := NewClient(srv.URL, "tok")
-		if _, err := c.ListMigrationNodes(t.Context(), 1, ListNodesOptions{}); err != nil {
-			t.Fatalf("ListMigrationNodes: %v", err)
-		}
-		if gotQuery != "" {
-			t.Errorf("expected empty query, got %q", gotQuery)
-		}
+		_, err := c.ListMigrationNodes(t.Context(), 1, ListNodesOptions{})
+		require.NoError(t, err, "ListMigrationNodes")
+		assert.Empty(t, gotQuery, "expected empty query")
 	})
 
 	t.Run("returns HTTPError on non-200", func(t *testing.T) {
@@ -77,16 +64,10 @@ func TestListMigrationNodes(t *testing.T) {
 
 		c := NewClient(srv.URL, "tok")
 		_, err := c.ListMigrationNodes(t.Context(), 1, ListNodesOptions{})
-		if err == nil {
-			t.Fatal("expected error")
-		}
+		require.Error(t, err)
 		var httpErr *HTTPError
-		if !errors.As(err, &httpErr) {
-			t.Fatalf("expected *HTTPError, got %T", err)
-		}
-		if httpErr.StatusCode != http.StatusUnprocessableEntity {
-			t.Errorf("StatusCode = %d", httpErr.StatusCode)
-		}
+		require.ErrorAs(t, err, &httpErr)
+		assert.Equal(t, http.StatusUnprocessableEntity, httpErr.StatusCode)
 	})
 }
 
@@ -107,14 +88,10 @@ func TestIterNodes(t *testing.T) {
 		c := NewClient(srv.URL, "tok")
 		var ids []string
 		for node, err := range c.IterNodes(t.Context(), 7, ListNodesOptions{}) {
-			if err != nil {
-				t.Fatalf("iter: %v", err)
-			}
+			require.NoError(t, err, "iter")
 			ids = append(ids, node.ID)
 		}
-		if want := []string{"n1", "n2", "n3"}; !equal(ids, want) {
-			t.Errorf("ids = %v, want %v", ids, want)
-		}
+		assert.Equal(t, []string{"n1", "n2", "n3"}, ids)
 	})
 
 	t.Run("stops early when caller breaks", func(t *testing.T) {
@@ -126,15 +103,11 @@ func TestIterNodes(t *testing.T) {
 		c := NewClient(srv.URL, "tok")
 		count := 0
 		for _, err := range c.IterNodes(t.Context(), 7, ListNodesOptions{}) {
-			if err != nil {
-				t.Fatalf("iter: %v", err)
-			}
+			require.NoError(t, err, "iter")
 			count++
 			break
 		}
-		if count != 1 {
-			t.Errorf("count = %d, want 1", count)
-		}
+		assert.Equal(t, 1, count)
 	})
 
 	t.Run("surfaces errors", func(t *testing.T) {
@@ -148,9 +121,7 @@ func TestIterNodes(t *testing.T) {
 		for _, err := range c.IterNodes(t.Context(), 7, ListNodesOptions{}) {
 			gotErr = err
 		}
-		if gotErr == nil {
-			t.Fatal("expected an error from iteration")
-		}
+		assert.Error(t, gotErr, "expected an error from iteration")
 	})
 
 	t.Run("follows the cursor past an empty page to later matching nodes", func(t *testing.T) {
@@ -172,14 +143,10 @@ func TestIterNodes(t *testing.T) {
 		c := NewClient(srv.URL, "tok")
 		var ids []string
 		for node, err := range c.IterNodes(t.Context(), 7, ListNodesOptions{}) {
-			if err != nil {
-				t.Fatalf("iter: %v", err)
-			}
+			require.NoError(t, err, "iter")
 			ids = append(ids, node.ID)
 		}
-		if want := []string{"n1"}; !equal(ids, want) {
-			t.Errorf("ids = %v, want %v", ids, want)
-		}
+		assert.Equal(t, []string{"n1"}, ids)
 	})
 
 	t.Run("stops when the API repeats a cursor to prevent a loop", func(t *testing.T) {
@@ -188,9 +155,7 @@ func TestIterNodes(t *testing.T) {
 		calls := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
-			if calls > 5 {
-				t.Fatalf("IterNodes did not stop on a repeated cursor (called %d times)", calls)
-			}
+			assert.LessOrEqual(t, calls, 5, "IterNodes did not stop on a repeated cursor")
 			_, _ = w.Write([]byte(`{"nodes":[],"after":"never-ending"}`))
 		}))
 		defer srv.Close()
@@ -200,44 +165,9 @@ func TestIterNodes(t *testing.T) {
 		for range c.IterNodes(t.Context(), 7, ListNodesOptions{}) {
 			count++
 		}
-		if count != 0 {
-			t.Errorf("count = %d, want 0", count)
-		}
+		assert.Equal(t, 0, count)
 		// One request advances to "never-ending"; the second sees it repeated
 		// and stops.
-		if calls != 2 {
-			t.Errorf("expected exactly 2 requests, got %d", calls)
-		}
+		assert.Equal(t, 2, calls, "expected exactly 2 requests")
 	})
-}
-
-func containsQuery(raw, want string) bool {
-	return slices.Contains(splitAmp(raw), want)
-}
-
-func splitAmp(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '&' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start <= len(s) {
-		out = append(out, s[start:])
-	}
-	return out
-}
-
-func equal(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

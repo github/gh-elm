@@ -1,9 +1,10 @@
 package watch
 
 import (
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/github/gh-elm/internal/elmapi"
 )
@@ -32,9 +33,8 @@ func TestDerivePhase_FromCombinedStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.status, func(t *testing.T) {
 			phase, overlay := DerivePhase(combined(tc.status))
-			if phase != tc.phase || overlay != tc.overlay {
-				t.Errorf("DerivePhase(%q) = (%v, %v), want (%v, %v)", tc.status, phase, overlay, tc.phase, tc.overlay)
-			}
+			assert.Equal(t, tc.phase, phase)
+			assert.Equal(t, tc.overlay, overlay)
 		})
 	}
 }
@@ -52,9 +52,8 @@ func TestDerivePhase_OverlayInfersBasePhase(t *testing.T) {
 		},
 	}
 	phase, overlay := DerivePhase(detail)
-	if phase != PhaseBackfilling || overlay != OverlayFailed {
-		t.Fatalf("got (%v, %v), want (Backfill, Failed)", phase, overlay)
-	}
+	assert.Equal(t, PhaseBackfilling, phase)
+	assert.Equal(t, OverlayFailed, overlay)
 }
 
 func TestDerivePhase_Fallback(t *testing.T) {
@@ -63,9 +62,8 @@ func TestDerivePhase_Fallback(t *testing.T) {
 		Migration: &elmapi.MigrationSummary{Status: new(statusCutoverPending)},
 	}
 	phase, overlay := DerivePhase(detail)
-	if phase != PhaseCuttingOver || overlay != OverlayNone {
-		t.Fatalf("cutover_pending fallback = (%v, %v)", phase, overlay)
-	}
+	assert.Equal(t, PhaseCuttingOver, phase, "cutover_pending fallback phase")
+	assert.Equal(t, OverlayNone, overlay)
 
 	// in_progress with backfill progress and all sent -> ready for cutover.
 	detail = &elmapi.MigrationDetail{
@@ -79,15 +77,13 @@ func TestDerivePhase_Fallback(t *testing.T) {
 		},
 	}
 	phase, _ = DerivePhase(detail)
-	if phase != PhaseReadyForCutover {
-		t.Fatalf("all-sent fallback = %v, want ReadyForCutover", phase)
-	}
+	assert.Equal(t, PhaseReadyForCutover, phase, "all-sent fallback")
 }
 
 func TestDerivePhase_Nil(t *testing.T) {
-	if phase, overlay := DerivePhase(nil); phase != PhaseCreated || overlay != OverlayNone {
-		t.Fatalf("nil detail = (%v, %v)", phase, overlay)
-	}
+	phase, overlay := DerivePhase(nil)
+	assert.Equal(t, PhaseCreated, phase)
+	assert.Equal(t, OverlayNone, overlay)
 }
 
 func TestView_RendersTimelineAndProgress(t *testing.T) {
@@ -128,15 +124,11 @@ func TestView_RendersTimelineAndProgress(t *testing.T) {
 		"hello world",               // generic message
 		"Refreshing every 2s",       // footer
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("View() missing %q in:\n%s", want, out)
-		}
+		assert.Contains(t, out, want)
 	}
 }
 
 func TestView_Loading(t *testing.T) {
 	m := New("id", time.Second, nil)
-	if got := m.View(); !strings.Contains(got, "Loading migration status") {
-		t.Fatalf("expected loading view, got %q", got)
-	}
+	assert.Contains(t, m.View(), "Loading migration status")
 }
