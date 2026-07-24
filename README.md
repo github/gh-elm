@@ -28,15 +28,12 @@ gh elm --version         # print the extension version
 gh elm configure         # interactively set up credentials
 gh elm configure --show  # print current config (tokens redacted)
 gh elm configure --reset # remove stored config and credentials
-
-gh elm migration ping    # scaffolding check for the migration group -> "pong"
-gh elm target ping       # scaffolding check for the target group -> "pong"
 ```
 
 ### Command groups
 
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
-  cancel, cutover) against the GHES REST API. Currently: `ping`.
+  cancel, cutover) against the GHES REST API.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.

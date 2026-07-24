@@ -6,29 +6,6 @@ import (
 	"testing"
 )
 
-func TestPingCommands(t *testing.T) {
-	for _, args := range [][]string{
-		{"target", "ping"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			root := NewRootCmd("test")
-
-			var out bytes.Buffer
-			root.SetOut(&out)
-			root.SetErr(&out)
-			root.SetArgs(args)
-
-			if err := root.Execute(); err != nil {
-				t.Fatalf("%v returned error: %v", args, err)
-			}
-
-			if got := strings.TrimSpace(out.String()); got != "pong" {
-				t.Errorf("expected %q, got %q", "pong", got)
-			}
-		})
-	}
-}
-
 func TestUnknownSubcommandFails(t *testing.T) {
 	// A mistyped subcommand must report "unknown command". Bare typos are caught
 	// by cobra's NoArgs; a typo *followed by a flag* exercises the shared
