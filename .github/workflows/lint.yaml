@@ -1,9 +1,5 @@
 name: go-linter
 
-permissions:
-  id-token: write
-  contents: read
-
 on:
   push:
     tags:
@@ -12,6 +8,10 @@ on:
       - main
   pull_request:
   merge_group:
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   lint:
