@@ -3,8 +3,6 @@
 package target
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -22,24 +20,9 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	targetCmd.AddCommand(newPingCmd())
 	targetCmd.AddCommand(newResourcesCmd())
 	targetCmd.AddCommand(newReportCmd())
 	targetCmd.AddCommand(newMannequinCmd())
 
 	return targetCmd
-}
-
-// newPingCmd is a scaffolding/connectivity check for the target command group.
-// It responds "pong" and makes no network calls.
-func newPingCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "ping",
-		Short: "Check that the target command group is wired up",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintln(cmd.OutOrStdout(), "pong")
-			return err
-		},
-	}
 }
