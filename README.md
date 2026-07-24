@@ -28,9 +28,6 @@ gh elm --version         # print the extension version
 gh elm configure         # interactively set up credentials
 gh elm configure --show  # print current config (tokens redacted)
 gh elm configure --reset # remove stored config and credentials
-
-gh elm migration ping    # scaffolding check for the migration group -> "pong"
-gh elm target ping       # scaffolding check for the target group -> "pong"
 ```
 
 ### Command groups
