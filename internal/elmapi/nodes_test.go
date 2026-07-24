@@ -85,7 +85,7 @@ func TestIterNodes(t *testing.T) {
 			case "page2":
 				_, _ = w.Write([]byte(`{"nodes":[{"id":"n3"}],"after":""}`))
 			default:
-				t.Errorf("unexpected after cursor %q", r.URL.Query().Get("after"))
+				assert.Failf(t, "unexpected after cursor", "%q", r.URL.Query().Get("after"))
 			}
 		}))
 		defer srv.Close()
@@ -140,7 +140,7 @@ func TestIterNodes(t *testing.T) {
 			case "page2":
 				_, _ = w.Write([]byte(`{"nodes":[{"id":"n1"}],"after":""}`))
 			default:
-				t.Errorf("unexpected after cursor %q", r.URL.Query().Get("after"))
+				assert.Failf(t, "unexpected after cursor", "%q", r.URL.Query().Get("after"))
 			}
 		}))
 		defer srv.Close()

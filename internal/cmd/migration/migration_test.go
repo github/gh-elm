@@ -255,9 +255,7 @@ func TestLookupTargetID(t *testing.T) {
 
 	t.Run("prints the target migration ID (human)", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1") {
-				t.Errorf("path = %q", r.URL.Path)
-			}
+			assert.True(t, strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1"), "path = %q", r.URL.Path)
 			_, _ = w.Write([]byte(withTargetID))
 		}))
 		defer srv.Close()
@@ -265,9 +263,7 @@ func TestLookupTargetID(t *testing.T) {
 		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		if !strings.Contains(out, "Target migration ID: 12345") {
-			t.Errorf("output = %q", out)
-		}
+		assert.Contains(t, out, "Target migration ID: 12345")
 	})
 
 	t.Run("--json emits a machine-readable object", func(t *testing.T) {
@@ -280,12 +276,9 @@ func TestLookupTargetID(t *testing.T) {
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		var got targetIDView
-		if err := json.Unmarshal([]byte(out), &got); err != nil {
-			t.Fatalf("output is not valid JSON: %v\n%s", err, out)
-		}
-		if got.MigrationID != "mig-1" || got.TargetMigrationID != 12345 {
-			t.Errorf("got = %+v", got)
-		}
+		require.NoError(t, json.Unmarshal([]byte(out), &got), "output is not valid JSON: %s", out)
+		assert.Equal(t, "mig-1", got.MigrationID)
+		assert.Equal(t, int64(12345), got.TargetMigrationID)
 	})
 
 	t.Run("errors on a migration ID that does not exist", func(t *testing.T) {
@@ -300,22 +293,15 @@ func TestLookupTargetID(t *testing.T) {
 
 		out, err := exec(t, "lookup-target-id", "--migration-id", "does-not-exist",
 			"--source-url", srv.URL, "--source-token", "tok")
-		if err == nil {
-			t.Fatalf("expected an error for a missing migration, got output:\n%s", out)
-		}
-		if !strings.Contains(err.Error(), "404") {
-			t.Errorf("expected a 404 error, got %v", err)
-		}
-		if strings.Contains(out, "Target migration ID") {
-			t.Errorf("missing migration must not print a target ID:\n%s", out)
-		}
+		require.Error(t, err, "expected an error for a missing migration, got output:\n%s", out)
+		assert.Contains(t, err.Error(), "404")
+		assert.NotContains(t, out, "Target migration ID", "missing migration must not print a target ID")
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
 		err := runErr(t, "lookup-target-id", "--source-url", "https://x", "--source-token", "tok")
-		if err == nil || !strings.Contains(err.Error(), "required") {
-			t.Fatalf("expected required-flag error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required")
 	})
 }
 
