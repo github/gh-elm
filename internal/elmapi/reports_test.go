@@ -37,7 +37,7 @@ func TestCreateReport(t *testing.T) {
 		assert.Equal(t, "application/json", gotContentType)
 		assert.Equal(t, ReportStageBackfill, gotBody.Stage)
 		assert.Equal(t, ReportStateAll, gotBody.State)
-		assert.JSONEq(t, respBody, string(raw))
+		assert.Equal(t, respBody, string(raw)) //nolint:testifylint // encoded-compare
 	})
 
 	t.Run("returns HTTPError when the API rejects a non-202", func(t *testing.T) {
@@ -82,7 +82,7 @@ func TestGetReportStatus(t *testing.T) {
 		require.NoError(t, err, "GetReportStatus")
 		assert.Equal(t, "/enterprise/migration/7/reports/status", gotPath)
 		assert.Equal(t, ReportStageBackfill, gotStage)
-		assert.JSONEq(t, respBody, string(raw))
+		assert.Equal(t, respBody, string(raw)) //nolint:testifylint // encoded-compare
 	})
 }
 
@@ -102,6 +102,6 @@ func TestGetReportURL(t *testing.T) {
 		require.NoError(t, err, "GetReportURL")
 		assert.Equal(t, "/enterprise/migration/9/reports/url", gotPath)
 		assert.Equal(t, ReportStageLiveUpdates, gotStage)
-		assert.JSONEq(t, respBody, string(raw))
+		assert.Equal(t, respBody, string(raw)) //nolint:testifylint // encoded-compare
 	})
 }
