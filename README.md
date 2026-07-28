@@ -93,7 +93,7 @@ gh elm target migration list
 gh elm target migration list --status paused
 
 # Create a migration directly on the target (single repository per migration)
-gh elm target migration create --source-url https://ghes.example/octo-org/octo-repo \
+gh elm target migration create --source-repository-url https://ghes.example/octo-org/octo-repo \
   --repository octo-org/octo-repo --description "manual test migration"
 
 # Check status and per-repository progress

@@ -140,7 +140,10 @@ func (c *Client) ListTargetMigrations(ctx context.Context, opts ListTargetMigrat
 // IterTargetMigrations yields every target migration, following pagination
 // until the API stops returning a next page token. Iteration stops on the
 // first error, delivered as the second value of the final pair; callers must
-// check it.
+// check it. A repeated page token is treated as an error rather than a quiet
+// stop, since it means the API can't be trusted to deliver the remaining
+// migrations and a caller checking only the loop's error return would
+// otherwise mistake a truncated result for a complete one.
 func (c *Client) IterTargetMigrations(ctx context.Context, opts ListTargetMigrationsOptions) iter.Seq2[TargetMigration, error] {
 	return func(yield func(TargetMigration, error) bool) {
 		opts.PageSize = targetMigrationsPageSize
@@ -170,7 +173,11 @@ func (c *Client) IterTargetMigrations(ctx context.Context, opts ListTargetMigrat
 				return
 			}
 
-			if page.NextPageToken == "" || seen[page.NextPageToken] {
+			if page.NextPageToken == "" {
+				return
+			}
+			if seen[page.NextPageToken] {
+				yield(TargetMigration{}, fmt.Errorf("target migration pagination repeated page token %q; results may be incomplete", page.NextPageToken))
 				return
 			}
 			seen[page.NextPageToken] = true

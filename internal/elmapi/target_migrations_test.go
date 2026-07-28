@@ -1,6 +1,7 @@
 package elmapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -188,7 +189,7 @@ func TestIterTargetMigrations(t *testing.T) {
 		assert.Error(t, gotErr, "expected an error from iteration")
 	})
 
-	t.Run("stops when the API repeats a cursor to prevent a loop", func(t *testing.T) {
+	t.Run("errors instead of looping forever when the API repeats a cursor", func(t *testing.T) {
 		calls := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
@@ -202,11 +203,65 @@ func TestIterTargetMigrations(t *testing.T) {
 
 		c := NewClient(srv.URL, "tok")
 		count := 0
-		for range c.IterTargetMigrations(t.Context(), ListTargetMigrationsOptions{}) {
+		var gotErr error
+		for _, err := range c.IterTargetMigrations(t.Context(), ListTargetMigrationsOptions{}) {
 			count++
+			gotErr = err
 		}
-		assert.Equal(t, 0, count)
+		assert.Equal(t, 1, count, "expected the final (error) pair to be yielded")
+		require.Error(t, gotErr, "a repeated cursor must surface as an error, not a quiet stop")
+		assert.Contains(t, gotErr.Error(), "repeated page token")
 		assert.Equal(t, 2, calls, "expected exactly 2 requests")
+	})
+
+	t.Run("stops immediately when the context is already canceled", func(t *testing.T) {
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			_, _ = w.Write([]byte(`{"migrations":[{"migrationId":"1"}],"nextPageToken":""}`))
+		}))
+		defer srv.Close()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		c := NewClient(srv.URL, "tok")
+		count := 0
+		var gotErr error
+		for _, err := range c.IterTargetMigrations(ctx, ListTargetMigrationsOptions{}) {
+			count++
+			gotErr = err
+		}
+		assert.Equal(t, 1, count, "expected the final (error) pair to be yielded")
+		require.ErrorIs(t, gotErr, context.Canceled)
+		assert.Zero(t, calls, "no request should be made once the context is already canceled")
+	})
+
+	t.Run("stops after the current page instead of following a next page token once canceled", func(t *testing.T) {
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			_, _ = w.Write([]byte(`{"migrations":[{"migrationId":"1"}],"nextPageToken":"page2"}`))
+		}))
+		defer srv.Close()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		c := NewClient(srv.URL, "tok")
+
+		var ids []string
+		var gotErr error
+		for m, err := range c.IterTargetMigrations(ctx, ListTargetMigrationsOptions{}) {
+			if err != nil {
+				gotErr = err
+				break
+			}
+			ids = append(ids, m.MigrationID)
+			cancel() // cancel once the first page's item has been yielded
+		}
+		assert.Equal(t, []string{"1"}, ids, "expected only the already-fetched page's item")
+		require.ErrorIs(t, gotErr, context.Canceled)
+		assert.Equal(t, 1, calls, "no second-page request should follow a cancellation")
 	})
 }
 

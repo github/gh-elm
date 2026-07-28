@@ -3,8 +3,10 @@ package target
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -57,8 +59,10 @@ func newMigrationListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List migrations on the target",
 		Long: "List migration records on the target (GHEC/Proxima) side. Use --status to\n" +
-			"filter client-side (the API does not support server-side status filtering).\n" +
-			"Repository progress is not populated here; use `status` for that.",
+			"filter client-side (the API does not support server-side status filtering,\n" +
+			"so a filtered list still scans every page before it can conclude there are\n" +
+			"no more matches; use --max-results to bound the scan). Repository progress\n" +
+			"is not populated here; use `status` for that.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			status, err := resolveTargetMigrationStatus(statusFlag)
@@ -94,7 +98,7 @@ func newMigrationListCmd() *cobra.Command {
 			}
 
 			if !asJSON {
-				fmt.Fprintln(out, migrationCountSummary(printed))
+				fmt.Fprintln(out, migrationCountSummary(printed, friendlyEnum(status, "STATUS_TYPE_")))
 			}
 			return nil
 		},
@@ -113,13 +117,13 @@ func newMigrationListCmd() *cobra.Command {
 // a migration record on the target. POST /enterprise/migration/create.
 func newMigrationCreateCmd() *cobra.Command {
 	var (
-		sourceURL    string
-		repository   string
-		description  string
-		exporterGUID string
-		asJSON       bool
-		targetURL    string
-		targetToken  string
+		sourceRepoURL string
+		repository    string
+		description   string
+		exporterGUID  string
+		asJSON        bool
+		targetURL     string
+		targetToken   string
 	)
 
 	cmd := &cobra.Command{
@@ -137,7 +141,7 @@ func newMigrationCreateCmd() *cobra.Command {
 			}
 
 			req := elmapi.CreateTargetMigrationRequest{
-				SourceURL:             sourceURL,
+				SourceURL:             sourceRepoURL,
 				Repositories:          []string{repository},
 				Description:           description,
 				ExporterMigrationGUID: exporterGUID,
@@ -150,14 +154,16 @@ func newMigrationCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&sourceURL, "source-url", "", "Source URL for the migration (required).")
+	cmd.Flags().StringVar(&sourceRepoURL, "source-repository-url", "",
+		"Full URL of the source repository being migrated, e.g. https://ghes.example/owner/repo (required). "+
+			"Not to be confused with the --source-url endpoint override used by gh elm migration commands.")
 	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Repository to migrate, in owner/repo format (required).")
 	cmd.Flags().StringVar(&description, "description", "", "Optional description of the migration.")
 	cmd.Flags().StringVar(&exporterGUID, "exporter-migration-guid", "", "Optional exporter-minted UUID correlating this migration with exporter-side records.")
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("source-url")
+	_ = cmd.MarkFlagRequired("source-repository-url")
 	_ = cmd.MarkFlagRequired("repository")
 
 	return cmd
@@ -181,13 +187,16 @@ func newMigrationStatusCmd() *cobra.Command {
 			"(GHEC/Proxima) side.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requirePositiveMigrationID(migrationID); err != nil {
+				return err
+			}
 			client, targetURLResolved, err := targetClient(targetURL, targetToken)
 			if err != nil {
 				return err
 			}
 			resp, err := client.GetTargetMigrationStatus(cmd.Context(), migrationID)
 			if err != nil {
-				return annotateAuthError(err, targetURLResolved)
+				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 
 			if asJSON {
@@ -198,7 +207,9 @@ func newMigrationStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to get status for (required).")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0,
+		"Target migration ID to get status for (required). This is the numeric target-side "+
+			"ID, not the source migration UUID; use gh elm migration lookup-target-id to resolve it.")
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the migration as JSON.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
@@ -222,19 +233,24 @@ func newMigrationPauseCmd() *cobra.Command {
 		Long:  "Pause a migration directly on the target (GHEC/Proxima) side.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requirePositiveMigrationID(migrationID); err != nil {
+				return err
+			}
 			client, targetURLResolved, err := targetClient(targetURL, targetToken)
 			if err != nil {
 				return err
 			}
 			if err := client.PauseTargetMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, targetURLResolved)
+				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %d paused.\n", migrationID)
 			return nil
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to pause (required).")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0,
+		"Target migration ID to pause (required). This is the numeric target-side ID, not "+
+			"the source migration UUID; use gh elm migration lookup-target-id to resolve it.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -257,19 +273,24 @@ func newMigrationResumeCmd() *cobra.Command {
 		Long:  "Resume a paused migration directly on the target (GHEC/Proxima) side.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requirePositiveMigrationID(migrationID); err != nil {
+				return err
+			}
 			client, targetURLResolved, err := targetClient(targetURL, targetToken)
 			if err != nil {
 				return err
 			}
 			if err := client.ResumeTargetMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, targetURLResolved)
+				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %d resumed.\n", migrationID)
 			return nil
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to resume (required).")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0,
+		"Target migration ID to resume (required). This is the numeric target-side ID, not "+
+			"the source migration UUID; use gh elm migration lookup-target-id to resolve it.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -289,22 +310,30 @@ func newMigrationAbortCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "abort",
 		Short: "Abort a migration on the target",
-		Long:  "Abort a migration directly on the target (GHEC/Proxima) side. This is a terminal action.",
-		Args:  cobra.NoArgs,
+		Long: "Abort a migration directly on the target (GHEC/Proxima) side. This is a\n" +
+			"terminal action: it takes effect immediately and cannot be undone. It does\n" +
+			"not prompt for confirmation, matching `gh elm migration cancel` on the\n" +
+			"source side.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requirePositiveMigrationID(migrationID); err != nil {
+				return err
+			}
 			client, targetURLResolved, err := targetClient(targetURL, targetToken)
 			if err != nil {
 				return err
 			}
 			if err := client.AbortTargetMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, targetURLResolved)
+				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %d aborted.\n", migrationID)
 			return nil
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to abort (required).")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0,
+		"Target migration ID to abort (required). This is the numeric target-side ID, not "+
+			"the source migration UUID; use gh elm migration lookup-target-id to resolve it.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.MarkFlagRequired("migration-id")
@@ -332,6 +361,45 @@ func resolveTargetMigrationStatus(s string) (string, error) {
 		return elmapi.TargetMigrationStatusPaused, nil
 	default:
 		return "", fmt.Errorf("invalid --status %q: must be in_progress, complete, failed, aborted, expired, or paused", s)
+	}
+}
+
+// requirePositiveMigrationID rejects an obviously invalid --migration-id
+// locally instead of sending it to the API and surfacing a remote error.
+func requirePositiveMigrationID(migrationID int64) error {
+	if migrationID <= 0 {
+		return fmt.Errorf("--migration-id must be a positive integer, got %d", migrationID)
+	}
+	return nil
+}
+
+// annotateMigrationActionError extends annotateAuthError with actionable
+// messages for the two errors most likely when acting on a single target
+// migration by ID: a 404 (the ID doesn't exist on the target — commonly
+// because a source migration UUID was passed instead of the numeric target
+// ID) and a 412 (the action isn't valid for the migration's current status).
+func annotateMigrationActionError(err error, targetURL string, migrationID int64) error {
+	if annotated := annotateAuthError(err, targetURL); annotated != err { //nolint:errorlint // exact passthrough sentinel from annotateAuthError, not a wrapped chain
+		return annotated
+	}
+
+	var httpErr *elmapi.HTTPError
+	if !errors.As(err, &httpErr) {
+		return err
+	}
+	switch httpErr.StatusCode {
+	case http.StatusNotFound:
+		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
+		return fmt.Errorf("target migration %d not found (HTTP 404): %s\n"+
+			"--migration-id must be the numeric target migration ID, not the source migration UUID. "+
+			"Use `gh elm migration lookup-target-id` to resolve it.", migrationID, httpErr.Message)
+	case http.StatusPreconditionFailed:
+		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
+		return fmt.Errorf("migration %d cannot perform this action in its current state (HTTP 412): %s\n"+
+			"Check `gh elm target migration status --migration-id %d` for its current status.",
+			migrationID, httpErr.Message, migrationID)
+	default:
+		return err
 	}
 }
 
@@ -378,14 +446,22 @@ func printMigrationJSON(w io.Writer, m elmapi.TargetMigration) error {
 	return err
 }
 
-func migrationCountSummary(n int) string {
+// migrationCountSummary reports how many migrations were printed. When
+// statusLabel is non-empty (i.e. --status filtered the list), it's woven into
+// the message so a filtered zero-result list reads as "No paused migrations
+// found." rather than the unqualified, easy-to-misread "No migrations found."
+func migrationCountSummary(n int, statusLabel string) string {
+	noun := "migrations"
+	if statusLabel != "" {
+		noun = statusLabel + " migrations"
+	}
 	switch n {
 	case 0:
-		return "No migrations found."
+		return fmt.Sprintf("No %s found.", noun)
 	case 1:
-		return "Found 1 migration."
+		return fmt.Sprintf("Found 1 %s.", strings.TrimSuffix(noun, "s"))
 	default:
-		return fmt.Sprintf("Found %d migrations.", n)
+		return fmt.Sprintf("Found %d %s.", n, noun)
 	}
 }
 

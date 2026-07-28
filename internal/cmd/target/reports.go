@@ -254,7 +254,7 @@ func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, render
 	}
 	var v T
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return fmt.Errorf("parsing report response: %w", err)
+		return fmt.Errorf("parsing response: %w", err)
 	}
 	// Render into a buffer first, then write to out once so a failed output
 	// stream (e.g. a closed pipe) surfaces as an error instead of a silently
