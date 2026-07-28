@@ -35,6 +35,11 @@ gh elm configure --reset # remove stored config and credentials
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
   migration's destination (GHEC) migration ID for use with the `gh elm target *` commands.
+- `gh elm target migration list|create|status|pause|resume|abort` — manage a migration
+  record directly on the target (GHEC/Proxima) side. Most workflows only need `list` and
+  `status`; `create`/`pause`/`resume`/`abort` are lower-level operations for debugging or
+  advanced workflows, since `gh elm migration create` normally drives the target record from
+  the source side.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -78,6 +83,26 @@ gh elm target resources --migration-id 42 --state failed
 # Cap results and emit newline-delimited JSON for scripting
 gh elm target resources --migration-id 42 --max-results 20
 gh elm target resources --migration-id 42 --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
+```
+
+Managing a migration on the target — `gh elm target migration`:
+
+```sh
+# List migrations (human-readable by default; add --json for newline-delimited JSON)
+gh elm target migration list
+gh elm target migration list --status paused
+
+# Create a migration directly on the target (single repository per migration)
+gh elm target migration create --source-url https://ghes.example/octo-org/octo-repo \
+  --repository octo-org/octo-repo --description "manual test migration"
+
+# Check status and per-repository progress
+gh elm target migration status --migration-id 42
+
+# Pause, resume, or abort
+gh elm target migration pause --migration-id 42
+gh elm target migration resume --migration-id 42
+gh elm target migration abort --migration-id 42
 ```
 
 Node reports — `gh elm target report create|status|url` (human-readable by default; add
