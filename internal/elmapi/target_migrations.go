@@ -147,7 +147,12 @@ func (c *Client) IterTargetMigrations(ctx context.Context, opts ListTargetMigrat
 		opts.PageToken = ""
 
 		seen := make(map[string]bool)
-		for ctx.Err() == nil {
+		for {
+			if err := ctx.Err(); err != nil {
+				yield(TargetMigration{}, err)
+				return
+			}
+
 			page, err := c.ListTargetMigrations(ctx, opts)
 			if err != nil {
 				yield(TargetMigration{}, err)
@@ -158,6 +163,11 @@ func (c *Client) IterTargetMigrations(ctx context.Context, opts ListTargetMigrat
 				if !yield(m, nil) {
 					return
 				}
+			}
+
+			if err := ctx.Err(); err != nil {
+				yield(TargetMigration{}, err)
+				return
 			}
 
 			if page.NextPageToken == "" || seen[page.NextPageToken] {
