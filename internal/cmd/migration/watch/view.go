@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/github/gh-elm/internal/theme"
 )
 
 // w writes s to b, discarding the return values.
@@ -49,7 +51,7 @@ func (m Model) View() string {
 func (m Model) renderHeader() string {
 	info := m.detail.Migration
 	if info == nil {
-		return m.styles.MigrationID.Render("Migration") + "  " + m.migrationID + "\n"
+		return m.styles.Bold.Render("Migration") + "  " + m.migrationID + "\n"
 	}
 
 	sourceNwo := info.SourceOrganizationLogin + "/" + info.SourceRepositoryName
@@ -61,18 +63,18 @@ func (m Model) renderHeader() string {
 	}
 
 	line1 := fmt.Sprintf("%s  %s  %s → %s",
-		m.styles.Label.Render("Migration"),
-		m.styles.MigrationID.Render(id),
+		m.styles.Info.Render("Migration"),
+		m.styles.Bold.Render(id),
 		sourceNwo,
 		targetNwo,
 	)
 
 	line2 := fmt.Sprintf("           %s: %s  %s: %s  %s: %s",
-		m.styles.Label.Render("Source org"),
+		m.styles.Info.Render("Source org"),
 		info.SourceOrganizationLogin,
-		m.styles.Label.Render("Target org"),
+		m.styles.Info.Render("Target org"),
 		info.TargetOrganizationLogin,
-		m.styles.Label.Render("Visibility"),
+		m.styles.Info.Render("Visibility"),
 		visibilityString(info.TargetVisibility),
 	)
 
@@ -107,7 +109,7 @@ func (m Model) renderTimeline() string {
 		ts := m.phaseTimestamp(p)
 
 		if ts != "" {
-			w(&b, fmt.Sprintf("  %s %s %s\n", indicator, name, m.styles.Timestamp.Render(ts)))
+			w(&b, fmt.Sprintf("  %s %s %s\n", indicator, name, m.styles.Muted.Render(ts)))
 		} else {
 			w(&b, fmt.Sprintf("  %s %s\n", indicator, name))
 		}
@@ -126,14 +128,14 @@ func (m Model) renderTimeline() string {
 	switch m.overlay {
 	case OverlayPaused:
 		w(&b, fmt.Sprintf("  %s %s\n",
-			m.styles.PhasePaused.Render("⏸"),
-			m.styles.PhaseName.Render("Paused"),
+			m.styles.Paused.Render("⏸"),
+			m.styles.Bold.Render("Paused"),
 		))
 		w(&b, "    Migration paused\n\n")
 	case OverlayDegraded:
 		w(&b, fmt.Sprintf("  %s %s\n",
 			m.styles.Warning.Render("⚠"),
-			m.styles.PhaseName.Render("Degraded"),
+			m.styles.Bold.Render("Degraded"),
 		))
 		if cs := m.detail.CombinedState; cs != nil && cs.DisplayMessage != "" {
 			w(&b, "    "+cs.DisplayMessage+"\n\n")
@@ -148,18 +150,18 @@ func (m Model) renderTimeline() string {
 func (m Model) phaseIndicator(p Phase) string {
 	switch {
 	case m.overlay == OverlayFailed && p == PhaseCompleted:
-		return m.styles.PhaseFailed.Render("✗")
+		return m.styles.Failure.Render("✗")
 	case m.overlay == OverlayTerminated && p == PhaseCompleted:
-		return m.styles.PhaseFailed.Render("✗")
+		return m.styles.Failure.Render("✗")
 	case p == m.basePhase:
 		if m.overlay == OverlayFailed || m.overlay == OverlayTerminated {
-			return m.styles.PhaseFailed.Render("✗")
+			return m.styles.Failure.Render("✗")
 		}
-		return m.styles.PhaseActive.Render("◉")
+		return m.styles.Active.Render("◉")
 	case phaseOrdinal(p) < phaseOrdinal(m.basePhase):
-		return m.styles.PhaseComplete.Render("✓")
+		return m.styles.Success.Render("✓")
 	default:
-		return m.styles.PhasePending.Render("○")
+		return m.styles.Muted.Render("○")
 	}
 }
 
@@ -174,9 +176,9 @@ func phaseOrdinal(p Phase) int {
 
 func (m Model) phaseNameStyled(p Phase) string {
 	if p == m.basePhase {
-		return m.styles.PhaseNameActive.Render(p.String())
+		return m.styles.Active.Bold(true).Render(p.String())
 	}
-	return m.styles.PhaseName.Render(p.String())
+	return m.styles.Bold.Render(p.String())
 }
 
 func (m Model) phaseTimestamp(p Phase) string {
@@ -238,7 +240,7 @@ func (m Model) phaseDetail(p Phase) string {
 	case p == PhaseCompleted && m.basePhase == PhaseCompleted && m.overlay == OverlayNone:
 		return m.completedDetail()
 	case p == PhaseCompleted && m.overlay == OverlayTerminated:
-		return m.styles.PhaseFailed.Render("Migration terminated")
+		return m.styles.Failure.Render("Migration terminated")
 	case p == PhaseCompleted && m.overlay == OverlayFailed:
 		return m.failedDetail()
 	}
@@ -268,7 +270,7 @@ func (m Model) backfillDetail() string {
 
 	failedStr := fmt.Sprintf("%d", failed)
 	if failed > 0 {
-		failedStr = m.styles.PhaseFailed.Render(fmt.Sprintf("%d", failed))
+		failedStr = m.styles.Failure.Render(fmt.Sprintf("%d", failed))
 	}
 
 	w(&b, fmt.Sprintf("Failed: %s  Git push: %s  All resources sent: %s",
@@ -278,7 +280,7 @@ func (m Model) backfillDetail() string {
 	if rp.LiveUpdateResourcesAdded > 0 || rp.LiveUpdateResourcesProcessed > 0 {
 		liveFailed := fmt.Sprintf("%d", rp.LiveUpdateResourcesFailed)
 		if rp.LiveUpdateResourcesFailed > 0 {
-			liveFailed = m.styles.PhaseFailed.Render(liveFailed)
+			liveFailed = m.styles.Failure.Render(liveFailed)
 		}
 		w(&b, fmt.Sprintf("\nLive updates: %d processed / %d sent  Failed: %s",
 			rp.LiveUpdateResourcesProcessed, rp.LiveUpdateResourcesAdded, liveFailed))
@@ -346,9 +348,9 @@ func (m Model) completedDetail() string {
 
 func (m Model) failedDetail() string {
 	if cs := m.detail.CombinedState; cs != nil && cs.DisplayMessage != "" {
-		return m.styles.PhaseFailed.Render(cs.DisplayMessage)
+		return m.styles.Failure.Render(cs.DisplayMessage)
 	}
-	return m.styles.PhaseFailed.Render("Migration failed")
+	return m.styles.Failure.Render("Migration failed")
 }
 
 // gitSyncMessagePrefix is the prefix the server attaches to git-sync messages
@@ -358,6 +360,25 @@ const gitSyncMessagePrefix = "[git sync: "
 // preflightMessagePrefix is the prefix the server attaches to preflight check
 // messages in MigrationMessage.Message. Format: "[preflight: <check>] <detail>".
 const preflightMessagePrefix = "[preflight: "
+
+// messageTypeError is the MigrationMessage.MessageType value marking a failure.
+const messageTypeError = "error"
+
+// checkLine renders a preflight or git-sync result.
+func (m Model) checkLine(isError bool, text string) string {
+	if isError {
+		return "  " + m.styles.Failure.Render("✗") + " " + m.styles.Failure.Render(text)
+	}
+	return "  " + m.styles.Success.Render("✓") + " " + m.styles.Muted.Render(text)
+}
+
+// noteLine renders a generic message with a neutral bullet.
+func (m Model) noteLine(isError bool, text string) string {
+	if isError {
+		return "  " + m.styles.Failure.Render("✗") + " " + m.styles.Failure.Render(text)
+	}
+	return "  " + m.styles.Muted.Render("· "+text)
+}
 
 // parsePrefixedMessage returns the label and detail text from a message of the
 // form "<prefix><label>] <detail>", or ok=false if the prefix is not present.
@@ -398,13 +419,9 @@ func (m Model) renderGitSync() string {
 		}
 		ts := ""
 		if t, ok := parseTime(msg.CreatedAt); ok {
-			ts = " " + m.styles.Timestamp.Render(formatTimestamp(t))
+			ts = " " + m.styles.Muted.Render(formatTimestamp(t))
 		}
-		if msg.MessageType == "error" {
-			lines = append(lines, "  "+m.styles.MessageError.Render("✗ "+source+": "+detail)+ts)
-		} else {
-			lines = append(lines, "  "+m.styles.MessageInfo.Render("✓ "+source+": "+detail)+ts)
-		}
+		lines = append(lines, m.checkLine(msg.MessageType == messageTypeError, source+": "+detail)+ts)
 	}
 
 	if len(lines) == 0 {
@@ -412,7 +429,7 @@ func (m Model) renderGitSync() string {
 	}
 
 	var b strings.Builder
-	w(&b, m.styles.Label.Render("Git Sync")+"\n")
+	w(&b, m.styles.Info.Render("Git Sync")+"\n")
 	for _, line := range lines {
 		w(&b, line+"\n")
 	}
@@ -432,13 +449,9 @@ func (m Model) renderPreflight() string {
 		}
 		ts := ""
 		if t, ok := parseTime(msg.CreatedAt); ok {
-			ts = " " + m.styles.Timestamp.Render(formatTimestamp(t))
+			ts = " " + m.styles.Muted.Render(formatTimestamp(t))
 		}
-		if msg.MessageType == "error" {
-			lines = append(lines, "  "+m.styles.MessageError.Render("✗ "+check+": "+detail)+ts)
-		} else {
-			lines = append(lines, "  "+m.styles.MessageInfo.Render("✓ "+check+": "+detail)+ts)
-		}
+		lines = append(lines, m.checkLine(msg.MessageType == messageTypeError, check+": "+detail)+ts)
 	}
 
 	if len(lines) == 0 {
@@ -446,7 +459,7 @@ func (m Model) renderPreflight() string {
 	}
 
 	var b strings.Builder
-	w(&b, m.styles.Label.Render("Preflight")+"\n")
+	w(&b, m.styles.Info.Render("Preflight")+"\n")
 	for _, line := range lines {
 		w(&b, line+"\n")
 	}
@@ -466,17 +479,13 @@ func (m Model) renderMessages() string {
 		if _, _, isPreflight := parsePreflightMessage(msg.Message); isPreflight {
 			continue
 		}
-		if msg.MessageType == "error" {
-			lines = append(lines, "  "+m.styles.MessageError.Render("✗ "+msg.Message))
-		} else {
-			lines = append(lines, "  "+m.styles.MessageInfo.Render("· "+msg.Message))
-		}
+		lines = append(lines, m.noteLine(msg.MessageType == messageTypeError, msg.Message))
 	}
 
 	var b strings.Builder
-	w(&b, m.styles.Label.Render("Messages")+"\n")
+	w(&b, m.styles.Info.Render("Messages")+"\n")
 	if len(lines) == 0 {
-		w(&b, "  "+m.styles.MessageInfo.Render("No messages")+"\n")
+		w(&b, "  "+m.styles.Muted.Render("No messages")+"\n")
 		return b.String()
 	}
 	for _, line := range lines {
@@ -493,7 +502,7 @@ func (m Model) renderFooter() string {
 	}
 	parts = append(parts, fmt.Sprintf("Refreshing every %s", m.interval), "Ctrl-C to exit")
 
-	footer := m.styles.Footer.Render(strings.Join(parts, " · "))
+	footer := m.styles.Muted.Render(strings.Join(parts, " · "))
 
 	if m.fetchErr != nil {
 		warning := m.styles.Warning.Render("⚠ Failed to refresh (retrying...)")
@@ -507,7 +516,7 @@ func (m Model) renderFooter() string {
 
 // renderProgressBar renders the backfill progress bar. The trailing
 // percentage is suppressed until AllResourcesSent is true.
-func renderProgressBar(processed, sent int64, allSent bool, width int64, s Styles) string {
+func renderProgressBar(processed, sent int64, allSent bool, width int64, s theme.Styles) string {
 	if width <= 0 {
 		width = 40
 	}
@@ -520,8 +529,9 @@ func renderProgressBar(processed, sent int64, allSent bool, width int64, s Style
 		filled = width
 	}
 
-	bar := s.ProgressFull.Render(strings.Repeat("█", int(filled))) +
-		s.ProgressEmpty.Render(strings.Repeat("░", int(width-filled)))
+	filledStyle, emptyStyle := s.Success, s.Muted
+	bar := filledStyle.Render(strings.Repeat("█", int(filled))) +
+		emptyStyle.Render(strings.Repeat("░", int(width-filled)))
 
 	if allSent && sent > 0 {
 		pct := processed * 100 / sent
@@ -530,11 +540,11 @@ func renderProgressBar(processed, sent int64, allSent bool, width int64, s Style
 	return fmt.Sprintf("%s %d processed / %d sent (discovering...)\n", bar, processed, sent)
 }
 
-func boolCheck(val bool, s Styles) string {
+func boolCheck(val bool, s theme.Styles) string {
 	if val {
-		return s.CheckOK.Render("✓")
+		return s.Success.Render("✓")
 	}
-	return s.CheckFail.Render("✗")
+	return s.Failure.Render("✗")
 }
 
 func formatDuration(d time.Duration) string {
