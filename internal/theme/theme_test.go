@@ -11,13 +11,16 @@ import (
 func TestNew(t *testing.T) {
 	s := New()
 
-	t.Run("semantic colours come from the gh palette", func(t *testing.T) {
+	t.Run("semantic colours come from the theme palette", func(t *testing.T) {
+		assert.Equal(t, colorPrimary, s.Primary.GetForeground())
 		assert.Equal(t, colorGreen, s.Success.GetForeground())
 		assert.Equal(t, colorYellow, s.Active.GetForeground())
 		assert.Equal(t, colorYellow, s.Warning.GetForeground())
 		assert.Equal(t, colorYellow, s.Paused.GetForeground())
 		assert.Equal(t, colorRed, s.Failure.GetForeground())
-		assert.Equal(t, colorCyan, s.Info.GetForeground())
+		assert.Equal(t, colorGreen, s.Info.GetForeground())
+		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
+		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
 	})
 
 	t.Run("muted is gh's 242 grey", func(t *testing.T) {
@@ -34,9 +37,9 @@ func TestNew(t *testing.T) {
 		// follow the user's own light or dark theme, and 242 stays legible on
 		// either, so adapting on top would fight the terminal.
 		for name, style := range map[string]lipgloss.Style{
-			"Info": s.Info, "Muted": s.Muted, "Success": s.Success,
-			"Active": s.Active, "Warning": s.Warning, "Paused": s.Paused,
-			"Failure": s.Failure,
+			"Primary": s.Primary, "Info": s.Info, "Secondary": s.Secondary, "Muted": s.Muted,
+			"Placeholder": s.Placeholder, "Success": s.Success, "Active": s.Active,
+			"Warning": s.Warning, "Paused": s.Paused, "Failure": s.Failure,
 		} {
 			assert.IsType(t, lipgloss.Color(""), style.GetForeground(), name)
 		}
@@ -45,31 +48,42 @@ func TestNew(t *testing.T) {
 
 func TestForm(t *testing.T) {
 	f := Form()
+	s := New()
 
 	t.Run("drops the accent colours ThemeBase16 brings", func(t *testing.T) {
 		assert.NotEqual(t, lipgloss.Color("5"), f.Focused.FocusedButton.GetBackground())
 		assert.NotEqual(t, lipgloss.Color("5"), f.Focused.TextInput.Cursor.GetForeground())
 	})
 
-	t.Run("titles and descriptions match the shared styles", func(t *testing.T) {
-		assert.Equal(t, colorCyan, f.Focused.Title.GetForeground())
-		assert.Equal(t, colorMuted, f.Focused.Description.GetForeground())
+	t.Run("titles reflect their hierarchy", func(t *testing.T) {
+		assert.Equal(t, colorGreen, f.Focused.Title.GetForeground())
+		assert.True(t, f.Focused.Title.GetBold())
+		assert.Equal(t, s.Primary.GetForeground(), f.Focused.NoteTitle.GetForeground())
+		assert.True(t, f.Focused.NoteTitle.GetBold())
+		assert.Equal(t, f.Focused.NoteTitle, f.Blurred.NoteTitle)
+		assert.Equal(t, s.Secondary.GetForeground(), f.Blurred.Title.GetForeground())
+	})
+
+	t.Run("secondary text has a clear hierarchy", func(t *testing.T) {
+		assert.Equal(t, s.Muted, f.Focused.Description)
+		assert.Equal(t, s.Placeholder, f.Focused.TextInput.Placeholder)
 	})
 
 	t.Run("ordinary content inherits the terminal foreground", func(t *testing.T) {
+		assert.Equal(t, s.Primary.GetForeground(), f.Focused.Base.GetBorderLeftForeground())
 		assert.Equal(t, lipgloss.NoColor{}, f.Focused.Option.GetForeground())
 		assert.Equal(t, lipgloss.NoColor{}, f.Focused.UnselectedOption.GetForeground())
+		assert.Equal(t, lipgloss.NoColor{}, f.Focused.TextInput.Text.GetForeground())
 		assert.Equal(t, lipgloss.NoColor{}, f.Blurred.TextInput.Text.GetForeground())
 	})
 
-	t.Run("help uses the shared muted style", func(t *testing.T) {
-		for name, style := range map[string]lipgloss.Style{
-			"ellipsis": f.Help.Ellipsis, "short key": f.Help.ShortKey,
-			"short description": f.Help.ShortDesc, "short separator": f.Help.ShortSeparator,
-			"full key": f.Help.FullKey, "full description": f.Help.FullDesc,
-			"full separator": f.Help.FullSeparator,
-		} {
-			assert.Equal(t, colorMuted, style.GetForeground(), name)
-		}
+	t.Run("help keys stand out from their descriptions", func(t *testing.T) {
+		assert.Equal(t, s.Secondary, f.Help.ShortKey)
+		assert.Equal(t, s.Secondary, f.Help.FullKey)
+		assert.Equal(t, s.Muted, f.Help.ShortDesc)
+		assert.Equal(t, s.Muted, f.Help.FullDesc)
+		assert.Equal(t, s.Muted, f.Help.ShortSeparator)
+		assert.Equal(t, s.Muted, f.Help.FullSeparator)
+		assert.Equal(t, s.Muted, f.Help.Ellipsis)
 	})
 }
