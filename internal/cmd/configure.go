@@ -13,6 +13,7 @@ import (
 
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/creds"
+	"github.com/github/gh-elm/internal/theme"
 )
 
 // newConfigureCmd builds the `gh elm configure` command: an interactive setup
@@ -102,7 +103,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 				Description("Needed for `gh elm target` commands. You can add these later.").
 				Value(&configureTarget),
 		),
-	).WithTheme(huh.ThemeCharm())
+	).WithTheme(theme.Form())
 
 	if err := runForm(sourceForm); err != nil {
 		return err
@@ -126,7 +127,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 					Value(&targetToken).
 					Validate(validateRequired("a target token")),
 			),
-		).WithTheme(huh.ThemeCharm())
+		).WithTheme(theme.Form())
 
 		if err := runForm(targetForm); err != nil {
 			return err
