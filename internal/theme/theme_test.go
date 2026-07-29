@@ -17,10 +17,20 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, colorYellow, s.Active.GetForeground())
 		assert.Equal(t, colorYellow, s.Warning.GetForeground())
 		assert.Equal(t, colorYellow, s.Paused.GetForeground())
-		assert.Equal(t, colorRed, s.Failure.GetForeground())
+		assert.Equal(t, githubRed, s.Failure.GetForeground())
 		assert.Equal(t, githubBlue, s.Info.GetForeground())
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
+	})
+
+	t.Run("GitHub palette values are pinned", func(t *testing.T) {
+		assert.Equal(t, githubBlue, lipgloss.Color("#0969da"))
+		assert.Equal(t, githubGreen, lipgloss.Color("#1a7f37"))
+		assert.Equal(t, githubRed, lipgloss.Color("#d1242f"))
+		assert.Equal(t, githubPurple, lipgloss.Color("#8250df"))
+		assert.Equal(t, githubTerracotta, lipgloss.Color("#bc4c00"))
+		assert.Equal(t, githubBrown, lipgloss.Color("#9a6700"))
+		assert.Equal(t, githubStar, lipgloss.Color("#eac54f"))
 	})
 
 	t.Run("muted is gh's 242 grey", func(t *testing.T) {

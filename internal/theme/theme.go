@@ -8,7 +8,6 @@ import (
 
 const (
 	colorButtonText  = lipgloss.Color("#ffffff")
-	colorRed         = lipgloss.Color("1")
 	colorYellow      = lipgloss.Color("3")
 	colorBlack       = lipgloss.Color("0")
 	colorPlaceholder = lipgloss.Color("238")
@@ -19,6 +18,16 @@ const (
 	githubGreen = lipgloss.Color("#1a7f37")
 	// githubBlue is GitHub's interactive accent blue.
 	githubBlue = lipgloss.Color("#0969da")
+	// githubRed is GitHub's danger red.
+	githubRed = lipgloss.Color("#d1242f")
+	// githubPurple is GitHub's done purple.
+	githubPurple = lipgloss.Color("#8250df")
+	// githubTerracotta is GitHub's severe accent.
+	githubTerracotta = lipgloss.Color("#bc4c00")
+	// githubBrown is GitHub's attention foreground.
+	githubBrown = lipgloss.Color("#9a6700")
+	// githubStar is GitHub's star yellow.
+	githubStar = lipgloss.Color("#eac54f")
 )
 
 // Styles is the set of semantic styles used across the extension.
@@ -64,7 +73,7 @@ func New() Styles {
 		Active:      lipgloss.NewStyle().Foreground(colorYellow),
 		Warning:     lipgloss.NewStyle().Foreground(colorYellow),
 		Paused:      lipgloss.NewStyle().Foreground(colorYellow),
-		Failure:     lipgloss.NewStyle().Foreground(colorRed),
+		Failure:     lipgloss.NewStyle().Foreground(githubRed),
 	}
 }
 
@@ -79,8 +88,8 @@ func Form() *huh.Theme {
 	t.Focused.NoteTitle = s.Primary.Bold(true)
 	t.Focused.Directory = t.Focused.Directory.Foreground(githubBlue)
 	t.Focused.Description = s.Muted
-	t.Focused.ErrorIndicator = t.Focused.ErrorIndicator.Foreground(colorRed)
-	t.Focused.ErrorMessage = t.Focused.ErrorMessage.Foreground(colorRed)
+	t.Focused.ErrorIndicator = t.Focused.ErrorIndicator.Foreground(githubRed)
+	t.Focused.ErrorMessage = t.Focused.ErrorMessage.Foreground(githubRed)
 	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(githubBlue)
 	t.Focused.NextIndicator = t.Focused.NextIndicator.Foreground(githubBlue)
 	t.Focused.PrevIndicator = t.Focused.PrevIndicator.Foreground(githubBlue)
