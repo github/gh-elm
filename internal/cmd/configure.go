@@ -105,6 +105,9 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		),
 	).WithTheme(theme.Form())
 
+	if _, err := fmt.Fprintln(cmd.OutOrStdout()); err != nil {
+		return err
+	}
 	if err := runForm(sourceForm); err != nil {
 		return err
 	}

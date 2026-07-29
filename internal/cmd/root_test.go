@@ -92,3 +92,30 @@ func TestRootVersion(t *testing.T) {
 	require.NoError(t, root.Execute(), "--version returned error")
 	assert.Contains(t, out.String(), "gh elm 1.2.3")
 }
+
+func TestRootHelp(t *testing.T) {
+	root := NewRootCmd("test")
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"--help"})
+
+	require.NoError(t, root.Execute())
+
+	help := out.String()
+	assert.True(t, strings.HasPrefix(help, "\n"))
+	assert.Contains(t, help, "Drive Enterprise Live Migrations (ELM) against the GitHub Enterprise Server REST API.")
+	assert.Contains(t, help, "\nUSAGE\n  gh elm <command> <subcommand> [flags]\n")
+	assert.Contains(t, help, "\nCOMMANDS\n")
+	assert.Contains(t, help, "  configure:     Interactively set up credentials for gh elm")
+	assert.Contains(t, help, "  help:          Help about any command")
+	assert.Contains(t, help, "\nMIGRATION COMMANDS\n")
+	assert.Contains(t, help, "  migration create:")
+	assert.Contains(t, help, "  migration watch:")
+	assert.Contains(t, help, "\nTARGET COMMANDS\n")
+	assert.Contains(t, help, "  target report create:")
+	assert.Contains(t, help, "  target mannequin claim:")
+	assert.Contains(t, help, "  target resources:")
+	assert.Contains(t, help, "\nFLAGS\n")
+	assert.Contains(t, help, "\nLEARN MORE\n")
+	assert.NotContains(t, help, "Available Commands:")
+}
