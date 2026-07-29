@@ -12,13 +12,13 @@ func TestNew(t *testing.T) {
 	s := New()
 
 	t.Run("semantic colours come from the theme palette", func(t *testing.T) {
-		assert.Equal(t, colorPrimary, s.Primary.GetForeground())
-		assert.Equal(t, colorGreen, s.Success.GetForeground())
+		assert.Equal(t, lipgloss.NoColor{}, s.Primary.GetForeground())
+		assert.Equal(t, githubGreen, s.Success.GetForeground())
 		assert.Equal(t, colorYellow, s.Active.GetForeground())
 		assert.Equal(t, colorYellow, s.Warning.GetForeground())
 		assert.Equal(t, colorYellow, s.Paused.GetForeground())
 		assert.Equal(t, colorRed, s.Failure.GetForeground())
-		assert.Equal(t, colorGreen, s.Info.GetForeground())
+		assert.Equal(t, githubBlue, s.Info.GetForeground())
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
 	})
@@ -37,7 +37,7 @@ func TestNew(t *testing.T) {
 		// follow the user's own light or dark theme, and 242 stays legible on
 		// either, so adapting on top would fight the terminal.
 		for name, style := range map[string]lipgloss.Style{
-			"Primary": s.Primary, "Info": s.Info, "Secondary": s.Secondary, "Muted": s.Muted,
+			"Info": s.Info, "Secondary": s.Secondary, "Muted": s.Muted,
 			"Placeholder": s.Placeholder, "Success": s.Success, "Active": s.Active,
 			"Warning": s.Warning, "Paused": s.Paused, "Failure": s.Failure,
 		} {
@@ -56,7 +56,7 @@ func TestForm(t *testing.T) {
 	})
 
 	t.Run("titles reflect their hierarchy", func(t *testing.T) {
-		assert.Equal(t, colorGreen, f.Focused.Title.GetForeground())
+		assert.Equal(t, githubBlue, f.Focused.Title.GetForeground())
 		assert.True(t, f.Focused.Title.GetBold())
 		assert.Equal(t, s.Primary.GetForeground(), f.Focused.NoteTitle.GetForeground())
 		assert.True(t, f.Focused.NoteTitle.GetBold())

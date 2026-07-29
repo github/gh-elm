@@ -7,14 +7,18 @@ import (
 )
 
 const (
-	colorPrimary     = lipgloss.Color("#ffffff")
+	colorButtonText  = lipgloss.Color("#ffffff")
 	colorRed         = lipgloss.Color("1")
-	colorGreen       = lipgloss.Color("#1a7f37")
 	colorYellow      = lipgloss.Color("3")
 	colorBlack       = lipgloss.Color("0")
 	colorPlaceholder = lipgloss.Color("238")
 	colorMuted       = lipgloss.Color("242")
 	colorSecondary   = lipgloss.Color("245")
+
+	// githubGreen is GitHub's success green.
+	githubGreen = lipgloss.Color("#1a7f37")
+	// githubBlue is GitHub's interactive accent blue.
+	githubBlue = lipgloss.Color("#0969da")
 )
 
 // Styles is the set of semantic styles used across the extension.
@@ -50,13 +54,13 @@ type Styles struct {
 // New returns the `gh elm` styles.
 func New() Styles {
 	return Styles{
-		Primary:     lipgloss.NewStyle().Foreground(colorPrimary),
+		Primary:     lipgloss.NewStyle(),
 		Bold:        lipgloss.NewStyle().Bold(true),
-		Info:        lipgloss.NewStyle().Foreground(colorGreen),
+		Info:        lipgloss.NewStyle().Foreground(githubBlue),
 		Secondary:   lipgloss.NewStyle().Foreground(colorSecondary),
 		Muted:       lipgloss.NewStyle().Foreground(colorMuted),
 		Placeholder: lipgloss.NewStyle().Foreground(colorPlaceholder),
-		Success:     lipgloss.NewStyle().Foreground(colorGreen),
+		Success:     lipgloss.NewStyle().Foreground(githubGreen),
 		Active:      lipgloss.NewStyle().Foreground(colorYellow),
 		Warning:     lipgloss.NewStyle().Foreground(colorYellow),
 		Paused:      lipgloss.NewStyle().Foreground(colorYellow),
@@ -69,27 +73,27 @@ func Form() *huh.Theme {
 	s := New()
 	t := huh.ThemeBase16()
 
-	t.Focused.Base = t.Focused.Base.BorderForeground(s.Primary.GetForeground())
+	t.Focused.Base = t.Focused.Base.UnsetBorderForeground()
 	t.Focused.Card = t.Focused.Base
-	t.Focused.Title = t.Focused.Title.Foreground(colorGreen).Bold(true)
+	t.Focused.Title = t.Focused.Title.Foreground(githubBlue).Bold(true)
 	t.Focused.NoteTitle = s.Primary.Bold(true)
-	t.Focused.Directory = t.Focused.Directory.Foreground(colorGreen)
+	t.Focused.Directory = t.Focused.Directory.Foreground(githubBlue)
 	t.Focused.Description = s.Muted
 	t.Focused.ErrorIndicator = t.Focused.ErrorIndicator.Foreground(colorRed)
 	t.Focused.ErrorMessage = t.Focused.ErrorMessage.Foreground(colorRed)
-	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(colorGreen)
-	t.Focused.NextIndicator = t.Focused.NextIndicator.Foreground(colorGreen)
-	t.Focused.PrevIndicator = t.Focused.PrevIndicator.Foreground(colorGreen)
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(githubBlue)
+	t.Focused.NextIndicator = t.Focused.NextIndicator.Foreground(githubBlue)
+	t.Focused.PrevIndicator = t.Focused.PrevIndicator.Foreground(githubBlue)
 	t.Focused.Option = t.Focused.Option.UnsetForeground()
-	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(colorGreen)
-	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(colorGreen)
-	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(colorGreen)
+	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(githubBlue)
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(githubBlue)
+	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(githubBlue)
 	t.Focused.UnselectedOption = t.Focused.UnselectedOption.UnsetForeground()
-	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(colorBlack).Background(colorGreen)
+	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(colorButtonText).Background(githubBlue)
 	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(colorMuted).Background(colorBlack)
-	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(colorGreen)
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(githubBlue)
 	t.Focused.TextInput.Placeholder = s.Placeholder
-	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(colorGreen)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(githubBlue)
 	t.Focused.TextInput.Text = t.Focused.TextInput.Text.UnsetForeground()
 
 	// huh derives blurred styles from the focused styles.
