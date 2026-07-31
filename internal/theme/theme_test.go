@@ -13,19 +13,23 @@ func TestNew(t *testing.T) {
 
 	t.Run("semantic colours come from the theme palette", func(t *testing.T) {
 		assert.Equal(t, lipgloss.NoColor{}, s.Primary.GetForeground())
-		assert.Equal(t, githubGreen, s.Success.GetForeground())
-		assert.Equal(t, colorYellow, s.Active.GetForeground())
+		assert.Equal(t, colorGreen, s.Success.GetForeground())
+		assert.Equal(t, colorBlue, s.Active.GetForeground())
 		assert.Equal(t, colorYellow, s.Warning.GetForeground())
 		assert.Equal(t, colorYellow, s.Paused.GetForeground())
 		assert.Equal(t, githubRed, s.Failure.GetForeground())
-		assert.Equal(t, githubBlue, s.Info.GetForeground())
+		assert.Equal(t, colorBlue, s.Info.GetForeground())
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
 	})
 
+	t.Run("Copilot CLI palette values are pinned", func(t *testing.T) {
+		assert.Equal(t, colorBlue, lipgloss.Color("#4493f8"))
+		assert.Equal(t, colorGreen, lipgloss.Color("#3fb950"))
+		assert.Equal(t, colorYellow, lipgloss.Color("#f9f1a5"))
+	})
+
 	t.Run("GitHub palette values are pinned", func(t *testing.T) {
-		assert.Equal(t, githubBlue, lipgloss.Color("#0969da"))
-		assert.Equal(t, githubGreen, lipgloss.Color("#1a7f37"))
 		assert.Equal(t, githubRed, lipgloss.Color("#d1242f"))
 		assert.Equal(t, githubPurple, lipgloss.Color("#8250df"))
 		assert.Equal(t, githubTerracotta, lipgloss.Color("#bc4c00"))
@@ -66,12 +70,22 @@ func TestForm(t *testing.T) {
 	})
 
 	t.Run("titles reflect their hierarchy", func(t *testing.T) {
-		assert.Equal(t, githubBlue, f.Focused.Title.GetForeground())
+		assert.Equal(t, colorBlue, f.Focused.Title.GetForeground())
 		assert.True(t, f.Focused.Title.GetBold())
 		assert.Equal(t, s.Primary.GetForeground(), f.Focused.NoteTitle.GetForeground())
 		assert.True(t, f.Focused.NoteTitle.GetBold())
 		assert.Equal(t, f.Focused.NoteTitle, f.Blurred.NoteTitle)
 		assert.Equal(t, s.Secondary.GetForeground(), f.Blurred.Title.GetForeground())
+	})
+
+	t.Run("focused controls use the Copilot CLI focus blue", func(t *testing.T) {
+		assert.Equal(t, colorBlue, f.Focused.SelectSelector.GetForeground())
+		assert.Equal(t, colorBlue, f.Focused.MultiSelectSelector.GetForeground())
+		assert.Equal(t, colorBlue, f.Focused.SelectedOption.GetForeground())
+		assert.Equal(t, colorBlue, f.Focused.SelectedPrefix.GetForeground())
+		assert.Equal(t, colorBlue, f.Focused.FocusedButton.GetBackground())
+		assert.Equal(t, colorBlue, f.Focused.TextInput.Cursor.GetForeground())
+		assert.Equal(t, colorBlue, f.Focused.TextInput.Prompt.GetForeground())
 	})
 
 	t.Run("secondary text has a clear hierarchy", func(t *testing.T) {

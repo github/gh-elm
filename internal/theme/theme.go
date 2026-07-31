@@ -8,16 +8,14 @@ import (
 
 const (
 	colorButtonText  = lipgloss.Color("#ffffff")
-	colorYellow      = lipgloss.Color("3")
+	colorBlue        = lipgloss.Color("#4493f8")
+	colorGreen       = lipgloss.Color("#3fb950")
+	colorYellow      = lipgloss.Color("#f9f1a5")
 	colorBlack       = lipgloss.Color("0")
 	colorPlaceholder = lipgloss.Color("238")
 	colorMuted       = lipgloss.Color("242")
 	colorSecondary   = lipgloss.Color("245")
 
-	// githubGreen is GitHub's success green.
-	githubGreen = lipgloss.Color("#1a7f37")
-	// githubBlue is GitHub's interactive accent blue.
-	githubBlue = lipgloss.Color("#0969da")
 	// githubRed is GitHub's danger red.
 	githubRed = lipgloss.Color("#d1242f")
 	// githubPurple is GitHub's done purple.
@@ -65,12 +63,12 @@ func New() Styles {
 	return Styles{
 		Primary:     lipgloss.NewStyle(),
 		Bold:        lipgloss.NewStyle().Bold(true),
-		Info:        lipgloss.NewStyle().Foreground(githubBlue),
+		Info:        lipgloss.NewStyle().Foreground(colorBlue),
 		Secondary:   lipgloss.NewStyle().Foreground(colorSecondary),
 		Muted:       lipgloss.NewStyle().Foreground(colorMuted),
 		Placeholder: lipgloss.NewStyle().Foreground(colorPlaceholder),
-		Success:     lipgloss.NewStyle().Foreground(githubGreen),
-		Active:      lipgloss.NewStyle().Foreground(colorYellow),
+		Success:     lipgloss.NewStyle().Foreground(colorGreen),
+		Active:      lipgloss.NewStyle().Foreground(colorBlue),
 		Warning:     lipgloss.NewStyle().Foreground(colorYellow),
 		Paused:      lipgloss.NewStyle().Foreground(colorYellow),
 		Failure:     lipgloss.NewStyle().Foreground(githubRed),
@@ -84,25 +82,25 @@ func Form() *huh.Theme {
 
 	t.Focused.Base = t.Focused.Base.UnsetBorderForeground()
 	t.Focused.Card = t.Focused.Base
-	t.Focused.Title = t.Focused.Title.Foreground(githubBlue).Bold(true)
+	t.Focused.Title = t.Focused.Title.Foreground(colorBlue).Bold(true)
 	t.Focused.NoteTitle = s.Primary.Bold(true)
-	t.Focused.Directory = t.Focused.Directory.Foreground(githubBlue)
+	t.Focused.Directory = t.Focused.Directory.Foreground(colorBlue)
 	t.Focused.Description = s.Muted
 	t.Focused.ErrorIndicator = t.Focused.ErrorIndicator.Foreground(githubRed)
 	t.Focused.ErrorMessage = t.Focused.ErrorMessage.Foreground(githubRed)
-	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(githubBlue)
-	t.Focused.NextIndicator = t.Focused.NextIndicator.Foreground(githubBlue)
-	t.Focused.PrevIndicator = t.Focused.PrevIndicator.Foreground(githubBlue)
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(colorBlue)
+	t.Focused.NextIndicator = t.Focused.NextIndicator.Foreground(colorBlue)
+	t.Focused.PrevIndicator = t.Focused.PrevIndicator.Foreground(colorBlue)
 	t.Focused.Option = t.Focused.Option.UnsetForeground()
-	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(githubBlue)
-	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(githubBlue)
-	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(githubBlue)
+	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(colorBlue)
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(colorBlue)
+	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(colorBlue)
 	t.Focused.UnselectedOption = t.Focused.UnselectedOption.UnsetForeground()
-	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(colorButtonText).Background(githubBlue)
+	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(colorButtonText).Background(colorBlue)
 	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(colorMuted).Background(colorBlack)
-	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(githubBlue)
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(colorBlue)
 	t.Focused.TextInput.Placeholder = s.Placeholder
-	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(githubBlue)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(colorBlue)
 	t.Focused.TextInput.Text = t.Focused.TextInput.Text.UnsetForeground()
 
 	// huh derives blurred styles from the focused styles.
