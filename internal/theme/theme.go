@@ -8,12 +8,18 @@ import (
 
 const (
 	colorButtonText  = lipgloss.Color("#ffffff")
-	colorBlue        = lipgloss.Color("#4493f8")
-	colorGreen       = lipgloss.Color("#3fb950")
+	colorRed         = lipgloss.Color("1")
+	colorGreen       = lipgloss.Color("2")
+	colorYellow      = lipgloss.Color("3")
+	colorBlue        = lipgloss.Color("4")
 	colorPlaceholder = lipgloss.Color("238")
 	colorMuted       = lipgloss.Color("242")
 	colorSecondary   = lipgloss.Color("245")
 
+	// githubBlue is GitHub's accent blue.
+	githubBlue = lipgloss.Color("#4493f8")
+	// githubGreen is GitHub's success green.
+	githubGreen = lipgloss.Color("#3fb950")
 	// githubRed is GitHub's danger red.
 	githubRed = lipgloss.Color("#d1242f")
 	// githubPurple is GitHub's done purple.

@@ -23,12 +23,16 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
 	})
 
-	t.Run("Copilot CLI palette values are pinned", func(t *testing.T) {
-		assert.Equal(t, colorBlue, lipgloss.Color("#4493f8"))
-		assert.Equal(t, colorGreen, lipgloss.Color("#3fb950"))
+	t.Run("ANSI palette values are pinned", func(t *testing.T) {
+		assert.Equal(t, lipgloss.Color("1"), colorRed)
+		assert.Equal(t, lipgloss.Color("2"), colorGreen)
+		assert.Equal(t, lipgloss.Color("3"), colorYellow)
+		assert.Equal(t, lipgloss.Color("4"), colorBlue)
 	})
 
 	t.Run("GitHub palette values are pinned", func(t *testing.T) {
+		assert.Equal(t, githubBlue, lipgloss.Color("#4493f8"))
+		assert.Equal(t, githubGreen, lipgloss.Color("#3fb950"))
 		assert.Equal(t, githubRed, lipgloss.Color("#d1242f"))
 		assert.Equal(t, githubPurple, lipgloss.Color("#8250df"))
 		assert.Equal(t, githubTerracotta, lipgloss.Color("#bc4c00"))
@@ -79,7 +83,7 @@ func TestForm(t *testing.T) {
 		assert.Equal(t, s.Secondary.GetForeground(), f.Blurred.Title.GetForeground())
 	})
 
-	t.Run("focused controls use the Copilot CLI focus blue", func(t *testing.T) {
+	t.Run("focused controls use the terminal ANSI blue", func(t *testing.T) {
 		assert.Equal(t, colorBlue, f.Focused.SelectSelector.GetForeground())
 		assert.Equal(t, colorBlue, f.Focused.MultiSelectSelector.GetForeground())
 		assert.Equal(t, colorBlue, f.Focused.SelectedOption.GetForeground())
