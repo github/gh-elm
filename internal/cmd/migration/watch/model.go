@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/github/gh-elm/internal/elmapi"
+	"github.com/github/gh-elm/internal/theme"
 )
 
 // Model is the bubbletea model for the watch display.
@@ -13,7 +14,7 @@ type Model struct {
 	migrationID string
 	interval    time.Duration
 	client      *elmapi.Client
-	styles      Styles
+	styles      theme.Styles
 
 	// Current state
 	detail      *elmapi.MigrationDetail
@@ -33,7 +34,7 @@ func New(migrationID string, interval time.Duration, client *elmapi.Client) Mode
 		migrationID: migrationID,
 		interval:    interval,
 		client:      client,
-		styles:      DefaultStyles(),
+		styles:      theme.New(),
 	}
 }
 
