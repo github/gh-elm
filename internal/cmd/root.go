@@ -34,6 +34,7 @@ func NewRootCmd(version string) *cobra.Command {
 	rootCmd.SetVersionTemplate("gh elm {{.Version}}\n")
 
 	rootCmd.AddCommand(newConfigureCmd())
+	rootCmd.AddCommand(newKitchenSinkCmd())
 	rootCmd.AddCommand(migration.NewCommand())
 	rootCmd.AddCommand(target.NewCommand())
 

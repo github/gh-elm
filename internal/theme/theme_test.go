@@ -15,8 +15,8 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, lipgloss.NoColor{}, s.Primary.GetForeground())
 		assert.Equal(t, colorGreen, s.Success.GetForeground())
 		assert.Equal(t, colorBlue, s.Active.GetForeground())
-		assert.Equal(t, colorYellow, s.Warning.GetForeground())
-		assert.Equal(t, colorYellow, s.Paused.GetForeground())
+		assert.Equal(t, warningColor, s.Warning.GetForeground())
+		assert.Equal(t, warningColor, s.Paused.GetForeground())
 		assert.Equal(t, githubRed, s.Failure.GetForeground())
 		assert.Equal(t, colorBlue, s.Info.GetForeground())
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
@@ -26,7 +26,6 @@ func TestNew(t *testing.T) {
 	t.Run("Copilot CLI palette values are pinned", func(t *testing.T) {
 		assert.Equal(t, colorBlue, lipgloss.Color("#4493f8"))
 		assert.Equal(t, colorGreen, lipgloss.Color("#3fb950"))
-		assert.Equal(t, colorYellow, lipgloss.Color("#f9f1a5"))
 	})
 
 	t.Run("GitHub palette values are pinned", func(t *testing.T) {
@@ -35,6 +34,11 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, githubTerracotta, lipgloss.Color("#bc4c00"))
 		assert.Equal(t, githubBrown, lipgloss.Color("#9a6700"))
 		assert.Equal(t, githubStar, lipgloss.Color("#eac54f"))
+	})
+
+	t.Run("warnings adapt to terminal background", func(t *testing.T) {
+		assert.Equal(t, string(githubBrown), warningColor.Light)
+		assert.Equal(t, string(githubStar), warningColor.Dark)
 	})
 
 	t.Run("muted is gh's 242 grey", func(t *testing.T) {
@@ -46,14 +50,11 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, lipgloss.NoColor{}, s.Bold.GetForeground())
 	})
 
-	t.Run("no style uses an adaptive colour", func(t *testing.T) {
-		// The palette is deliberately flat: terminal palette indices already
-		// follow the user's own light or dark theme, and 242 stays legible on
-		// either, so adapting on top would fight the terminal.
+	t.Run("other styles use fixed colours", func(t *testing.T) {
 		for name, style := range map[string]lipgloss.Style{
 			"Info": s.Info, "Secondary": s.Secondary, "Muted": s.Muted,
 			"Placeholder": s.Placeholder, "Success": s.Success, "Active": s.Active,
-			"Warning": s.Warning, "Paused": s.Paused, "Failure": s.Failure,
+			"Failure": s.Failure,
 		} {
 			assert.IsType(t, lipgloss.Color(""), style.GetForeground(), name)
 		}
@@ -84,6 +85,9 @@ func TestForm(t *testing.T) {
 		assert.Equal(t, colorBlue, f.Focused.SelectedOption.GetForeground())
 		assert.Equal(t, colorBlue, f.Focused.SelectedPrefix.GetForeground())
 		assert.Equal(t, colorBlue, f.Focused.FocusedButton.GetBackground())
+		assert.Equal(t, colorButtonText, f.Focused.FocusedButton.GetForeground())
+		assert.Equal(t, buttonIdleBackground, f.Focused.BlurredButton.GetBackground())
+		assert.Equal(t, buttonIdleForeground, f.Focused.BlurredButton.GetForeground())
 		assert.Equal(t, colorBlue, f.Focused.TextInput.Cursor.GetForeground())
 		assert.Equal(t, colorBlue, f.Focused.TextInput.Prompt.GetForeground())
 	})

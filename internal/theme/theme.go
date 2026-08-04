@@ -10,8 +10,6 @@ const (
 	colorButtonText  = lipgloss.Color("#ffffff")
 	colorBlue        = lipgloss.Color("#4493f8")
 	colorGreen       = lipgloss.Color("#3fb950")
-	colorYellow      = lipgloss.Color("#f9f1a5")
-	colorBlack       = lipgloss.Color("0")
 	colorPlaceholder = lipgloss.Color("238")
 	colorMuted       = lipgloss.Color("242")
 	colorSecondary   = lipgloss.Color("245")
@@ -26,6 +24,22 @@ const (
 	githubBrown = lipgloss.Color("#9a6700")
 	// githubStar is GitHub's star yellow.
 	githubStar = lipgloss.Color("#eac54f")
+)
+
+var warningColor = lipgloss.AdaptiveColor{
+	Light: string(githubBrown),
+	Dark:  string(githubStar),
+}
+
+var (
+	buttonIdleBackground = lipgloss.AdaptiveColor{
+		Light: "#eaeef2",
+		Dark:  "#141b22",
+	}
+	buttonIdleForeground = lipgloss.AdaptiveColor{
+		Light: "#57606a",
+		Dark:  "#b1bac4",
+	}
 )
 
 // Styles is the set of semantic styles used across the extension.
@@ -51,8 +65,7 @@ type Styles struct {
 	Warning lipgloss.Style
 	// Paused marks work deliberately halted. It shares Warning's colour
 	// because both mean the migration is not progressing normally; the glyph
-	// at the call site is what separates it from Active, which is the same
-	// colour but the opposite state.
+	// at the call site distinguishes the two states.
 	Paused lipgloss.Style
 	// Failure marks a failed or blocking item.
 	Failure lipgloss.Style
@@ -69,8 +82,8 @@ func New() Styles {
 		Placeholder: lipgloss.NewStyle().Foreground(colorPlaceholder),
 		Success:     lipgloss.NewStyle().Foreground(colorGreen),
 		Active:      lipgloss.NewStyle().Foreground(colorBlue),
-		Warning:     lipgloss.NewStyle().Foreground(colorYellow),
-		Paused:      lipgloss.NewStyle().Foreground(colorYellow),
+		Warning:     lipgloss.NewStyle().Foreground(warningColor),
+		Paused:      lipgloss.NewStyle().Foreground(warningColor),
 		Failure:     lipgloss.NewStyle().Foreground(githubRed),
 	}
 }
@@ -97,7 +110,9 @@ func Form() *huh.Theme {
 	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(colorBlue)
 	t.Focused.UnselectedOption = t.Focused.UnselectedOption.UnsetForeground()
 	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(colorButtonText).Background(colorBlue)
-	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(colorMuted).Background(colorBlack)
+	t.Focused.BlurredButton = t.Focused.BlurredButton.
+		Foreground(buttonIdleForeground).
+		Background(buttonIdleBackground)
 	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(colorBlue)
 	t.Focused.TextInput.Placeholder = s.Placeholder
 	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(colorBlue)
