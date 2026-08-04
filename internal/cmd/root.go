@@ -14,10 +14,9 @@ import (
 // version is injected from main at build time and surfaced via `--version`.
 func NewRootCmd(version string) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "elm",
-		Short: "Manage Enterprise Live Migrations from your terminal",
-		Long: "gh elm is a gh CLI extension for driving Enterprise Live Migrations (ELM)\n" +
-			"against the GitHub Enterprise Server REST API.",
+		Use:     "elm",
+		Short:   "Manage Enterprise Live Migrations from your terminal",
+		Long:    "Drive Enterprise Live Migrations (ELM) against the GitHub Enterprise Server REST API.",
 		Version: version,
 		// The extension formats its own errors in main; keep cobra from
 		// double-printing usage and error text on a failed RunE.
@@ -30,6 +29,7 @@ func NewRootCmd(version string) *cobra.Command {
 	}
 
 	rootCmd.SetFlagErrorFunc(groupFlagErrorFunc)
+	rootCmd.SetHelpFunc(renderHelp)
 
 	rootCmd.SetVersionTemplate("gh elm {{.Version}}\n")
 
