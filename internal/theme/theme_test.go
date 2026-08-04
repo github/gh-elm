@@ -24,10 +24,10 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("ANSI palette values are pinned", func(t *testing.T) {
-		assert.Equal(t, lipgloss.Color("1"), colorRed)
-		assert.Equal(t, lipgloss.Color("2"), colorGreen)
-		assert.Equal(t, lipgloss.Color("3"), colorYellow)
-		assert.Equal(t, lipgloss.Color("4"), colorBlue)
+		assert.Equal(t, colorRed, lipgloss.Color("1"))
+		assert.Equal(t, colorGreen, lipgloss.Color("2"))
+		assert.Equal(t, colorYellow, lipgloss.Color("3"))
+		assert.Equal(t, colorBlue, lipgloss.Color("4"))
 	})
 
 	t.Run("GitHub palette values are pinned", func(t *testing.T) {
