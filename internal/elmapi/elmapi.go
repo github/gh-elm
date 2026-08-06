@@ -42,6 +42,20 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// Response contains a typed API response and the exact JSON document it was
+// decoded from. Raw lets machine-readable output preserve fields that the typed
+// response does not model.
+type Response[T any] struct {
+	Value T
+	Raw   json.RawMessage
+}
+
+// UnmarshalJSON retains the original response bytes while decoding Value.
+func (r *Response[T]) UnmarshalJSON(data []byte) error {
+	r.Raw = append(r.Raw[:0], data...)
+	return json.Unmarshal(data, &r.Value)
+}
+
 // Option customizes a Client.
 type Option func(*Client)
 

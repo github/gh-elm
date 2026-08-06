@@ -13,7 +13,7 @@ import (
 )
 
 func TestCreate(t *testing.T) {
-	t.Run("creates a migration and prints the response JSON", func(t *testing.T) {
+	t.Run("creates a migration and prints human-readable output", func(t *testing.T) {
 		var gotPath, gotMethod string
 		var gotBody elmapiCreateBody
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,25 @@ func TestCreate(t *testing.T) {
 		assert.Equal(t, "BOGON", gotBody.PATName)
 		assert.Equal(t, "web", gotBody.SourceRepositoryName)
 		assert.Equal(t, "internal", gotBody.TargetVisibility)
-		assert.Contains(t, out, `"migration_id": "mig-1"`, "output missing migration_id")
+		assert.Contains(t, out, "Migration created")
+		assert.Contains(t, out, "Migration ID")
+		assert.Contains(t, out, "mig-1")
+	})
+
+	t.Run("--json preserves the raw create response", func(t *testing.T) {
+		const respBody = `{"migration_id":"mig-1","expires_at":null,"future_field":"preserved"}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(respBody))
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		out := run(t, "create", "--source-org", "acme", "--source-repo", "web",
+			"--target-org", "acme-cloud", "--target-repo", "web", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
 	})
 
 	t.Run("create --start posts start and reports success", func(t *testing.T) {
@@ -76,6 +94,14 @@ func TestCreate(t *testing.T) {
 			"--watch", "--source-url", "https://x", "--source-token", "tok")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "--watch requires --start")
+	})
+
+	t.Run("--json cannot be combined with --watch", func(t *testing.T) {
+		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
+			"--target-org", "b", "--target-repo", "r",
+			"--start", "--watch", "--json", "--source-url", "https://x", "--source-token", "tok")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--json cannot be used with --watch")
 	})
 
 	t.Run("requires the core flags", func(t *testing.T) {
@@ -118,7 +144,7 @@ func TestStart(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
-	t.Run("prints the raw API JSON", func(t *testing.T) {
+	t.Run("prints human-readable status", func(t *testing.T) {
 		const respBody = `{"migration":{"migration_id":"mig-1","status":"in_progress"},"target_state":null,"combined_state":null,"messages":[]}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.True(t, strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1"), "path = %q", r.URL.Path)
@@ -129,12 +155,27 @@ func TestStatus(t *testing.T) {
 		out := run(t, "status", "--migration-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		for _, want := range []string{"Migration", "Migration ID", "mig-1", "In progress"} {
+			assert.Contains(t, out, want)
+		}
+	})
+
+	t.Run("--json preserves the raw status response", func(t *testing.T) {
+		const respBody = `{"migration":{"migration_id":"mig-1"},"future_field":{"value":1}}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(respBody))
+		}))
+		defer srv.Close()
+
+		out := run(t, "status", "--migration-id", "mig-1", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
 	})
 }
 
 func TestList(t *testing.T) {
-	t.Run("passes filters and prints raw JSON", func(t *testing.T) {
+	t.Run("passes filters and prints human-readable output", func(t *testing.T) {
 		var gotQuery string
 		const respBody = `{"migrations":[],"total_count":0}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +189,21 @@ func TestList(t *testing.T) {
 
 		assert.Contains(t, gotQuery, "status=in_progress")
 		assert.Contains(t, gotQuery, "page_size=25")
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.Contains(t, out, "No migrations found.")
+		assert.Contains(t, out, "Showing 0")
+	})
+
+	t.Run("--json preserves the raw list response", func(t *testing.T) {
+		const respBody = `{"migrations":[],"total_count":0,"future_field":"preserved"}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(respBody))
+		}))
+		defer srv.Close()
+
+		out := run(t, "list", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
 	})
 
 	t.Run("rejects an invalid status", func(t *testing.T) {
@@ -172,7 +227,7 @@ func TestActions(t *testing.T) {
 		{"cutover", []string{"cutover-to-destination", "--migration-id", "m"}, "/enterprise/live-migrations/m/cutover", http.StatusNoContent, "", "Cutover initiated"},
 		{"pause", []string{"pause", "--migration-id", "m"}, "/enterprise/live-migrations/m/pause", http.StatusNoContent, "", "paused"},
 		{"resume", []string{"resume", "--migration-id", "m"}, "/enterprise/live-migrations/m/resume", http.StatusNoContent, "", "resumed"},
-		{"revert-cutover", []string{"revert-cutover", "--migration-id", "m"}, "/enterprise/live-migrations/m/revert-cutover", http.StatusOK, `{"success":true,"unarchived_source_repository":true,"in_progress_cutover_terminated":false,"in_progress_migration_terminated":false}`, `"success": true`},
+		{"revert-cutover", []string{"revert-cutover", "--migration-id", "m"}, "/enterprise/live-migrations/m/revert-cutover", http.StatusOK, `{"success":true,"unarchived_source_repository":true,"in_progress_cutover_terminated":false,"in_progress_migration_terminated":false}`, "Cutover reverted"},
 	}
 
 	for _, tc := range cases {
@@ -198,6 +253,21 @@ func TestActions(t *testing.T) {
 			assert.Contains(t, out, tc.wantOut)
 		})
 	}
+}
+
+func TestRevertCutoverJSON(t *testing.T) {
+	t.Run("preserves the raw response", func(t *testing.T) {
+		const respBody = `{"success":true,"unarchived_source_repository":true,"future_field":"preserved"}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(respBody))
+		}))
+		defer srv.Close()
+
+		out := run(t, "revert-cutover", "--migration-id", "m", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+	})
 }
 
 func TestCutover(t *testing.T) {

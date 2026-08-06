@@ -35,6 +35,8 @@ gh elm configure --reset # remove stored config and credentials
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
   migration's destination (GHEC) migration ID for use with the `gh elm target *` commands.
+  Create, status, list, and revert-cutover output is human-readable by default; add
+  `--json` for the raw API response.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -45,6 +47,27 @@ gh elm configure --reset # remove stored config and credentials
 Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
+
+Migration responses are rendered for people by default:
+
+```sh
+# Create a migration and show its ID and expiry
+gh elm migration create \
+  --source-org source-org --source-repo repo \
+  --target-org target-org --target-repo repo
+
+# Show formatted status details or list migrations
+gh elm migration status --migration-id <uuid>
+gh elm migration list --status all
+
+# Preserve the raw API response for scripts and jq
+gh elm migration status --migration-id <uuid> --json | jq .combined_state.status
+gh elm migration list --status all --json | jq '.migrations[]'
+
+# Revert cutover with human-readable results, or inspect the raw response
+gh elm migration revert-cutover --migration-id <uuid>
+gh elm migration revert-cutover --migration-id <uuid> --json | jq .success
+```
 
 Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`
 (human-readable by default; add `--json` for a machine-readable object). The numeric target

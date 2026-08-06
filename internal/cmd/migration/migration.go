@@ -16,6 +16,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/render"
 )
 
 // NewCommand builds the `gh elm migration` command group. Subcommands mirror the
@@ -108,6 +109,7 @@ func newCreateCmd() *cobra.Command {
 		targetVisibility string
 		start            bool
 		watch            bool
+		asJSON           bool
 	)
 
 	cmd := &cobra.Command{
@@ -124,6 +126,9 @@ func newCreateCmd() *cobra.Command {
 			}
 			if watch && !start {
 				return errors.New("--watch requires --start: a migration must be started before it can be watched")
+			}
+			if watch && asJSON {
+				return errors.New("--json cannot be used with --watch")
 			}
 
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
@@ -165,18 +170,25 @@ func newCreateCmd() *cobra.Command {
 			}
 
 			if !start {
-				return writeJSON(cmd.OutOrStdout(), resp)
+				if asJSON {
+					return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
+				}
+				return render.Write(cmd.OutOrStdout(), render.MigrationCreate(resp.Value))
 			}
 
-			if err := client.StartMigration(cmd.Context(), resp.MigrationID); err != nil {
-				return fmt.Errorf("migration %s created but failed to start: %w", resp.MigrationID, annotateAuthError(err, srcURL))
+			if err := client.StartMigration(cmd.Context(), resp.Value.MigrationID); err != nil {
+				return fmt.Errorf("migration %s created but failed to start: %w", resp.Value.MigrationID, annotateAuthError(err, srcURL))
 			}
 
 			if watch {
-				return runWatch(cmd, client, srcURL, resp.MigrationID)
+				return runWatch(cmd, client, srcURL, resp.Value.MigrationID)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s created and started.\n", resp.MigrationID)
+			if asJSON {
+				return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s created and started.\n", resp.Value.MigrationID)
 			return nil
 		},
 	}
@@ -188,6 +200,7 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetVisibility, "target-visibility", "internal", "Target repository visibility (private or internal).")
 	cmd.Flags().BoolVar(&start, "start", false, "Automatically start the migration after creating it.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After creating and starting, enter live watch mode (requires --start).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 	for _, f := range []string{"source-org", "source-repo", "target-org", "target-repo"} {
 		_ = cmd.MarkFlagRequired(f)
@@ -234,13 +247,16 @@ func newStartCmd() *cobra.Command {
 
 // newStatusCmd builds `gh elm migration status`.
 func newStatusCmd() *cobra.Command {
-	var migrationID string
+	var (
+		migrationID string
+		asJSON      bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Get the status and details of a migration",
 		Long: "Retrieve combined status, progress, cutover readiness, expiration, and timing\n" +
-			"for a migration. Prints the API's raw JSON response.",
+			"for a migration. Human-readable by default; add --json for the raw API response.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
@@ -251,11 +267,19 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, srcURL)
 			}
-			return writeRaw(cmd.OutOrStdout(), raw)
+			if asJSON {
+				return render.WriteRawJSON(cmd.OutOrStdout(), raw)
+			}
+			var detail elmapi.MigrationDetail
+			if err := json.Unmarshal(raw, &detail); err != nil {
+				return fmt.Errorf("decoding migration status: %w", err)
+			}
+			return render.Write(cmd.OutOrStdout(), render.MigrationStatus(detail))
 		},
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (required).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -308,6 +332,7 @@ func newListCmd() *cobra.Command {
 		status   string
 		pageSize int
 		after    string
+		asJSON   bool
 	)
 
 	cmd := &cobra.Command{
@@ -315,8 +340,8 @@ func newListCmd() *cobra.Command {
 		Short: "List migrations (defaults to in-progress only)",
 		Long: "List migrations, with optional filtering by status and cursor-based pagination.\n" +
 			"Use --status to filter (created, queued, in_progress, paused, completed, failed,\n" +
-			"terminated) or --status=all to list migrations in every state. Prints the API's\n" +
-			"raw JSON response.",
+			"terminated) or --status=all to list migrations in every state. Human-readable by\n" +
+			"default; add --json for the raw API response.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if status != "" {
@@ -328,7 +353,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			raw, err := client.ListMigrations(cmd.Context(), elmapi.ListMigrationsOptions{
+			resp, err := client.ListMigrations(cmd.Context(), elmapi.ListMigrationsOptions{
 				Status:   status,
 				PageSize: pageSize,
 				After:    after,
@@ -336,13 +361,17 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, srcURL)
 			}
-			return writeRaw(cmd.OutOrStdout(), raw)
+			if asJSON {
+				return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
+			}
+			return render.Write(cmd.OutOrStdout(), render.MigrationList(resp.Value))
 		},
 	}
 
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (all, created, queued, in_progress, paused, completed, failed, terminated). Defaults to in_progress.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 0, "Number of migrations per page (1-100).")
 	cmd.Flags().StringVar(&after, "after", "", "Cursor for pagination (from next_cursor in a previous response).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
@@ -453,14 +482,17 @@ func newCutoverStatusCmd() *cobra.Command {
 
 // newRevertCutoverCmd builds `gh elm migration revert-cutover`.
 func newRevertCutoverCmd() *cobra.Command {
-	var migrationID string
+	var (
+		migrationID string
+		asJSON      bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "revert-cutover",
 		Short: "Revert the effects of a cutover so the source repository can be migrated again",
 		Long: "Revert the effects of a cutover, unarchiving the source repository and\n" +
 			"terminating any cutover or migration still in progress so the source repository\n" +
-			"can be migrated again. Prints the API's raw JSON response.",
+			"can be migrated again. Human-readable by default; add --json for the raw API response.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
@@ -471,11 +503,15 @@ func newRevertCutoverCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, srcURL)
 			}
-			return writeJSON(cmd.OutOrStdout(), resp)
+			if asJSON {
+				return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
+			}
+			return render.Write(cmd.OutOrStdout(), render.MigrationRevertCutover(resp.Value))
 		},
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to revert cutover for (required).")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 	_ = cmd.MarkFlagRequired("migration-id")
 
@@ -577,18 +613,6 @@ func validateStatus(s string) error {
 	default:
 		return fmt.Errorf("invalid --status %q: must be one of all, created, queued, in_progress, paused, completed, failed, terminated", s)
 	}
-}
-
-// writeRaw echoes the API's raw JSON response verbatim, followed by a newline.
-func writeRaw(w io.Writer, raw json.RawMessage) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	if _, err := w.Write(raw); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintln(w)
-	return err
 }
 
 // writeJSON marshals v as indented JSON followed by a newline.

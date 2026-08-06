@@ -57,8 +57,8 @@ type CreateMigrationResponse struct {
 
 // CreateMigration creates a new (unstarted) live migration.
 // POST /enterprise/live-migrations.
-func (c *Client) CreateMigration(ctx context.Context, req CreateMigrationRequest) (*CreateMigrationResponse, error) {
-	var resp CreateMigrationResponse
+func (c *Client) CreateMigration(ctx context.Context, req CreateMigrationRequest) (*Response[CreateMigrationResponse], error) {
+	var resp Response[CreateMigrationResponse]
 	if err := c.post(ctx, migrationsBasePath, req, &resp, http.StatusCreated); err != nil {
 		return nil, fmt.Errorf("creating migration: %w", err)
 	}
@@ -93,9 +93,16 @@ type ListMigrationsOptions struct {
 	After    string
 }
 
-// ListMigrations returns the API's raw JSON list document.
+// ListMigrationsResponse is the typed view of a migration list response.
+type ListMigrationsResponse struct {
+	Migrations []MigrationSummary `json:"migrations"`
+	TotalCount int64              `json:"total_count"`
+	NextCursor string             `json:"next_cursor"`
+}
+
+// ListMigrations returns a typed migration list and its raw JSON document.
 // GET /enterprise/live-migrations.
-func (c *Client) ListMigrations(ctx context.Context, opts ListMigrationsOptions) (json.RawMessage, error) {
+func (c *Client) ListMigrations(ctx context.Context, opts ListMigrationsOptions) (*Response[ListMigrationsResponse], error) {
 	q := url.Values{}
 	if opts.Status != "" {
 		q.Set("status", opts.Status)
@@ -107,11 +114,11 @@ func (c *Client) ListMigrations(ctx context.Context, opts ListMigrationsOptions)
 		q.Set("after", opts.After)
 	}
 
-	var raw json.RawMessage
-	if err := c.get(ctx, migrationsBasePath, q, &raw); err != nil {
+	var resp Response[ListMigrationsResponse]
+	if err := c.get(ctx, migrationsBasePath, q, &resp); err != nil {
 		return nil, fmt.Errorf("listing migrations: %w", err)
 	}
-	return raw, nil
+	return &resp, nil
 }
 
 // CancelMigration terminates a migration. This is a terminal action.
@@ -149,8 +156,8 @@ type RevertCutoverResponse struct {
 
 // RevertCutover reverts the effects of a cutover so the source repository can be
 // migrated again. POST /enterprise/live-migrations/{id}/revert-cutover.
-func (c *Client) RevertCutover(ctx context.Context, migrationID string) (*RevertCutoverResponse, error) {
-	var resp RevertCutoverResponse
+func (c *Client) RevertCutover(ctx context.Context, migrationID string) (*Response[RevertCutoverResponse], error) {
+	var resp Response[RevertCutoverResponse]
 	if err := c.post(ctx, c.migrationPath(migrationID, "revert-cutover"), nil, &resp, http.StatusOK); err != nil {
 		return nil, fmt.Errorf("reverting cutover: %w", err)
 	}
