@@ -18,10 +18,10 @@ import (
 
 const elmUnavailableMessage = "it seems like ELM is not enabled in any of your organizations or your version of GHES does not support ELM"
 
-// annotateSourceError turns authentication failures and an unavailable ELM API
-// into actionable messages. A 404 for an individual migration can be valid, so
-// the collection endpoint is probed before concluding that ELM is unavailable.
-func annotateSourceError(ctx context.Context, client *elmapi.Client, err error, sourceURL string) error {
+// annotateSourceAPIError turns authentication failures and an unavailable ELM
+// API into actionable messages. A 404 for an individual migration can be valid,
+// so the collection endpoint is probed before concluding that ELM is unavailable.
+func annotateSourceAPIError(ctx context.Context, client *elmapi.Client, err error, sourceURL string) error {
 	var httpErr *elmapi.HTTPError
 	if !errors.As(err, &httpErr) {
 		return err
