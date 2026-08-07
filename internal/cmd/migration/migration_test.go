@@ -237,17 +237,65 @@ func TestCutoverStatus(t *testing.T) {
 	})
 }
 
-func TestAuthErrorAnnotation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
-	}))
-	defer srv.Close()
+func TestSourceErrorAnnotation(t *testing.T) {
+	t.Run("annotates an authentication failure", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		}))
+		defer srv.Close()
 
-	err := runErr(t, "status", "--migration-id", "m",
-		"--source-url", srv.URL, "--source-token", "tok")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "authentication failed")
+		err := runErr(t, "status", "--migration-id", "m",
+			"--source-url", srv.URL, "--source-token", "tok")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "authentication failed")
+	})
+
+	t.Run("explains unavailable ELM when authentication succeeds", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/user") {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := runErr(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+		require.EqualError(t, err, elmUnavailableMessage)
+	})
+
+	t.Run("reports failed authentication behind an ELM 404", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/user") {
+				http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := runErr(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "authentication failed")
+	})
+
+	t.Run("preserves a missing migration error when ELM is available", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations") {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0,"next_cursor":""}`))
+				return
+			}
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := runErr(t, "status", "--migration-id", "does-not-exist",
+			"--source-url", srv.URL, "--source-token", "tok")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "404")
+		assert.NotContains(t, err.Error(), elmUnavailableMessage)
+	})
 }
 
 func TestLookupTargetID(t *testing.T) {

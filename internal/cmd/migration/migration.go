@@ -161,7 +161,7 @@ func newCreateCmd() *cobra.Command {
 
 			resp, err := client.CreateMigration(cmd.Context(), req)
 			if err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 
 			if !start {
@@ -169,7 +169,7 @@ func newCreateCmd() *cobra.Command {
 			}
 
 			if err := client.StartMigration(cmd.Context(), resp.MigrationID); err != nil {
-				return fmt.Errorf("migration %s created but failed to start: %w", resp.MigrationID, annotateAuthError(err, srcURL))
+				return fmt.Errorf("migration %s created but failed to start: %w", resp.MigrationID, annotateSourceError(cmd.Context(), client, err, srcURL))
 			}
 
 			if watch {
@@ -214,7 +214,7 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 			if err := client.StartMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			if watch {
 				return runWatch(cmd, client, srcURL, migrationID)
@@ -249,7 +249,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			raw, err := client.GetMigration(cmd.Context(), migrationID)
 			if err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			return writeRaw(cmd.OutOrStdout(), raw)
 		},
@@ -285,7 +285,7 @@ func newLookupTargetIDCmd() *cobra.Command {
 			}
 			detail, err := client.GetMigrationDetail(cmd.Context(), migrationID)
 			if err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			if detail.Migration == nil {
 				return fmt.Errorf("migration %s returned no migration record", migrationID)
@@ -334,7 +334,7 @@ func newListCmd() *cobra.Command {
 				After:    after,
 			})
 			if err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			return writeRaw(cmd.OutOrStdout(), raw)
 		},
@@ -364,7 +364,7 @@ func newCancelCmd() *cobra.Command {
 				return err
 			}
 			if err := client.CancelMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s cancelled.\n", migrationID)
 			return nil
@@ -399,7 +399,7 @@ func newCutoverCmd() *cobra.Command {
 				return err
 			}
 			if err := client.Cutover(cmd.Context(), migrationID, force); err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			if watch {
 				return runWatch(cmd, client, srcURL, migrationID)
@@ -438,7 +438,7 @@ func newCutoverStatusCmd() *cobra.Command {
 			}
 			detail, err := client.GetMigrationDetail(cmd.Context(), migrationID)
 			if err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			return writeCutoverStatus(cmd.OutOrStdout(), detail)
 		},
@@ -469,7 +469,7 @@ func newRevertCutoverCmd() *cobra.Command {
 			}
 			resp, err := client.RevertCutover(cmd.Context(), migrationID)
 			if err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			return writeJSON(cmd.OutOrStdout(), resp)
 		},
@@ -499,7 +499,7 @@ func newPauseCmd() *cobra.Command {
 				return err
 			}
 			if err := client.PauseMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s paused.\n", migrationID)
 			return nil
@@ -528,7 +528,7 @@ func newResumeCmd() *cobra.Command {
 				return err
 			}
 			if err := client.ResumeMigration(cmd.Context(), migrationID); err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceError(cmd.Context(), client, err, srcURL)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s resumed.\n", migrationID)
 			return nil

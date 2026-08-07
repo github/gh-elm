@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,17 +16,58 @@ import (
 	"github.com/github/gh-elm/internal/elmapi"
 )
 
-// annotateAuthError turns a 401/403 from the source API into an actionable
-// message. Auth failures are commonly caused by a stale GH_SOURCE_HOST or
-// GH_SOURCE_TOKEN overriding the configured values, so we call that out.
-func annotateAuthError(err error, sourceURL string) error {
+const elmUnavailableMessage = "it seems like ELM is not enabled in any of your organizations or your version of GHES does not support ELM"
+
+// annotateSourceError turns authentication failures and an unavailable ELM API
+// into actionable messages. A 404 for an individual migration can be valid, so
+// the collection endpoint is probed before concluding that ELM is unavailable.
+func annotateSourceError(ctx context.Context, client *elmapi.Client, err error, sourceURL string) error {
 	var httpErr *elmapi.HTTPError
-	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
-		return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s; "+
-			"check the source token with `gh elm configure --show`. Note the %s and %s environment variables override stored config",
-			httpErr.StatusCode, sourceURL, httpErr.Message, config.EnvSourceURL, config.EnvSourceToken)
+	if !errors.As(err, &httpErr) {
+		return err
+	}
+	if isAuthenticationError(httpErr) {
+		return authenticationError(httpErr, sourceURL)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		return err
+	}
+
+	_, probeErr := client.ListMigrations(ctx, elmapi.ListMigrationsOptions{PageSize: 1})
+	if probeErr == nil {
+		return err
+	}
+
+	var probeHTTPError *elmapi.HTTPError
+	if !errors.As(probeErr, &probeHTTPError) {
+		return err
+	}
+	if isAuthenticationError(probeHTTPError) {
+		return authenticationError(probeHTTPError, sourceURL)
+	}
+	if probeHTTPError.StatusCode != http.StatusNotFound {
+		return err
+	}
+
+	authErr := client.CheckAuthentication(ctx)
+	if authErr == nil {
+		return errors.New(elmUnavailableMessage)
+	}
+	var authHTTPError *elmapi.HTTPError
+	if errors.As(authErr, &authHTTPError) && isAuthenticationError(authHTTPError) {
+		return authenticationError(authHTTPError, sourceURL)
 	}
 	return err
+}
+
+func isAuthenticationError(err *elmapi.HTTPError) bool {
+	return err.StatusCode == http.StatusUnauthorized || err.StatusCode == http.StatusForbidden
+}
+
+func authenticationError(err *elmapi.HTTPError, sourceURL string) error {
+	return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s; "+
+		"check the source token with `gh elm configure --show`. Note the %s and %s environment variables override stored config",
+		err.StatusCode, sourceURL, err.Message, config.EnvSourceURL, config.EnvSourceToken)
 }
 
 // writeCutoverStatus renders the cutover-readiness view derived from a

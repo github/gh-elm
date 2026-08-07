@@ -73,6 +73,15 @@ func NewClient(baseURL, token string, opts ...Option) *Client {
 	return c
 }
 
+// CheckAuthentication verifies that the configured token can access the
+// authenticated-user endpoint.
+func (c *Client) CheckAuthentication(ctx context.Context) error {
+	if err := c.get(ctx, "/user", nil, nil); err != nil {
+		return fmt.Errorf("checking authentication: %w", err)
+	}
+	return nil
+}
+
 // HTTPError is returned when the API responds with a non-2xx status.
 type HTTPError struct {
 	StatusCode int
