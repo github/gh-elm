@@ -19,7 +19,7 @@ func MigrationCreate(v elmapi.CreateMigrationResponse) string {
 		bullet(styles.Success.Render("✓"), styles.Success.Bold(true).Render("Migration created")),
 		renderSection("Details",
 			field("Migration ID", styles.Bold.Render(valueOrEmpty(v.MigrationID))),
-			field("Expires", pointerValue(v.ExpiresAt)),
+			field("Expires", boldPointerValue(v.ExpiresAt)),
 		),
 	)
 }
@@ -56,14 +56,14 @@ func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
 		field("Migration ID", styles.Bold.Render(valueOrEmpty(migration.MigrationID))),
 	}
 	if migration.TargetMigrationID != 0 {
-		lines = append(lines, field("Target migration ID", strconv.FormatInt(migration.TargetMigrationID, 10)))
+		lines = append(lines, field("Target migration ID", styles.Bold.Render(strconv.FormatInt(migration.TargetMigrationID, 10))))
 	}
 	lines = append(lines,
 		field("Visibility", pointerValue(migration.TargetVisibility)),
 		field("Created", pointerValue(migration.CreatedAt)),
 		field("Started", pointerValue(migration.StartedAt)),
-		field("Completed", pointerValue(migration.CompletedAt)),
-		field("Expires", pointerValue(migration.ExpiresAt)),
+		field("Completed", completedValue(migration.CompletedAt)),
+		field("Expires", boldPointerValue(migration.ExpiresAt)),
 	)
 
 	return renderSection(title, lines...)
@@ -133,7 +133,7 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 			repositoryLines = append(repositoryLines, bullet(
 				styles.Muted.Render("•"),
 				styles.Bold.Render(valueOrEmpty(repository.RepositoryNWO))+
-					styles.Muted.Render(" · "+phase+" · ")+status,
+					styles.Muted.Render(" · "+phase+" · "+status),
 			))
 		}
 		sections = append(sections, renderSection("Repository states", repositoryLines...))
@@ -190,7 +190,7 @@ func MigrationList(v elmapi.ListMigrationsResponse) string {
 		card := []string{
 			bullet(statusGlyph(pointerString(migration.Status)), statusText(pointerString(migration.Status))+
 				"  "+styles.Bold.Render(source+" → "+target)),
-			field("Migration ID", styles.Muted.Render(valueOrEmpty(migration.MigrationID))),
+			field("Migration ID", valueOrEmpty(migration.MigrationID)),
 		}
 		if migration.TargetMigrationID != 0 {
 			card = append(card, field("Target migration ID", strconv.FormatInt(migration.TargetMigrationID, 10)))
@@ -199,8 +199,8 @@ func MigrationList(v elmapi.ListMigrationsResponse) string {
 			field("Visibility", pointerValue(migration.TargetVisibility)),
 			field("Created", pointerValue(migration.CreatedAt)),
 			field("Started", pointerValue(migration.StartedAt)),
-			field("Completed", pointerValue(migration.CompletedAt)),
-			field("Expires", pointerValue(migration.ExpiresAt)),
+			field("Completed", completedValue(migration.CompletedAt)),
+			field("Expires", boldPointerValue(migration.ExpiresAt)),
 		)
 		cards = append(cards, strings.Join(card, "\n"))
 	}
@@ -363,7 +363,27 @@ func pointerString(value *string) string {
 }
 
 func pointerValue(value *string) string {
-	return valueOrEmpty(pointerString(value))
+	styles := theme.New()
+	if value == nil || *value == "" {
+		return styles.Muted.Render(emptyValue)
+	}
+	return *value
+}
+
+func boldPointerValue(value *string) string {
+	styles := theme.New()
+	if value == nil || *value == "" {
+		return styles.Muted.Render(emptyValue)
+	}
+	return styles.Bold.Render(*value)
+}
+
+func completedValue(value *string) string {
+	styles := theme.New()
+	if value == nil || *value == "" {
+		return styles.Muted.Render(emptyValue)
+	}
+	return styles.Success.Render(*value)
 }
 
 func valueOrEmpty(value string) string {

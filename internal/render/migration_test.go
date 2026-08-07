@@ -5,10 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/github/gh-elm/internal/elmapi"
+	"github.com/github/gh-elm/internal/theme"
 )
 
 type failWriter struct{}
@@ -103,6 +106,24 @@ func TestStatusPresentation(t *testing.T) {
 
 	t.Run("renders degraded as an attention state", func(t *testing.T) {
 		assert.Contains(t, statusGlyph("degraded"), "Ⅱ")
+	})
+
+	t.Run("uses semantic ANSI colors when color is enabled", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		styles := theme.New()
+		fieldOutput := field("Migration ID", "mig-1")
+		assert.Contains(t, fieldOutput, styles.Muted.Render("Migration ID        "))
+		assert.Contains(t, fieldOutput, styles.Muted.Render("Migration ID        ")+"mig-1")
+		assert.NotContains(t, fieldOutput, styles.Muted.Render("mig-1"))
+		assert.Contains(t, positiveState(true, "complete", "pending").glyph, styles.Success.Render("✓"))
+		assert.Contains(t, failureState(false, "available", "unavailable").glyph, styles.Failure.Render("✗"))
+		assert.Equal(t, styles.Success.Bold(true).Render("Completed"), statusText("completed"))
+		assert.Equal(t, styles.Failure.Bold(true).Render("Failed"), statusText("failed"))
 	})
 }
 
