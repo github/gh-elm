@@ -265,6 +265,51 @@ func TestSourceErrorAnnotation(t *testing.T) {
 		require.EqualError(t, err, elmUnavailableMessage)
 	})
 
+	t.Run("explains when the source GHES version is too old", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/user") {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.Header().Set("X-GitHub-Enterprise-Version", "3.18.10")
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := runErr(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+		require.EqualError(t, err, "source GHES version 3.18.10 does not support ELM; upgrade to GHES 3.18.11 or later")
+	})
+
+	t.Run("keeps the generic error for a sufficient source GHES version", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/user") {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.Header().Set("X-GitHub-Enterprise-Version", "3.18.11")
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := runErr(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+		require.EqualError(t, err, elmUnavailableMessage)
+	})
+
+	t.Run("keeps the generic error for an unrecognized source version", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/user") {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.Header().Set("X-GitHub-Enterprise-Version", "unknown")
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := runErr(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+		require.EqualError(t, err, elmUnavailableMessage)
+	})
+
 	t.Run("reports failed authentication behind an ELM 404", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasSuffix(r.URL.Path, "/user") {
@@ -295,6 +340,50 @@ func TestSourceErrorAnnotation(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "404")
 		assert.NotContains(t, err.Error(), elmUnavailableMessage)
+	})
+}
+
+func TestMinimumELMVersion(t *testing.T) {
+	t.Run("rejects a release before ELM support", func(t *testing.T) {
+		minimum, unsupported := minimumELMVersion("3.16.9")
+		assert.True(t, unsupported)
+		assert.Equal(t, "3.17.17", minimum)
+	})
+
+	t.Run("enforces each documented release floor", func(t *testing.T) {
+		for below, floor := range map[string]string{
+			"3.17.16": "3.17.17",
+			"3.18.10": "3.18.11",
+			"3.19.7":  "3.19.8",
+			"3.20.3":  "3.20.4",
+			"3.21.1":  "3.21.2",
+		} {
+			minimum, unsupported := minimumELMVersion(below)
+			assert.True(t, unsupported, "version %s", below)
+			assert.Equal(t, floor, minimum, "version %s", below)
+
+			minimum, unsupported = minimumELMVersion(floor)
+			assert.False(t, unsupported, "version %s", floor)
+			assert.Empty(t, minimum, "version %s", floor)
+		}
+	})
+
+	t.Run("accepts a newer release line", func(t *testing.T) {
+		minimum, unsupported := minimumELMVersion("3.22.0")
+		assert.False(t, unsupported)
+		assert.Empty(t, minimum)
+	})
+
+	t.Run("accepts a version suffix", func(t *testing.T) {
+		minimum, unsupported := minimumELMVersion("3.19.7-rc1")
+		assert.True(t, unsupported)
+		assert.Equal(t, "3.19.8", minimum)
+	})
+
+	t.Run("leaves a malformed version inconclusive", func(t *testing.T) {
+		minimum, unsupported := minimumELMVersion("not-a-version")
+		assert.False(t, unsupported)
+		assert.Empty(t, minimum)
 	})
 }
 

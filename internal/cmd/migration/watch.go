@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +19,14 @@ import (
 )
 
 const elmUnavailableMessage = "it seems like ELM is not enabled in any of your organizations or your version of GHES does not support ELM"
+
+var minimumELMPatches = map[int]int{
+	17: 17,
+	18: 11,
+	19: 8,
+	20: 4,
+	21: 2,
+}
 
 // annotateSourceAPIError turns authentication failures and an unavailable ELM
 // API into actionable messages. A 404 for an individual migration can be valid,
@@ -51,6 +61,13 @@ func annotateSourceAPIError(ctx context.Context, client *elmapi.Client, err erro
 
 	authErr := client.CheckAuthentication(ctx)
 	if authErr == nil {
+		version := httpErr.EnterpriseVersion
+		if version == "" {
+			version = probeHTTPError.EnterpriseVersion
+		}
+		if minimumVersion, unsupported := minimumELMVersion(version); unsupported {
+			return fmt.Errorf("source GHES version %s does not support ELM; upgrade to GHES %s or later", version, minimumVersion)
+		}
 		return errors.New(elmUnavailableMessage)
 	}
 	var authHTTPError *elmapi.HTTPError
@@ -58,6 +75,53 @@ func annotateSourceAPIError(ctx context.Context, client *elmapi.Client, err erro
 		return authenticationError(authHTTPError, sourceURL)
 	}
 	return err
+}
+
+// minimumELMVersion returns the upgrade floor when version is conclusively too
+// old for ELM. Unknown versions are left to the generic availability error.
+func minimumELMVersion(version string) (string, bool) {
+	major, minor, patch, ok := parseGHESVersion(version)
+	if !ok {
+		return "", false
+	}
+
+	if major < 3 || (major == 3 && minor < 17) {
+		return "3.17.17", true
+	}
+	if major > 3 || minor > 21 {
+		return "", false
+	}
+
+	minimumPatch, knownRelease := minimumELMPatches[minor]
+	if !knownRelease || patch >= minimumPatch {
+		return "", false
+	}
+	return fmt.Sprintf("%d.%d.%d", major, minor, minimumPatch), true
+}
+
+func parseGHESVersion(version string) (major, minor, patch int, ok bool) {
+	version = strings.TrimSpace(version)
+	if base, _, found := strings.Cut(version, "-"); found {
+		version = base
+	}
+	if base, _, found := strings.Cut(version, "+"); found {
+		version = base
+	}
+
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, false
+	}
+
+	values := []*int{&major, &minor, &patch}
+	for i, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return 0, 0, 0, false
+		}
+		*values[i] = value
+	}
+	return major, minor, patch, true
 }
 
 func isAuthenticationError(err *elmapi.HTTPError) bool {

@@ -23,9 +23,10 @@ import (
 const (
 	defaultTimeout = 30 * time.Second
 
-	acceptHeader     = "application/vnd.github+json"
-	apiVersionHeader = "X-GitHub-Api-Version"
-	apiVersion       = "2022-11-28"
+	acceptHeader            = "application/vnd.github+json"
+	apiVersionHeader        = "X-GitHub-Api-Version"
+	apiVersion              = "2022-11-28"
+	enterpriseVersionHeader = "X-GitHub-Enterprise-Version"
 
 	// maxErrorBody bounds how much of an error response body we surface.
 	maxErrorBody = 500
@@ -84,9 +85,10 @@ func (c *Client) CheckAuthentication(ctx context.Context) error {
 
 // HTTPError is returned when the API responds with a non-2xx status.
 type HTTPError struct {
-	StatusCode int
-	Status     string
-	Message    string
+	StatusCode        int
+	Status            string
+	Message           string
+	EnterpriseVersion string
 }
 
 func (e *HTTPError) Error() string {
@@ -153,9 +155,10 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 
 	if resp.StatusCode != wantStatus {
 		return &HTTPError{
-			StatusCode: resp.StatusCode,
-			Status:     resp.Status,
-			Message:    truncate(strings.TrimSpace(string(respBody)), maxErrorBody),
+			StatusCode:        resp.StatusCode,
+			Status:            resp.Status,
+			Message:           truncate(strings.TrimSpace(string(respBody)), maxErrorBody),
+			EnterpriseVersion: resp.Header.Get(enterpriseVersionHeader),
 		}
 	}
 
