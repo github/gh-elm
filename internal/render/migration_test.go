@@ -89,11 +89,35 @@ func TestMigrationList(t *testing.T) {
 		assert.NotContains(t, output, "╭")
 	})
 
-	t.Run("renders empty results and pagination", func(t *testing.T) {
+	t.Run("renders an empty state for no migrations", func(t *testing.T) {
 		output := MigrationList(elmapi.ListMigrationsResponse{})
 
-		assert.Contains(t, output, "No migrations found.")
-		assert.Contains(t, output, "Showing 0")
+		assert.Equal(t, "Migrations\n  No migrations available.\n  Create one with `gh elm migration create --help`.\n\n", output)
+	})
+
+	t.Run("renders an empty state when total count is zero", func(t *testing.T) {
+		output := MigrationList(elmapi.ListMigrationsResponse{
+			Migrations: []elmapi.MigrationSummary{{MigrationID: "mig-1"}},
+			TotalCount: 0,
+		})
+
+		assert.Contains(t, output, "No migrations available.")
+		assert.NotContains(t, output, "mig-1")
+	})
+
+	t.Run("mutes the empty state hint", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		styles := theme.New()
+		output := MigrationList(elmapi.ListMigrationsResponse{})
+
+		assert.Contains(t, output, "  No migrations available.")
+		assert.Contains(t, output, styles.Muted.Render("  Create one with `gh elm migration create --help`."))
+		assert.NotContains(t, output, styles.Muted.Render("  No migrations available."))
 	})
 }
 

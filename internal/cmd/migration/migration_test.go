@@ -189,8 +189,9 @@ func TestList(t *testing.T) {
 
 		assert.Contains(t, gotQuery, "status=in_progress")
 		assert.Contains(t, gotQuery, "page_size=25")
-		assert.Contains(t, out, "No migrations found.")
-		assert.Contains(t, out, "Showing 0")
+		assert.Contains(t, out, "No migrations available.")
+		assert.Contains(t, out, "Create one with `gh elm migration create --help`.")
+		assert.NotContains(t, out, "Showing 0")
 	})
 
 	t.Run("--json preserves the raw list response", func(t *testing.T) {

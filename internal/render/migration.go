@@ -175,12 +175,12 @@ func renderMessages(messages []elmapi.MigrationMessage) string {
 // MigrationList renders a migration list response.
 func MigrationList(v elmapi.ListMigrationsResponse) string {
 	styles := theme.New()
-	if len(v.Migrations) == 0 {
-		return joinSections(
+	if len(v.Migrations) == 0 || v.TotalCount == 0 {
+		return strings.Join([]string{
 			styles.Bold.Render("Migrations"),
-			detail("No migrations found."),
-			renderListFooter(v),
-		)
+			"  No migrations available.",
+			styles.Muted.Render("  Create one with `gh elm migration create --help`."),
+		}, "\n") + "\n\n"
 	}
 
 	var cards []string
