@@ -88,6 +88,8 @@ type HTTPError struct {
 	StatusCode        int
 	Status            string
 	Message           string
+	DocumentationURL  string
+	CorrelationID     string
 	EnterpriseVersion string
 }
 
@@ -154,10 +156,13 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 	}
 
 	if resp.StatusCode != wantStatus {
+		apiErr := decodeErrorResponse(respBody)
 		return &HTTPError{
 			StatusCode:        resp.StatusCode,
 			Status:            resp.Status,
-			Message:           truncate(strings.TrimSpace(string(respBody)), maxErrorBody),
+			Message:           apiErr.Message,
+			DocumentationURL:  apiErr.DocumentationURL,
+			CorrelationID:     apiErr.CorrelationID,
 			EnterpriseVersion: resp.Header.Get(enterpriseVersionHeader),
 		}
 	}
@@ -168,6 +173,24 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 		}
 	}
 	return nil
+}
+
+type errorResponse struct {
+	Message          string `json:"message"`
+	DocumentationURL string `json:"documentation_url"`
+	CorrelationID    string `json:"correlation_id"`
+}
+
+func decodeErrorResponse(body []byte) errorResponse {
+	var apiErr errorResponse
+	if err := json.Unmarshal(body, &apiErr); err != nil || apiErr.Message == "" {
+		apiErr.Message = strings.TrimSpace(string(body))
+	}
+
+	apiErr.Message = truncate(apiErr.Message, maxErrorBody)
+	apiErr.DocumentationURL = truncate(apiErr.DocumentationURL, maxErrorBody)
+	apiErr.CorrelationID = truncate(apiErr.CorrelationID, maxErrorBody)
+	return apiErr
 }
 
 func truncate(s string, n int) string {
