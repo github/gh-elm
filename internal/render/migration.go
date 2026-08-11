@@ -21,6 +21,12 @@ func MigrationCreate(v elmapi.CreateMigrationResponse) string {
 		styles.Muted.Render(fmt.Sprintf("  %-*s%s", fieldLabelWidth, "Expires", expiresAt)) + "\n\n"
 }
 
+// MigrationCancel renders a successful migration cancellation.
+func MigrationCancel(migrationID string) string {
+	styles := theme.New()
+	return styles.Success.Render("✓") + " Migration " + valueOrEmpty(migrationID) + " cancelled.\n\n"
+}
+
 // MigrationStatus renders a migration status response.
 func MigrationStatus(v elmapi.MigrationDetail) string {
 	if v.Migration == nil && v.TargetState == nil && v.CombinedState == nil && len(v.Messages) == 0 {

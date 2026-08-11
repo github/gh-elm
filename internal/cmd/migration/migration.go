@@ -395,8 +395,7 @@ func newCancelCmd() *cobra.Command {
 			if err := client.CancelMigration(cmd.Context(), migrationID); err != nil {
 				return annotateAuthError(err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s cancelled.\n", migrationID)
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.MigrationCancel(migrationID))
 		},
 	}
 

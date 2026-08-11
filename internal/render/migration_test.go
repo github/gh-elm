@@ -54,6 +54,25 @@ func TestMigrationCreate(t *testing.T) {
 	})
 }
 
+func TestMigrationCancel(t *testing.T) {
+	t.Run("renders a successful cancellation", func(t *testing.T) {
+		assert.Equal(t, "✓ Migration mig-1 cancelled.\n\n", MigrationCancel("mig-1"))
+	})
+
+	t.Run("renders the checkmark as a success when color is enabled", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		output := MigrationCancel("mig-1")
+
+		assert.Contains(t, output, theme.New().Success.Render("✓"))
+		assert.NotContains(t, output, theme.New().Success.Render("Migration mig-1 cancelled."))
+	})
+}
+
 func TestMigrationStatus(t *testing.T) {
 	t.Run("renders nested status sections", func(t *testing.T) {
 		status := "in_progress"
