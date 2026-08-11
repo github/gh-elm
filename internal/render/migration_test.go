@@ -20,6 +20,40 @@ func (failWriter) Write([]byte) (int, error) {
 	return 0, errors.New("write failed")
 }
 
+func TestMigrationCreate(t *testing.T) {
+	t.Run("renders a successful creation", func(t *testing.T) {
+		expiresAt := "2026-09-01T16:34:20Z"
+
+		assert.Equal(t, `Migration successfully created
+  Migration ID        897930cf-51cb-4e2d-9806-6357a6e66b55
+  Expires             2026-09-01T16:34:20Z
+
+`, MigrationCreate(elmapi.CreateMigrationResponse{
+			MigrationID: "897930cf-51cb-4e2d-9806-6357a6e66b55",
+			ExpiresAt:   &expiresAt,
+		}))
+	})
+
+	t.Run("uses semantic styles when color is enabled", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		expiresAt := "2026-09-01T16:34:20Z"
+		styles := theme.New()
+		output := MigrationCreate(elmapi.CreateMigrationResponse{
+			MigrationID: "mig-1",
+			ExpiresAt:   &expiresAt,
+		})
+
+		assert.Contains(t, output, styles.Success.Bold(true).Render("Migration successfully created"))
+		assert.Contains(t, output, styles.Bold.Render("mig-1"))
+		assert.Contains(t, output, styles.Muted.Render("  Expires             "+expiresAt))
+	})
+}
+
 func TestMigrationStatus(t *testing.T) {
 	t.Run("renders nested status sections", func(t *testing.T) {
 		status := "in_progress"

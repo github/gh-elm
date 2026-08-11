@@ -16,7 +16,7 @@ func TestRun(t *testing.T) {
 		require.NoError(t, run(&output, false))
 
 		for _, want := range []string{
-			"Migration created",
+			"Migration successfully created",
 			"Progress · target-org/monolith",
 			"Live updates are falling behind.",
 			"Completed",

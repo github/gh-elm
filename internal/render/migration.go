@@ -15,13 +15,10 @@ const emptyValue = "—"
 // MigrationCreate renders a create-migration response.
 func MigrationCreate(v elmapi.CreateMigrationResponse) string {
 	styles := theme.New()
-	return joinSections(
-		bullet(styles.Success.Render("✓"), styles.Success.Bold(true).Render("Migration created")),
-		renderSection("Details",
-			field("Migration ID", styles.Bold.Render(valueOrEmpty(v.MigrationID))),
-			field("Expires", boldPointerValue(v.ExpiresAt)),
-		),
-	)
+	expiresAt := valueOrEmpty(pointerString(v.ExpiresAt))
+	return styles.Success.Bold(true).Render("Migration successfully created") + "\n" +
+		field("Migration ID", styles.Bold.Render(valueOrEmpty(v.MigrationID))) + "\n" +
+		styles.Muted.Render(fmt.Sprintf("  %-*s%s", fieldLabelWidth, "Expires", expiresAt)) + "\n\n"
 }
 
 // MigrationStatus renders a migration status response.

@@ -37,7 +37,7 @@ func TestCreate(t *testing.T) {
 		assert.Equal(t, "BOGON", gotBody.PATName)
 		assert.Equal(t, "web", gotBody.SourceRepositoryName)
 		assert.Equal(t, "internal", gotBody.TargetVisibility)
-		assert.Contains(t, out, "Migration created")
+		assert.Contains(t, out, "Migration successfully created")
 		assert.Contains(t, out, "Migration ID")
 		assert.Contains(t, out, "mig-1")
 	})
