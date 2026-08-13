@@ -52,6 +52,9 @@ Create a migration using concise repository coordinates:
 gh elm migration create source-org/repo target-org/repo
 # List in-progress migrations, falling back to created migrations when empty
 gh elm migration list
+
+# Cancel a migration (the -m/--migration-id flag remains supported)
+gh elm migration cancel <uuid>
 ```
 
 Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`

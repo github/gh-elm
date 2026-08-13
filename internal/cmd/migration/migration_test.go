@@ -342,7 +342,7 @@ func TestActions(t *testing.T) {
 		respBody string
 		wantOut  string
 	}{
-		{"cancel", []string{"cancel", "--migration-id", "m"}, "/enterprise/live-migrations/m/cancel", http.StatusNoContent, "", "cancelled"},
+		{"cancel", []string{"cancel", "m"}, "/enterprise/live-migrations/m/cancel", http.StatusNoContent, "", "cancelled"},
 		{"cutover", []string{"cutover-to-destination", "--migration-id", "m"}, "/enterprise/live-migrations/m/cutover", http.StatusNoContent, "", "Cutover initiated"},
 		{"pause", []string{"pause", "--migration-id", "m"}, "/enterprise/live-migrations/m/pause", http.StatusNoContent, "", "paused"},
 		{"resume", []string{"resume", "--migration-id", "m"}, "/enterprise/live-migrations/m/resume", http.StatusNoContent, "", "resumed"},
@@ -372,6 +372,42 @@ func TestActions(t *testing.T) {
 			assert.Contains(t, out, tc.wantOut)
 		})
 	}
+}
+
+func TestCancel(t *testing.T) {
+	t.Run("accepts the migration ID flag", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		run(t, "cancel", "--migration-id", "mig-1", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/cancel"))
+	})
+
+	t.Run("rejects positional and flag IDs together", func(t *testing.T) {
+		err := runErr(t, "cancel", "mig-1", "--migration-id", "mig-2")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be combined")
+	})
+
+	t.Run("requires a migration ID", func(t *testing.T) {
+		err := runErr(t, "cancel")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migration ID required")
+	})
+
+	t.Run("rejects extra migration IDs", func(t *testing.T) {
+		err := runErr(t, "cancel", "mig-1", "mig-2")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "at most 1 arg")
+	})
 }
 
 func TestCutover(t *testing.T) {

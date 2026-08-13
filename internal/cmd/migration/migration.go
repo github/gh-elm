@@ -385,27 +385,33 @@ func newCancelCmd() *cobra.Command {
 	var migrationID string
 
 	cmd := &cobra.Command{
-		Use:   "cancel",
+		Use:   "cancel [MIGRATION-ID]",
 		Short: "Cancel and terminate a migration",
 		Long: "Terminate a migration: it is cancelled locally, aborted on the ELM backend, and\n" +
-			"its work items are removed. This is a terminal action with no recovery.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"its work items are removed. This is a terminal action with no recovery. Pass the\n" +
+			"migration ID positionally or use --migration-id for compatibility.",
+		Example: "  gh elm migration cancel 897930cf-51cb-4e2d-9806-6357a6e66b55",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
+
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			if err := client.CancelMigration(cmd.Context(), migrationID); err != nil {
+			if err := client.CancelMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateAuthError(err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s cancelled.\n", migrationID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s cancelled.\n", resolvedMigrationID)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to cancel (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to cancel (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -647,6 +653,26 @@ func parseRepositoryCoordinate(value string) (repositoryCoordinate, error) {
 		organization: strings.TrimSpace(parts[0]),
 		repository:   strings.TrimSpace(parts[1]),
 	}, nil
+}
+
+func resolveMigrationID(args []string, flagValue string, flagSpecified bool) (string, error) {
+	if len(args) > 0 && flagSpecified {
+		return "", errors.New("MIGRATION-ID cannot be combined with --migration-id")
+	}
+	if len(args) == 1 {
+		migrationID := strings.TrimSpace(args[0])
+		if migrationID == "" {
+			return "", errors.New("MIGRATION-ID cannot be empty")
+		}
+		return migrationID, nil
+	}
+	if flagSpecified {
+		migrationID := strings.TrimSpace(flagValue)
+		if migrationID != "" {
+			return migrationID, nil
+		}
+	}
+	return "", errors.New("migration ID required: pass MIGRATION-ID or use --migration-id")
 }
 
 func anyFlagChanged(cmd *cobra.Command, names ...string) bool {
