@@ -13,7 +13,7 @@ import (
 )
 
 func TestCreate(t *testing.T) {
-	t.Run("creates a migration and prints the response JSON", func(t *testing.T) {
+	t.Run("creates a migration from positional repositories", func(t *testing.T) {
 		var gotPath, gotMethod string
 		var gotBody elmapiCreateBody
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,8 +25,7 @@ func TestCreate(t *testing.T) {
 		defer srv.Close()
 
 		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
-		out := run(t, "create", "--source-org", "acme", "--source-repo", "web",
-			"--target-org", "acme-cloud", "--target-repo", "web",
+		out := run(t, "create", "acme/web", "acme-cloud/web",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.Equal(t, http.MethodPost, gotMethod)
@@ -35,7 +34,10 @@ func TestCreate(t *testing.T) {
 		assert.Equal(t, "https://api.example.ghe.com", gotBody.TargetAPIEndpoint)
 		// pat_name is stubbed with a sentinel (API-defect workaround).
 		assert.Equal(t, "BOGON", gotBody.PATName)
+		assert.Equal(t, "acme", gotBody.SourceOrganizationLogin)
 		assert.Equal(t, "web", gotBody.SourceRepositoryName)
+		assert.Equal(t, "acme-cloud", gotBody.TargetOrganizationLogin)
+		assert.Equal(t, "web", gotBody.TargetRepositoryName)
 		assert.Equal(t, "internal", gotBody.TargetVisibility)
 		assert.Contains(t, out, `"migration_id": "mig-1"`, "output missing migration_id")
 	})
@@ -62,6 +64,31 @@ func TestCreate(t *testing.T) {
 		assert.Contains(t, out, "created and started")
 	})
 
+	t.Run("rejects mixed positional and flag repositories", func(t *testing.T) {
+		err := runErr(t, "create", "a/r", "b/r", "--source-org", "a",
+			"--source-url", "https://x", "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be combined")
+	})
+
+	t.Run("rejects malformed positional repositories", func(t *testing.T) {
+		err := runErr(t, "create", "a/r/extra", "b/r",
+			"--source-url", "https://x", "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid source repository")
+		assert.Contains(t, err.Error(), "exactly one slash")
+	})
+
+	t.Run("rejects a partial repository flag set", func(t *testing.T) {
+		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
+			"--source-url", "https://x", "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "all four repository flags")
+	})
+
 	t.Run("rejects public visibility", func(t *testing.T) {
 		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
 			"--target-org", "b", "--target-repo", "r", "--target-visibility", "public",
@@ -81,7 +108,7 @@ func TestCreate(t *testing.T) {
 	t.Run("requires the core flags", func(t *testing.T) {
 		err := runErr(t, "create", "--source-url", "https://x", "--source-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "required")
+		assert.Contains(t, err.Error(), "requires")
 	})
 
 	t.Run("errors when no target host is configured (API-defect workaround)", func(t *testing.T) {
@@ -307,10 +334,13 @@ func TestLookupTargetID(t *testing.T) {
 
 // elmapiCreateBody mirrors the create request body for assertions.
 type elmapiCreateBody struct {
-	SourceRepositoryName string `json:"source_repository_name"`
-	TargetAPIEndpoint    string `json:"target_api_endpoint"`
-	PATName              string `json:"pat_name"`
-	TargetVisibility     string `json:"target_visibility"`
+	SourceOrganizationLogin string `json:"source_organization_login"`
+	SourceRepositoryName    string `json:"source_repository_name"`
+	TargetOrganizationLogin string `json:"target_organization_login"`
+	TargetRepositoryName    string `json:"target_repository_name"`
+	TargetAPIEndpoint       string `json:"target_api_endpoint"`
+	PATName                 string `json:"pat_name"`
+	TargetVisibility        string `json:"target_visibility"`
 }
 
 // run executes a `migration` subcommand and returns output, failing on error.

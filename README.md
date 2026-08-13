@@ -46,6 +46,12 @@ Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
 
+Create a migration using concise repository coordinates:
+
+```sh
+gh elm migration create source-org/repo target-org/repo
+```
+
 Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`
 (human-readable by default; add `--json` for a machine-readable object). The numeric target
 migration ID it returns is the `--migration-id` value the `gh elm target *` commands (for

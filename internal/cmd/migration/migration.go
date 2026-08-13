@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -111,13 +112,27 @@ func newCreateCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "create",
+		Use:   "create [SOURCE-OWNER/SOURCE-REPO TARGET-OWNER/TARGET-REPO]",
 		Short: "Create a new migration",
 		Long: "Create a new Enterprise Live Migration to prepare for repository export and\n" +
 			"import. The migration is created in a `created` state; pass --start to launch\n" +
-			"it immediately.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"it immediately. Pass source and target as owner/repo arguments, or use all four\n" +
+			"repository flags for compatibility.",
+		Example: "  gh elm migration create source-org/repo target-org/repo\n" +
+			"  gh elm migration create --source-org source-org --source-repo repo --target-org target-org --target-repo repo",
+		Args: cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repositories, err := resolveCreateRepositories(args, createRepositoryFlags{
+				sourceOrg:        sourceOrg,
+				sourceRepo:       sourceRepo,
+				targetOrg:        targetOrg,
+				targetRepo:       targetRepo,
+				anyFlagSpecified: anyFlagChanged(cmd, "source-org", "source-repo", "target-org", "target-repo"),
+			})
+			if err != nil {
+				return err
+			}
+
 			visibility, err := resolveVisibility(targetVisibility)
 			if err != nil {
 				return err
@@ -146,10 +161,10 @@ func newCreateCmd() *cobra.Command {
 			}
 
 			req := elmapi.CreateMigrationRequest{
-				SourceOrganizationLogin: sourceOrg,
-				SourceRepositoryName:    sourceRepo,
-				TargetOrganizationLogin: targetOrg,
-				TargetRepositoryName:    targetRepo,
+				SourceOrganizationLogin: repositories.source.organization,
+				SourceRepositoryName:    repositories.source.repository,
+				TargetOrganizationLogin: repositories.target.organization,
+				TargetRepositoryName:    repositories.target.repository,
 				TargetAPIEndpoint:       targetAPI,
 				// WORKAROUND (API defect): the create endpoint requires a
 				// non-empty pat_name, but migration credentials are supplied by
@@ -181,17 +196,14 @@ func newCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&sourceOrg, "source-org", "", "Source organization login (required).")
-	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "Source repository name (required).")
-	cmd.Flags().StringVar(&targetOrg, "target-org", "", "Target organization login (required).")
-	cmd.Flags().StringVar(&targetRepo, "target-repo", "", "Target repository name (required).")
+	cmd.Flags().StringVar(&sourceOrg, "source-org", "", "Source organization login (use with --source-repo, --target-org, and --target-repo).")
+	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "Source repository name (use with --source-org, --target-org, and --target-repo).")
+	cmd.Flags().StringVar(&targetOrg, "target-org", "", "Target organization login (use with --source-org, --source-repo, and --target-repo).")
+	cmd.Flags().StringVar(&targetRepo, "target-repo", "", "Target repository name (use with --source-org, --source-repo, and --target-org).")
 	cmd.Flags().StringVar(&targetVisibility, "target-visibility", "internal", "Target repository visibility (private or internal).")
 	cmd.Flags().BoolVar(&start, "start", false, "Automatically start the migration after creating it.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After creating and starting, enter live watch mode (requires --start).")
 	sourceFlags(cmd)
-	for _, f := range []string{"source-org", "source-repo", "target-org", "target-repo"} {
-		_ = cmd.MarkFlagRequired(f)
-	}
 
 	return cmd
 }
@@ -552,6 +564,75 @@ func sourceURLFlag(cmd *cobra.Command) *string {
 func sourceTokenFlag(cmd *cobra.Command) *string {
 	v, _ := cmd.Flags().GetString("source-token")
 	return &v
+}
+
+type repositoryCoordinate struct {
+	organization string
+	repository   string
+}
+
+type createRepositories struct {
+	source repositoryCoordinate
+	target repositoryCoordinate
+}
+
+type createRepositoryFlags struct {
+	sourceOrg        string
+	sourceRepo       string
+	targetOrg        string
+	targetRepo       string
+	anyFlagSpecified bool
+}
+
+func resolveCreateRepositories(args []string, flags createRepositoryFlags) (createRepositories, error) {
+	if len(args) > 0 && flags.anyFlagSpecified {
+		return createRepositories{}, errors.New("repository arguments cannot be combined with --source-org, --source-repo, --target-org, or --target-repo")
+	}
+
+	if len(args) > 0 {
+		if len(args) != 2 {
+			return createRepositories{}, errors.New("create requires both source and target repositories in owner/repo format")
+		}
+		source, err := parseRepositoryCoordinate(args[0])
+		if err != nil {
+			return createRepositories{}, fmt.Errorf("invalid source repository: %w", err)
+		}
+		target, err := parseRepositoryCoordinate(args[1])
+		if err != nil {
+			return createRepositories{}, fmt.Errorf("invalid target repository: %w", err)
+		}
+		return createRepositories{source: source, target: target}, nil
+	}
+
+	sourceOrg := strings.TrimSpace(flags.sourceOrg)
+	sourceRepo := strings.TrimSpace(flags.sourceRepo)
+	targetOrg := strings.TrimSpace(flags.targetOrg)
+	targetRepo := strings.TrimSpace(flags.targetRepo)
+	if sourceOrg == "" || sourceRepo == "" || targetOrg == "" || targetRepo == "" {
+		return createRepositories{}, errors.New("create requires SOURCE-OWNER/SOURCE-REPO and TARGET-OWNER/TARGET-REPO, or all four repository flags")
+	}
+
+	return createRepositories{
+		source: repositoryCoordinate{organization: sourceOrg, repository: sourceRepo},
+		target: repositoryCoordinate{organization: targetOrg, repository: targetRepo},
+	}, nil
+}
+
+func parseRepositoryCoordinate(value string) (repositoryCoordinate, error) {
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return repositoryCoordinate{}, fmt.Errorf("%q must contain exactly one slash with a non-empty owner and repository", value)
+	}
+	return repositoryCoordinate{
+		organization: strings.TrimSpace(parts[0]),
+		repository:   strings.TrimSpace(parts[1]),
+	}, nil
+}
+
+func anyFlagChanged(cmd *cobra.Command, names ...string) bool {
+	return slices.ContainsFunc(names, func(name string) bool {
+		return cmd.Flags().Changed(name)
+	})
 }
 
 // resolveVisibility validates the --target-visibility flag. The REST API accepts
