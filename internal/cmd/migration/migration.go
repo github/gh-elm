@@ -5,6 +5,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -172,6 +173,10 @@ func newCreateCmd() *cobra.Command {
 				// to send. Stub it with a sentinel until the API stops requiring it.
 				PATName:          "BOGON",
 				TargetVisibility: visibility,
+			}
+
+			if err := ensureUniqueCreatedMigration(cmd.Context(), client, req); err != nil {
+				return annotateAuthError(err, srcURL)
 			}
 
 			resp, err := client.CreateMigration(cmd.Context(), req)
@@ -633,6 +638,61 @@ func anyFlagChanged(cmd *cobra.Command, names ...string) bool {
 	return slices.ContainsFunc(names, func(name string) bool {
 		return cmd.Flags().Changed(name)
 	})
+}
+
+func ensureUniqueCreatedMigration(ctx context.Context, client *elmapi.Client, req elmapi.CreateMigrationRequest) error {
+	const pageSize = 100
+
+	after := ""
+	for {
+		raw, err := client.ListMigrations(ctx, elmapi.ListMigrationsOptions{
+			Status:   elmapi.StatusCreated,
+			PageSize: pageSize,
+			After:    after,
+		})
+		if err != nil {
+			return fmt.Errorf("checking for an existing migration: %w", err)
+		}
+
+		var resp migrationListResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return fmt.Errorf("checking for an existing migration: decoding response: %w", err)
+		}
+
+		for _, migration := range resp.Migrations {
+			if sameMigrationRepositories(migration, req) {
+				return fmt.Errorf(
+					"a created migration already exists for %s/%s → %s/%s (migration ID: %s)",
+					req.SourceOrganizationLogin,
+					req.SourceRepositoryName,
+					req.TargetOrganizationLogin,
+					req.TargetRepositoryName,
+					migration.MigrationID,
+				)
+			}
+		}
+
+		if resp.NextCursor == "" {
+			return nil
+		}
+		if resp.NextCursor == after {
+			return errors.New("checking for an existing migration: API returned a repeated pagination cursor")
+		}
+		after = resp.NextCursor
+	}
+}
+
+type migrationListResponse struct {
+	Migrations []elmapi.MigrationSummary `json:"migrations"`
+	TotalCount int64                     `json:"total_count"`
+	NextCursor string                    `json:"next_cursor"`
+}
+
+func sameMigrationRepositories(migration elmapi.MigrationSummary, req elmapi.CreateMigrationRequest) bool {
+	return strings.EqualFold(migration.SourceOrganizationLogin, req.SourceOrganizationLogin) &&
+		strings.EqualFold(migration.SourceRepositoryName, req.SourceRepositoryName) &&
+		strings.EqualFold(migration.TargetOrganizationLogin, req.TargetOrganizationLogin) &&
+		strings.EqualFold(migration.TargetRepositoryName, req.TargetRepositoryName)
 }
 
 // resolveVisibility validates the --target-visibility flag. The REST API accepts

@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/github/gh-elm/internal/elmapi"
 )
 
 func TestCreate(t *testing.T) {
@@ -17,6 +19,12 @@ func TestCreate(t *testing.T) {
 		var gotPath, gotMethod string
 		var gotBody elmapiCreateBody
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				assert.Equal(t, elmapi.StatusCreated, r.URL.Query().Get("status"))
+				assert.Equal(t, "100", r.URL.Query().Get("page_size"))
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
 			gotPath, gotMethod = r.URL.Path, r.Method
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
 			w.WriteHeader(http.StatusCreated)
@@ -45,6 +53,10 @@ func TestCreate(t *testing.T) {
 	t.Run("create --start posts start and reports success", func(t *testing.T) {
 		var startCalled bool
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/start") {
 				startCalled = true
 				w.WriteHeader(http.StatusNoContent)
@@ -87,6 +99,81 @@ func TestCreate(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "all four repository flags")
+	})
+
+	t.Run("rejects a duplicate created migration case-insensitively", func(t *testing.T) {
+		var createCalled bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				createCalled = true
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
+			_, _ = w.Write([]byte(`{"migrations":[{
+				"migration_id":"existing-id",
+				"source_organization_login":"ACME",
+				"source_repository_name":"WEB",
+				"target_organization_login":"ACME-CLOUD",
+				"target_repository_name":"WEB"
+			}],"total_count":1}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		err := runErr(t, "create", "acme/web", "acme-cloud/web",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "created migration already exists")
+		assert.Contains(t, err.Error(), "existing-id")
+		assert.False(t, createCalled)
+	})
+
+	t.Run("checks every created migration page", func(t *testing.T) {
+		var cursors []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cursors = append(cursors, r.URL.Query().Get("after"))
+			if r.URL.Query().Get("after") == "" {
+				_, _ = w.Write([]byte(`{"migrations":[{
+					"migration_id":"other-id",
+					"source_organization_login":"other",
+					"source_repository_name":"repo",
+					"target_organization_login":"elsewhere",
+					"target_repository_name":"repo"
+				}],"total_count":2,"next_cursor":"page-2"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"migrations":[{
+				"migration_id":"existing-id",
+				"source_organization_login":"acme",
+				"source_repository_name":"web",
+				"target_organization_login":"acme-cloud",
+				"target_repository_name":"web"
+			}],"total_count":2}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		err := runErr(t, "create", "acme/web", "acme-cloud/web",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Equal(t, []string{"", "page-2"}, cursors)
+		assert.Contains(t, err.Error(), "existing-id")
+	})
+
+	t.Run("surfaces duplicate preflight failures", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		err := runErr(t, "create", "acme/web", "acme-cloud/web",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "checking for an existing migration")
 	})
 
 	t.Run("rejects public visibility", func(t *testing.T) {
