@@ -375,6 +375,19 @@ func TestActions(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
+	t.Run("accepts the kill alias", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		run(t, "kill", "mig-1", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/cancel"))
+	})
+
 	t.Run("accepts the migration ID flag", func(t *testing.T) {
 		var gotPath string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +420,14 @@ func TestCancel(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "at most 1 arg")
+	})
+
+	t.Run("help hides the alias", func(t *testing.T) {
+		out, err := exec(t, "cancel", "--help")
+
+		require.NoError(t, err)
+		assert.NotContains(t, out, "ALIASES")
+		assert.NotContains(t, out, "kill")
 	})
 }
 

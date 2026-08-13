@@ -68,6 +68,30 @@ func TestConfigureShow(t *testing.T) {
 	assert.Contains(t, out, "not set", "unset target token should read as not set")
 }
 
+func TestConfigureAlias(t *testing.T) {
+	seedFileStore(t)
+
+	root := NewRootCmd("test")
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetErr(&output)
+	root.SetArgs([]string{"config", "--show"})
+
+	require.NoError(t, root.Execute())
+	assert.Contains(t, output.String(), "Source (GHES)")
+}
+
+func TestConfigureHelpHidesAlias(t *testing.T) {
+	root := NewRootCmd("test")
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetArgs([]string{"configure", "--help"})
+
+	require.NoError(t, root.Execute())
+	assert.NotContains(t, output.String(), "ALIASES")
+	assert.NotContains(t, output.String(), "configure, config")
+}
+
 func TestConfigureReset(t *testing.T) {
 	seedFileStore(t)
 	require.NoError(t, (&config.Config{SourceURL: "https://ghes.example.com", TargetURL: "https://api.tenant.ghe.com"}).Save(), "seed config")

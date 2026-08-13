@@ -42,6 +42,7 @@ func NewCommand() *cobra.Command {
 		newLookupTargetIDCmd(),
 		newListCmd(),
 		newCancelCmd(),
+		newKillCmd(),
 		newCutoverCmd(),
 		newCutoverStatusCmd(),
 		newRevertCutoverCmd(),
@@ -413,6 +414,13 @@ func newCancelCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to cancel (alternative to the positional argument).")
 	sourceFlags(cmd)
 
+	return cmd
+}
+
+func newKillCmd() *cobra.Command {
+	cmd := newCancelCmd()
+	cmd.Use = "kill [MIGRATION-ID]"
+	cmd.Hidden = true
 	return cmd
 }
 
