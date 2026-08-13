@@ -265,6 +265,66 @@ func TestList(t *testing.T) {
 		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
 	})
 
+	t.Run("bare list falls back to created migrations", func(t *testing.T) {
+		const createdBody = `{"migrations":[{"migration_id":"created-id","status":"created"}],"total_count":1}`
+		var statuses []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			status := r.URL.Query().Get("status")
+			statuses = append(statuses, status)
+			if status == "" {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
+			_, _ = w.Write([]byte(createdBody))
+		}))
+		defer srv.Close()
+
+		out := run(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, []string{"", elmapi.StatusCreated}, statuses)
+		assert.Equal(t, createdBody+"\n", out) //nolint:testifylint // exact raw response contract
+	})
+
+	t.Run("does not fall back when page size is explicit", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+		}))
+		defer srv.Close()
+
+		run(t, "list", "--page-size", "25", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+	})
+
+	t.Run("does not fall back when a cursor is explicit", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+		}))
+		defer srv.Close()
+
+		run(t, "list", "--after", "cursor", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+	})
+
+	t.Run("does not fall back when the default response is non-empty", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[{"migration_id":"active-id","status":"in_progress"}],"total_count":1}`))
+		}))
+		defer srv.Close()
+
+		out := run(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+		assert.Contains(t, out, "active-id")
+	})
+
 	t.Run("rejects an invalid status", func(t *testing.T) {
 		err := runErr(t, "list", "--status", "bogus",
 			"--source-url", "https://x", "--source-token", "tok")

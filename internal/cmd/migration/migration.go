@@ -329,11 +329,12 @@ func newListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List migrations (defaults to in-progress only)",
+		Short: "List migrations",
 		Long: "List migrations, with optional filtering by status and cursor-based pagination.\n" +
 			"Use --status to filter (created, queued, in_progress, paused, completed, failed,\n" +
 			"terminated) or --status=all to list migrations in every state. Prints the API's\n" +
-			"raw JSON response.",
+			"raw JSON response. A bare list first checks in-progress migrations and falls back\n" +
+			"to created migrations when none are found.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if status != "" {
@@ -352,6 +353,20 @@ func newListCmd() *cobra.Command {
 			})
 			if err != nil {
 				return annotateAuthError(err, srcURL)
+			}
+			if status == "" && pageSize == 0 && after == "" {
+				var list migrationListResponse
+				if err := json.Unmarshal(raw, &list); err != nil {
+					return fmt.Errorf("decoding migration list: %w", err)
+				}
+				if migrationListEmpty(list) {
+					raw, err = client.ListMigrations(cmd.Context(), elmapi.ListMigrationsOptions{
+						Status: elmapi.StatusCreated,
+					})
+					if err != nil {
+						return annotateAuthError(err, srcURL)
+					}
+				}
 			}
 			return writeRaw(cmd.OutOrStdout(), raw)
 		},
@@ -693,6 +708,10 @@ func sameMigrationRepositories(migration elmapi.MigrationSummary, req elmapi.Cre
 		strings.EqualFold(migration.SourceRepositoryName, req.SourceRepositoryName) &&
 		strings.EqualFold(migration.TargetOrganizationLogin, req.TargetOrganizationLogin) &&
 		strings.EqualFold(migration.TargetRepositoryName, req.TargetRepositoryName)
+}
+
+func migrationListEmpty(list migrationListResponse) bool {
+	return len(list.Migrations) == 0 || list.TotalCount == 0
 }
 
 // resolveVisibility validates the --target-visibility flag. The REST API accepts

@@ -50,6 +50,8 @@ Create a migration using concise repository coordinates:
 
 ```sh
 gh elm migration create source-org/repo target-org/repo
+# List in-progress migrations, falling back to created migrations when empty
+gh elm migration list
 ```
 
 Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`
