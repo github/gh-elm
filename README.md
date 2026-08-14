@@ -167,12 +167,20 @@ Requires [Go](https://go.dev) (version pinned in [`go.mod`](go.mod)) and the `gh
 make build     # build the ./gh-elm binary
 make install   # build and install this checkout as a local gh extension
 make test      # run unit tests (with -race)
-make audit     # fmt + vet + lint + test (what CI runs)
+make test-integration  # build and exercise gh-elm as a real subprocess
+make audit     # run formatting, vet, lint, unit, and integration tests
 gh elm --version  # verify your local build is installed
 ```
 
 `make install` registers this directory as the `elm` extension, so `gh elm ...` runs your
 local build. Rebuild with `make build` to pick up changes.
+
+Integration tests build a temporary `gh-elm` executable and run it as a real
+subprocess against local HTTP test servers. They use isolated configuration and
+a file-backed credential store, require no GitHub credentials, and do not
+contact live GHES or GHEC environments.
+
+CI runs these tests natively on Linux, macOS, and Windows.
 
 ## Releasing
 

@@ -19,6 +19,10 @@ install: build ## Build and (re)install as a local gh extension (gh elm ...)
 test: ## Run unit tests
 	go test -race ./...
 
+.PHONY: test-integration
+test-integration: ## Run black-box CLI integration tests
+	go test -count=1 -tags=integration ./integration/...
+
 .PHONY: vet
 vet: ## go vet
 	go vet ./...
@@ -32,7 +36,7 @@ tidy: ## Tidy go.mod/go.sum
 	go mod tidy
 
 .PHONY: audit
-audit: fmt vet lint test ## Run the checks CI runs
+audit: fmt vet lint test test-integration ## Run formatting, lint, unit, and integration checks
 
 .PHONY: lint
 lint: ## Run golangci-lint
