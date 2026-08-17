@@ -133,6 +133,29 @@ func isUserNotFound(err error) bool {
 	return false
 }
 
+// BotID resolves a GitHub App / bot account login (e.g. "example-ci[bot]") to
+// its GraphQL node ID. The GraphQL user(login:) query hides bots, so we use the
+// REST users endpoint, which returns bot accounts (type "Bot") along with their
+// node_id. A 404 is reported as ErrUserNotFound so callers can skip a missing
+// claimant, mirroring UserID.
+func (c *Client) BotID(ctx context.Context, login string) (string, error) {
+	path := fmt.Sprintf("/users/%s", url.PathEscape(login))
+	var data struct {
+		Type   string `json:"type"`
+		NodeID string `json:"node_id"`
+	}
+	if err := c.restGet(ctx, path, &data, 200, 404); err != nil {
+		return "", fmt.Errorf("looking up bot ID for %q: %w", login, err)
+	}
+	if data.NodeID == "" {
+		return "", fmt.Errorf("bot %q not found: %w", login, ErrUserNotFound)
+	}
+	if !strings.EqualFold(data.Type, "Bot") {
+		return "", fmt.Errorf("%q is not a GitHub App / bot account", login)
+	}
+	return data.NodeID, nil
+}
+
 // LoginName returns the login of the authenticated user (the token's viewer).
 func (c *Client) LoginName(ctx context.Context) (string, error) {
 	var data struct {
@@ -217,6 +240,13 @@ const reattributeMannequinToUserMutation = `mutation($orgId: ID!, $sourceId: ID!
   }
 }`
 
+const reattributeMannequinToBotMutation = `mutation($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
+  reattributeMannequinToBot(input: { ownerId: $orgId, sourceId: $sourceId, targetId: $targetId }) {
+    source { ... on Mannequin { id login } }
+    target { ... on Bot { id login } }
+  }
+}`
+
 // userInfo decodes a { id, login } source/target node.
 type userInfo struct {
 	ID    string `json:"id"`
@@ -257,6 +287,27 @@ func (c *Client) ReattributeMannequinToUser(ctx context.Context, orgID, mannequi
 		return nil, err
 	}
 	r := data.ReattributeMannequinToUser
+	return &AttributionResult{
+		SourceID: r.Source.ID, SourceLogin: r.Source.Login,
+		TargetID: r.Target.ID, TargetLogin: r.Target.Login,
+	}, nil
+}
+
+// ReattributeMannequinToBot immediately reattributes a mannequin's content to a
+// customer-owned GitHub App / bot account. The acting admin must own or
+// administer the target app; GitHub-owned apps are rejected server-side.
+func (c *Client) ReattributeMannequinToBot(ctx context.Context, orgID, mannequinID, targetBotID string) (*AttributionResult, error) {
+	var data struct {
+		ReattributeMannequinToBot struct {
+			Source userInfo `json:"source"`
+			Target userInfo `json:"target"`
+		} `json:"reattributeMannequinToBot"`
+	}
+	vars := map[string]any{"orgId": orgID, "sourceId": mannequinID, "targetId": targetBotID}
+	if err := c.graphQL(ctx, reattributeMannequinToBotMutation, vars, &data); err != nil {
+		return nil, err
+	}
+	r := data.ReattributeMannequinToBot
 	return &AttributionResult{
 		SourceID: r.Source.ID, SourceLogin: r.Source.Login,
 		TargetID: r.Target.ID, TargetLogin: r.Target.Login,

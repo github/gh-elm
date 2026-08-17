@@ -17,12 +17,16 @@ type fakeClient struct {
 	mannequins          []Mannequin
 	byLogin             map[string][]Mannequin
 	userIDs             map[string]string
+	botIDs              map[string]string
 	userIDErr           error    // when set, UserID returns this for every lookup
 	invitations         []string // "sourceID->targetID"
 	reattributions      []string
+	botReattributions   []string
 	inviteErr           error
 	reattributeErr      error
+	botReattributeErr   error
 	reattributeAttempts int
+	botAttempts         int
 }
 
 func (f *fakeClient) OrganizationID(_ context.Context, _ string) (string, error) {
@@ -35,6 +39,13 @@ func (f *fakeClient) UserID(_ context.Context, login string) (string, error) {
 	id, ok := f.userIDs[login]
 	if !ok {
 		return "", fmt.Errorf("user %q not found: %w", login, ErrUserNotFound)
+	}
+	return id, nil
+}
+func (f *fakeClient) BotID(_ context.Context, login string) (string, error) {
+	id, ok := f.botIDs[login]
+	if !ok {
+		return "", fmt.Errorf("bot %q not found: %w", login, ErrUserNotFound)
 	}
 	return id, nil
 }
@@ -58,6 +69,14 @@ func (f *fakeClient) ReattributeMannequinToUser(_ context.Context, _, mannequinI
 	}
 	f.reattributions = append(f.reattributions, mannequinID+"->"+targetUserID)
 	return &AttributionResult{SourceID: mannequinID, TargetID: targetUserID}, nil
+}
+func (f *fakeClient) ReattributeMannequinToBot(_ context.Context, _, mannequinID, targetBotID string) (*AttributionResult, error) {
+	f.botAttempts++
+	if f.botReattributeErr != nil {
+		return nil, f.botReattributeErr
+	}
+	f.botReattributions = append(f.botReattributions, mannequinID+"->"+targetBotID)
+	return &AttributionResult{SourceID: mannequinID, TargetID: targetBotID}, nil
 }
 
 // capturingLogger records log lines for assertions.
@@ -130,6 +149,26 @@ func TestReclaimMannequin(t *testing.T) {
 		require.NoError(t, svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, true), "ReclaimMannequin")
 		assert.Len(t, f.reattributions, 1)
 		assert.Empty(t, f.invitations)
+	})
+
+	t.Run("reclaims a bot target via reattributeMannequinToBot", func(t *testing.T) {
+		f := &fakeClient{
+			orgID:   "ORG",
+			byLogin: map[string][]Mannequin{"alice": {{ID: "m1", Login: "alice"}}},
+			botIDs:  map[string]string{"example-ci[bot]": "b1"},
+		}
+		svc, _ := newService(f)
+
+		err := svc.ReclaimMannequin(t.Context(), "alice", "", "example-ci[bot]", "octo", false, false)
+		if err != nil {
+			t.Fatalf("ReclaimMannequin: %v", err)
+		}
+		if len(f.botReattributions) != 1 || f.botReattributions[0] != "m1->b1" {
+			t.Errorf("botReattributions = %v", f.botReattributions)
+		}
+		if len(f.invitations) != 0 || f.reattributeAttempts != 0 {
+			t.Errorf("should not have used the user path: invitations=%v reattributeAttempts=%d", f.invitations, f.reattributeAttempts)
+		}
 	})
 }
 
