@@ -1,5 +1,5 @@
 // Package config manages gh-elm's non-secret configuration — the source (GHES)
-// and target (GHEC/Proxima) API URLs — and locates gh-elm's config directory.
+// and target (GHEC) API URLs — and locates gh-elm's config directory.
 //
 // Secret tokens are NOT stored here; they live behind a creds.Store. Environment
 // variables (see the Env* constants) and command flags override stored values at
@@ -16,7 +16,7 @@ import (
 )
 
 // Environment variable names. gh-elm uses a unified GH_SOURCE_*/GH_TARGET_*
-// scheme for the source (GHES) and target (GHEC/Proxima) host and token, so
+// scheme for the source (GHES) and target (GHEC) host and token, so
 // scripts and CI can override the stored config without gh elm configure.
 const (
 	EnvSourceURL = "GH_SOURCE_HOST"

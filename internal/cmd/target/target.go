@@ -1,5 +1,5 @@
 // Package target implements the `gh elm target` command group, which works with
-// migration-target (GHEC/Proxima) resources.
+// migration-target (GHEC) resources.
 package target
 
 import (
@@ -11,9 +11,9 @@ import (
 func NewCommand() *cobra.Command {
 	targetCmd := &cobra.Command{
 		Use:   "target",
-		Short: "Work with migration-target (GHEC/Proxima) resources",
+		Short: "Work with migration-target (GHEC) resources",
 		Long: "Read and write migration-target resources (for example migration resources\n" +
-			"and mannequins) on the GitHub Enterprise Cloud (Proxima) side of a migration.",
+			"and mannequins) on the GitHub Enterprise Cloud side of a migration.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

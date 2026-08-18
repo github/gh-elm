@@ -7,6 +7,15 @@ against the GitHub Enterprise Server (GHES) REST API.
 `/enterprise/live-migrations` REST API with a normal personal access token, so it runs from
 your own machine — no SSH into the appliance required.
 
+## Project status
+
+`gh-elm` is under active development and maintained by GitHub's migrations team.
+External contributions are welcome.
+
+The extension is focused on Enterprise Live Migrations from GitHub Enterprise Server. It
+requires a GHES version that provides the ELM REST API and is not a replacement for other
+GitHub migration tools.
+
 ## Installation
 
 ```sh
@@ -122,7 +131,7 @@ gh elm target mannequin claim --github-org octo-org --csv mannequins.csv --skip-
 
 - **Source** — your GitHub Enterprise Server (GHES) appliance (URL + a PAT with the
   `admin:enterprise` scope).
-- **Target** — the GitHub Enterprise Cloud (Proxima) migration target (URL + a PAT). Optional;
+- **Target** — the GitHub Enterprise Cloud migration target (URL + a PAT). Optional;
   only needed for `gh elm target` commands.
 
 Where values are stored:
@@ -202,3 +211,21 @@ Releases are drafted automatically and built with GoReleaser:
 
 The published binaries are named `gh-elm_<version>_<os>-<arch>` so that
 `gh extension install github/gh-elm` and `gh extension upgrade` can pick the right asset.
+
+## Contributing
+
+External contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development
+requirements and pull request guidance.
+
+## Maintainers
+
+See [CODEOWNERS](CODEOWNERS).
+
+## Support
+
+See [SUPPORT.md](SUPPORT.md) for support channels and expectations.
+
+## License
+
+This project is licensed under the terms of the MIT open source license. See
+[LICENSE](LICENSE) for the full terms.

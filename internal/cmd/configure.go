@@ -17,7 +17,7 @@ import (
 )
 
 // newConfigureCmd builds the `gh elm configure` command: an interactive setup
-// for the source (GHES) and target (GHEC/Proxima) API URLs and tokens.
+// for the source (GHES) and target (GHEC) API URLs and tokens.
 func newConfigureCmd() *cobra.Command {
 	var (
 		showFlag  bool
@@ -27,7 +27,7 @@ func newConfigureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Interactively set up credentials for gh elm",
-		Long: "Configure the source (GHES) and target (GHEC/Proxima) API URLs and tokens that\n" +
+		Long: "Configure the source (GHES) and target (GHEC) API URLs and tokens that\n" +
 			"gh elm uses.\n\n" +
 			"URLs are saved to gh-elm's config file. Tokens are stored in your OS keyring\n" +
 			"(macOS Keychain, Linux Secret Service, Windows Credential Manager) when one is\n" +
@@ -99,7 +99,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		),
 		huh.NewGroup(
 			huh.NewConfirm().
-				Title("Configure target (GHEC/Proxima) credentials now?").
+				Title("Configure target (GHEC) credentials now?").
 				Description("Needed for `gh elm target` commands. You can add these later.").
 				Value(&configureTarget),
 		),
@@ -116,7 +116,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		targetForm := huh.NewForm(
 			huh.NewGroup(
 				huh.NewNote().
-					Title("Target — GitHub Enterprise Cloud (Proxima)").
+					Title("Target — GitHub Enterprise Cloud").
 					Description("The destination the repositories are migrating to."),
 				huh.NewInput().
 					Title("Target URL").
@@ -181,7 +181,7 @@ func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
 	fmt.Fprintln(out, "Source (GHES):")
 	fmt.Fprintf(out, "  url:   %s\n", orUnset(cfg.SourceURL))
 	fmt.Fprintf(out, "  token: %s\n", sourceToken)
-	fmt.Fprintln(out, "Target (GHEC/Proxima):")
+	fmt.Fprintln(out, "Target (GHEC):")
 	fmt.Fprintf(out, "  url:   %s\n", orUnset(cfg.TargetURL))
 	fmt.Fprintf(out, "  token: %s\n", targetToken)
 	fmt.Fprintf(out, "\nStored at:\n  config:      %s\n  credentials: %s\n",

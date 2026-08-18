@@ -1,4 +1,4 @@
-// Package endpoints resolves the source (GHES) and target (GHEC/Proxima) API
+// Package endpoints resolves the source (GHES) and target (GHEC) API
 // endpoints — a base URL and token — applying gh-elm's precedence order:
 //
 //	explicit flag  >  environment variable  >  stored config/credentials
@@ -56,7 +56,7 @@ func (r *Resolver) Source(flagURL, flagToken string) (Endpoint, error) {
 	return ep, nil
 }
 
-// Target resolves the target (GHEC/Proxima) endpoint. flagURL and flagToken take
+// Target resolves the target (GHEC) endpoint. flagURL and flagToken take
 // highest precedence; pass "" when they are not set.
 func (r *Resolver) Target(flagURL, flagToken string) (Endpoint, error) {
 	return r.resolve(flagURL, flagToken, config.EnvTargetURL, config.EnvTargetToken, r.cfg.TargetURL, creds.TargetToken)

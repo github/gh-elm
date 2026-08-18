@@ -19,13 +19,13 @@ import (
 // newMannequinCmd builds the `gh elm target mannequin` command group — `list`
 // (fetch a target org's mannequins as CSV) and `claim` (reclaim one or more
 // mannequins), ported from gh-gei's generate-mannequin-csv and
-// reclaim-mannequin. Both operate on the target (GHEC/Proxima) organization via
+// reclaim-mannequin. Both operate on the target (GHEC) organization via
 // its GitHub GraphQL/REST API.
 func newMannequinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mannequin",
 		Short: "List and claim mannequins on the target org",
-		Long: "Work with mannequins on a target (GHEC/Proxima) organization: `list` writes\n" +
+		Long: "Work with mannequins on a target (GHEC) organization: `list` writes\n" +
 			"them as CSV, and `claim` reclaims them (mapping each mannequin to a target user).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -54,7 +54,7 @@ func newMannequinListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List a target org's mannequins as CSV",
-		Long: "List the mannequins for a target (GHEC/Proxima) organization and write them\n" +
+		Long: "List the mannequins for a target (GHEC) organization and write them\n" +
 			"as CSV. By default the CSV is written to stdout; pass --output to write a file.\n" +
 			"The CSV can then be edited and fed to `gh elm target mannequin claim --csv`.",
 		Args: cobra.NoArgs,
@@ -131,7 +131,7 @@ func newMannequinClaimCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "claim",
 		Short: "Claim (reclaim) one or more mannequins on the target org",
-		Long: "Claim mannequins on a target (GHEC/Proxima) organization, mapping each\n" +
+		Long: "Claim mannequins on a target (GHEC) organization, mapping each\n" +
 			"mannequin to a target user. Claim a single mannequin with --mannequin-user\n" +
 			"and --target-user, or claim many at once with --csv (see `gh elm target\n" +
 			"mannequin list`). Use --skip-invitation to reattribute immediately without\n" +
