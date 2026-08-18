@@ -81,7 +81,7 @@ func sourceFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(sourceToken, "source-token", "", "Override the source (GHES) API token.")
 }
 
-// resolveTargetEndpoint returns the configured target (GHEC) API base URL
+// resolveTargetEndpoint returns the configured target (GitHub with Data Residency) API base URL
 // (GH_TARGET_HOST / stored config), scheme-normalized to https. It exists ONLY
 // to satisfy an API defect: the create endpoint requires a target_api_endpoint
 // even though these commands otherwise never call the target API, so there is no
@@ -264,7 +264,7 @@ func newStatusCmd() *cobra.Command {
 
 // newLookupTargetIDCmd builds `gh elm migration lookup-target-id`. It fetches the
 // migration's status document from the GHES REST API and surfaces the target
-// (destination) migration ID that ELM assigned on the GHEC side.
+// migration ID that ELM assigned on the destination (GitHub with Data Residency) side.
 func newLookupTargetIDCmd() *cobra.Command {
 	var (
 		migrationID string
@@ -275,7 +275,7 @@ func newLookupTargetIDCmd() *cobra.Command {
 		Use:   "lookup-target-id",
 		Short: "Look up the target (destination) migration ID for a migration",
 		Long: "Fetch a migration's status from the GHES REST API and report the target\n" +
-			"migration ID that ELM assigned on the destination (GHEC) side. Human-readable\n" +
+			"migration ID that ELM assigned on the destination (GitHub with Data Residency) side. Human-readable\n" +
 			"by default; add --json for a machine-readable object.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

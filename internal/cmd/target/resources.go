@@ -18,7 +18,7 @@ import (
 )
 
 // newResourcesCmd builds `gh elm target resources`, which lists a migration's
-// resources from the target (GHEC) REST API. The API exposes these as
+// resources from the target (GitHub with Data Residency) REST API. The API exposes these as
 // migration nodes — GET /enterprise/migration/:id/nodes.
 func newResourcesCmd() *cobra.Command {
 	var (
@@ -35,7 +35,7 @@ func newResourcesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resources",
 		Short: "List a migration's resources from the target",
-		Long: "List a migration's resources from the target (GHEC) REST API.\n" +
+		Long: "List a migration's resources from the target (GitHub with Data Residency) REST API.\n" +
 			"Filter by repository, state, and origin. When --origin is omitted, resources\n" +
 			"from both the backfill and live_update origins are listed.",
 		Args: cobra.NoArgs,

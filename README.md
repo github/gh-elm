@@ -43,7 +43,8 @@ gh elm configure --reset # remove stored config and credentials
 
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
-  migration's destination (GHEC) migration ID for use with the `gh elm target *` commands.
+  migration's destination (GitHub with Data Residency) migration ID for use with the
+  `gh elm target *` commands.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -55,11 +56,12 @@ Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
 
-Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`
-(human-readable by default; add `--json` for a machine-readable object). The numeric target
-migration ID it returns is the `--migration-id` value the `gh elm target *` commands (for
-example `gh elm target resources` and `gh elm target report`) expect, so use this to bridge
-from a migration's source UUID to the target ID those commands need:
+Look up a migration's destination (GitHub with Data Residency) migration ID —
+`gh elm migration lookup-target-id` (human-readable by default; add `--json` for a
+machine-readable object). The numeric target migration ID it returns is the `--migration-id`
+value the `gh elm target *` commands (for example `gh elm target resources` and
+`gh elm target report`) expect, so use this to bridge from a migration's source UUID to the
+target ID those commands need:
 
 ```sh
 # Human-readable
@@ -131,7 +133,7 @@ gh elm target mannequin claim --github-org octo-org --csv mannequins.csv --skip-
 
 - **Source** — your GitHub Enterprise Server (GHES) appliance (URL + a PAT with the
   `admin:enterprise` scope).
-- **Target** — the GitHub Enterprise Cloud migration target (URL + a PAT). Optional;
+- **Target** — the GitHub with Data Residency migration target (URL + a PAT). Optional;
   only needed for `gh elm target` commands.
 
 Where values are stored:
@@ -187,7 +189,7 @@ local build. Rebuild with `make build` to pick up changes.
 Integration tests build a temporary `gh-elm` executable and run it as a real
 subprocess against local HTTP test servers. They use isolated configuration and
 a file-backed credential store, require no GitHub credentials, and do not
-contact live GHES or GHEC environments.
+contact live GHES or GitHub with Data Residency environments.
 
 CI runs these tests natively on Linux, macOS, and Windows.
 
