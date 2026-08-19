@@ -42,4 +42,8 @@ migration mig-1 created but failed to start: The migration service is temporaril
 	t.Run("preserves the existing format for other errors", func(t *testing.T) {
 		assert.Equal(t, "Error: something broke\n", FormatError(errors.New("something broke")))
 	})
+
+	t.Run("capitalizes a non-ASCII fallback status", func(t *testing.T) {
+		assert.Equal(t, "Échec", formatHTTPStatus(0, "0 ÉCHEC"))
+	})
 }
