@@ -671,22 +671,24 @@ func TestMinimumELMVersion(t *testing.T) {
 		assert.Equal(t, "3.17.17", minimum)
 	})
 
-	t.Run("enforces each documented release floor", func(t *testing.T) {
-		for below, floor := range map[string]string{
-			"3.17.16": "3.17.17",
-			"3.18.10": "3.18.11",
-			"3.19.7":  "3.19.8",
-			"3.20.3":  "3.20.4",
-			"3.21.1":  "3.21.2",
-		} {
-			minimum, unsupported := minimumELMVersion(below)
-			assert.True(t, unsupported, "version %s", below)
-			assert.Equal(t, floor, minimum, "version %s", below)
+	t.Run("enforces the 3.17 release floor", func(t *testing.T) {
+		assertReleaseFloor(t, "3.17.16", "3.17.17")
+	})
 
-			minimum, unsupported = minimumELMVersion(floor)
-			assert.False(t, unsupported, "version %s", floor)
-			assert.Empty(t, minimum, "version %s", floor)
-		}
+	t.Run("enforces the 3.18 release floor", func(t *testing.T) {
+		assertReleaseFloor(t, "3.18.10", "3.18.11")
+	})
+
+	t.Run("enforces the 3.19 release floor", func(t *testing.T) {
+		assertReleaseFloor(t, "3.19.7", "3.19.8")
+	})
+
+	t.Run("enforces the 3.20 release floor", func(t *testing.T) {
+		assertReleaseFloor(t, "3.20.3", "3.20.4")
+	})
+
+	t.Run("enforces the 3.21 release floor", func(t *testing.T) {
+		assertReleaseFloor(t, "3.21.1", "3.21.2")
 	})
 
 	t.Run("accepts a newer release line", func(t *testing.T) {
@@ -706,6 +708,18 @@ func TestMinimumELMVersion(t *testing.T) {
 		assert.False(t, unsupported)
 		assert.Empty(t, minimum)
 	})
+}
+
+func assertReleaseFloor(t *testing.T, below, floor string) {
+	t.Helper()
+
+	minimum, unsupported := minimumELMVersion(below)
+	assert.True(t, unsupported, "version %s", below)
+	assert.Equal(t, floor, minimum, "version %s", below)
+
+	minimum, unsupported = minimumELMVersion(floor)
+	assert.False(t, unsupported, "version %s", floor)
+	assert.Empty(t, minimum, "version %s", floor)
 }
 
 func TestLookupTargetID(t *testing.T) {
