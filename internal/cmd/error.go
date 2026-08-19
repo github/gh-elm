@@ -43,15 +43,15 @@ func FormatError(err error) string {
 }
 
 func formatHTTPErrorMessage(err error, httpErr *elmapi.HTTPError) string {
-	context := strings.TrimSuffix(err.Error(), httpErr.Error())
-	context = strings.TrimSuffix(context, ": ")
-	if context == "" {
+	prefix := strings.TrimSuffix(err.Error(), httpErr.Error())
+	prefix = strings.TrimSuffix(prefix, ": ")
+	if prefix == "" {
 		return httpErr.Message
 	}
 	if httpErr.Message == "" {
-		return context
+		return prefix
 	}
-	return context + ": " + httpErr.Message
+	return prefix + ": " + httpErr.Message
 }
 
 func formatHTTPStatus(statusCode int, status string) string {
