@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/theme"
@@ -64,5 +66,6 @@ func formatHTTPStatus(statusCode int, status string) string {
 	}
 
 	statusText = strings.ToLower(statusText)
-	return strings.ToUpper(statusText[:1]) + statusText[1:]
+	first, size := utf8.DecodeRuneInString(statusText)
+	return string(unicode.ToUpper(first)) + statusText[size:]
 }

@@ -1,7 +1,6 @@
 package elmapi
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,7 +25,7 @@ func TestHTTPErrorEnterpriseVersion(t *testing.T) {
 	require.Error(t, err)
 
 	var httpErr *HTTPError
-	require.True(t, errors.As(err, &httpErr))
+	require.ErrorAs(t, err, &httpErr)
 	assert.Equal(t, "3.18.10", httpErr.EnterpriseVersion)
 	assert.Equal(t, "Not Found", httpErr.Message)
 	assert.Equal(t, "https://docs.github.com/rest", httpErr.DocumentationURL)

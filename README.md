@@ -44,7 +44,8 @@ gh elm configure --reset # remove stored config and credentials
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
   migration's destination (GitHub with Data Residency) migration ID for use with the
-  `gh elm target *` commands.
+  `gh elm target *` commands. Create, status, list, and revert-cutover output is
+  human-readable by default; add `--json` for the raw API response.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -56,15 +57,27 @@ Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
 
-Create a migration using concise repository coordinates:
+Migration responses are rendered for people by default:
 
 ```sh
+# Create a migration using concise repository coordinates and show its ID and expiry
 gh elm migration create source-org/repo target-org/repo
-# List in-progress migrations, falling back to created migrations when empty
+
+# Show formatted status details, or list migrations (falls back to created
+# migrations when no in-progress migrations are found)
+gh elm migration status --migration-id <uuid>
 gh elm migration list
+
+# Preserve the raw API response for scripts and jq
+gh elm migration status --migration-id <uuid> --json | jq .combined_state.status
+gh elm migration list --status all --json | jq '.migrations[]'
 
 # Cancel a migration (the -m/--migration-id flag remains supported)
 gh elm migration cancel <uuid>
+
+# Revert cutover with human-readable results, or inspect the raw response
+gh elm migration revert-cutover --migration-id <uuid>
+gh elm migration revert-cutover --migration-id <uuid> --json | jq .success
 ```
 
 Look up a migration's destination (GitHub with Data Residency) migration ID —

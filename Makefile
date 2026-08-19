@@ -38,6 +38,14 @@ tidy: ## Tidy go.mod/go.sum
 .PHONY: audit
 audit: fmt vet lint test test-integration ## Run formatting, lint, unit, and integration checks
 
+.PHONY: kitchen-sink
+kitchen-sink: ## Preview all migration renderers with forced semantic color
+	@go run ./cmd/kitchen-sink --color
+
+.PHONY: kitchen-sink-json
+kitchen-sink-json: ## Preview the raw JSON used by the kitchen sink
+	@go run ./cmd/kitchen-sink --json
+
 .PHONY: lint
 lint: ## Run golangci-lint
 	script/lint-go-code
