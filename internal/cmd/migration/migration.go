@@ -763,7 +763,7 @@ func sameMigrationRepositories(migration elmapi.MigrationSummary, req elmapi.Cre
 }
 
 func migrationListEmpty(list elmapi.ListMigrationsResponse) bool {
-	return len(list.Migrations) == 0 || list.TotalCount == 0
+	return len(list.Migrations) == 0 && list.TotalCount == 0
 }
 
 // resolveVisibility validates the --target-visibility flag. The REST API accepts

@@ -386,6 +386,20 @@ func TestList(t *testing.T) {
 		assert.Contains(t, out, "active-id")
 	})
 
+	t.Run("does not fall back when migrations are returned despite a zero total count", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[{"migration_id":"active-id","status":"in_progress"}],"total_count":0}`))
+		}))
+		defer srv.Close()
+
+		out := run(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+		assert.Contains(t, out, "active-id")
+	})
+
 	t.Run("rejects an invalid status", func(t *testing.T) {
 		err := runErr(t, "list", "--status", "bogus",
 			"--source-url", "https://x", "--source-token", "tok")
