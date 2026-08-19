@@ -177,7 +177,7 @@ func newCreateCmd() *cobra.Command {
 			}
 
 			if err := ensureUniqueCreatedMigration(cmd.Context(), client, req); err != nil {
-				return annotateAuthError(err, srcURL)
+				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
 
 			resp, err := client.CreateMigration(cmd.Context(), req)
@@ -365,7 +365,7 @@ func newListCmd() *cobra.Command {
 						Status: elmapi.StatusCreated,
 					})
 					if err != nil {
-						return annotateAuthError(err, srcURL)
+						return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 					}
 				}
 			}
