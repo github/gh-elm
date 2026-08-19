@@ -69,27 +69,29 @@ func TestConfigureShow(t *testing.T) {
 }
 
 func TestConfigureAlias(t *testing.T) {
-	seedFileStore(t)
+	t.Run("executes show", func(t *testing.T) {
+		seedFileStore(t)
 
-	root := NewRootCmd("test")
-	var output bytes.Buffer
-	root.SetOut(&output)
-	root.SetErr(&output)
-	root.SetArgs([]string{"config", "--show"})
+		root := NewRootCmd("test")
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetErr(&output)
+		root.SetArgs([]string{"config", "--show"})
 
-	require.NoError(t, root.Execute())
-	assert.Contains(t, output.String(), "Source (GHES)")
-}
+		require.NoError(t, root.Execute())
+		assert.Contains(t, output.String(), "Source (GHES)")
+	})
 
-func TestConfigureHelpHidesAlias(t *testing.T) {
-	root := NewRootCmd("test")
-	var output bytes.Buffer
-	root.SetOut(&output)
-	root.SetArgs([]string{"configure", "--help"})
+	t.Run("is hidden from configure help", func(t *testing.T) {
+		root := NewRootCmd("test")
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetArgs([]string{"configure", "--help"})
 
-	require.NoError(t, root.Execute())
-	assert.NotContains(t, output.String(), "ALIASES")
-	assert.NotContains(t, output.String(), "configure, config")
+		require.NoError(t, root.Execute())
+		assert.NotContains(t, output.String(), "ALIASES")
+		assert.NotContains(t, output.String(), "configure, config")
+	})
 }
 
 func TestConfigureReset(t *testing.T) {
