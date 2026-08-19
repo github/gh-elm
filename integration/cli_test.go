@@ -76,7 +76,6 @@ func TestMigrationStatus(t *testing.T) {
 			"--json",
 			"--migration-id",
 			"mig-1",
-			"--json",
 			"--source-url",
 			srv.URL,
 			"--source-token",
@@ -245,7 +244,6 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			"--json",
 			"--migration-id",
 			"mig-1",
-			"--json",
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
@@ -266,7 +264,6 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			"--json",
 			"--migration-id",
 			"mig-1",
-			"--json",
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
@@ -287,7 +284,6 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			"--json",
 			"--migration-id",
 			"mig-1",
-			"--json",
 			"--source-url",
 			flagServer.URL,
 			"--source-token",
