@@ -1,0 +1,254 @@
+name: gh-elm E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: Branch, tag, or commit SHA to test
+        required: true
+        type: string
+      mode:
+        description: E2E test mode
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+
+permissions:
+  contents: read
+
+# Only one gh-elm E2E run may use the sandbox at a time. A new run waits
+# instead of cancelling a migration test that is already in progress.
+concurrency:
+  group: gh-elm-e2e-sandbox
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve candidate revision
+    runs-on: ubuntu-latest
+
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      harness_present: ${{ steps.candidate.outputs.harness_present }}
+
+    steps:
+      - name: Validate candidate input
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$CANDIDATE_REF" ]]; then
+            echo "::error::candidate_ref cannot be empty."
+            exit 1
+          fi
+
+          if [[ "$CANDIDATE_REF" == -* ]]; then
+            echo "::error::candidate_ref cannot begin with '-'."
+            exit 1
+          fi
+
+          if [[ "$CANDIDATE_REF" == *$'\n'* || "$CANDIDATE_REF" == *$'\r'* ]]; then
+            echo "::error::candidate_ref cannot contain line breaks."
+            exit 1
+          fi
+
+      # This job does not use the E2E environment and receives no E2E secrets.
+      # Checking out the candidate is safe here because no candidate code is run.
+      - name: Check out candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_ref }}
+          persist-credentials: false
+
+      - name: Resolve immutable commit
+        id: candidate
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          E2E_MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sha="$(git rev-parse HEAD)"
+
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve the candidate to a full commit SHA."
+            exit 1
+          fi
+
+          if [[ -f scripts/e2e/test-elm-ghes.sh ]]; then
+            harness_present=true
+          else
+            harness_present=false
+          fi
+
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "harness_present=$harness_present" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## gh-elm E2E candidate"
+            echo
+            echo "- Requested ref: \`$CANDIDATE_REF\`"
+            echo "- Resolved commit: \`$sha\`"
+            echo "- Environment: \`gh-elm-e2e-sandbox\`"
+            echo "- Mode: \`$E2E_MODE\`"
+            echo "- E2E harness present: \`$harness_present\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  no-harness:
+    name: E2E harness not present
+    needs: resolve
+    if: needs.resolve.outputs.harness_present != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Explain why no test ran
+        shell: bash
+        run: |
+          {
+            echo "## E2E test not run"
+            echo
+            echo "The selected revision does not contain:"
+            echo
+            echo "\`scripts/e2e/test-elm-ghes.sh\`"
+            echo
+            echo "No E2E credentials were requested and no external services were contacted."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::notice::The selected revision has no E2E harness. Nothing was run."
+
+  smoke:
+    name: Smoke E2E
+    needs: resolve
+    if: needs.resolve.outputs.harness_present == 'true'
+    runs-on: ubuntu-latest
+
+    # Credentials and variables come from this single, approved sandbox.
+    environment:
+      name: gh-elm-e2e-sandbox
+
+    env:
+      # Source GHES
+      SOURCE_HOST: ${{ vars.E2E_GHES_URL }}
+      SOURCE_TOKEN: ${{ secrets.E2E_GHES_TOKEN }}
+      SOURCE_ORG: ${{ vars.E2E_SOURCE_ORG }}
+      SOURCE_REPO: ${{ vars.E2E_SOURCE_REPO }}
+
+      # Migration target
+      TARGET_HOST: ${{ vars.E2E_TARGET_URL }}
+      TARGET_TOKEN: ${{ secrets.E2E_TARGET_PAT }}
+      TARGET_ORG: ${{ vars.E2E_TARGET_ORG }}
+      TARGET_VISIBILITY: ${{ vars.E2E_TARGET_VISIBILITY }}
+
+      # E2E harness configuration
+      E2E_MODE: ${{ inputs.mode }}
+      E2E_RUN_ID: actions-${{ github.run_id }}-${{ github.run_attempt }}
+      OUTDIR: ${{ github.workspace }}/elm-results
+
+    steps:
+      # Check out the immutable SHA resolved before E2E credentials were
+      # requested. If the branch moves while this workflow waits, this job
+      # still tests the original commit.
+      - name: Check out approved candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - name: Verify checked-out commit
+        env:
+          EXPECTED_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          actual_sha="$(git rev-parse HEAD)"
+
+          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Checked out $actual_sha; expected $EXPECTED_SHA."
+            exit 1
+          fi
+
+          echo "Testing immutable commit: $actual_sha"
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_variables=(
+            SOURCE_HOST
+            SOURCE_TOKEN
+            SOURCE_ORG
+            SOURCE_REPO
+            TARGET_HOST
+            TARGET_TOKEN
+            TARGET_ORG
+            TARGET_VISIBILITY
+          )
+
+          missing=()
+
+          for variable in "${required_variables[@]}"; do
+            if [[ -z "${!variable:-}" ]]; then
+              missing+=("$variable")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::The gh-elm-e2e-sandbox environment is missing required configuration."
+            printf 'Missing: %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+          echo "Required E2E configuration is present."
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run E2E smoke test
+        id: e2e
+        shell: bash
+        run: bash scripts/e2e/test-elm-ghes.sh
+
+      - name: Add E2E summary
+        if: always()
+        env:
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
+          E2E_MODE: ${{ inputs.mode }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          {
+            echo "## gh-elm E2E execution"
+            echo
+            echo "- Candidate: \`$CANDIDATE_SHA\`"
+            echo "- Environment: \`gh-elm-e2e-sandbox\`"
+            echo "- Mode: \`$E2E_MODE\`"
+            echo "- Job result: \`$JOB_STATUS\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -f "$OUTDIR/evidence.md" ]]; then
+            {
+              echo
+              echo "### Harness evidence"
+              echo
+              cat "$OUTDIR/evidence.md"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gh-elm-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: elm-results/
+          if-no-files-found: warn
+          retention-days: 14
