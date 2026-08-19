@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/github/gh-elm/internal/elmapi"
+	"github.com/github/gh-elm/internal/theme"
 )
 
 func TestFormatError(t *testing.T) {
@@ -39,8 +42,20 @@ migration mig-1 created but failed to start: The migration service is temporaril
 `, FormatError(err))
 	})
 
-	t.Run("preserves the existing format for other errors", func(t *testing.T) {
-		assert.Equal(t, "Error: something broke\n", FormatError(errors.New("something broke")))
+	t.Run("renders other errors with a separate header", func(t *testing.T) {
+		assert.Equal(t, "Error\nsomething broke\n", FormatError(errors.New("something broke")))
+	})
+
+	t.Run("styles the native error header as a failure", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		output := FormatError(errors.New("something broke"))
+		assert.Equal(t, theme.New().Failure.Bold(true).Render("Error")+"\nsomething broke\n", output)
+		assert.Equal(t, theme.New().Failure.Bold(true).Render("Error")+"\nsomething broke\n", output)
 	})
 
 	t.Run("capitalizes a non-ASCII fallback status", func(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/render"
 )
 
 // newReportCmd builds the `gh elm target report` command group — `create`,
@@ -274,9 +275,9 @@ type reportCreateView struct {
 
 func printReportCreate(w io.Writer, v reportCreateView) {
 	if v.AlreadyInProgress {
-		fmt.Fprintln(w, "A report for this stage was already in progress; reusing it.")
+		fmt.Fprintln(w, render.Success("A report for this stage was already in progress; reusing it."))
 	} else {
-		fmt.Fprintln(w, "Report requested.")
+		fmt.Fprintln(w, render.Success("Report requested."))
 	}
 	if !v.RequestedAt.IsZero() {
 		fmt.Fprintf(w, "Requested at: %s\n", v.RequestedAt.Format(time.RFC3339))

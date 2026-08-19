@@ -16,15 +16,14 @@ const emptyValue = "—"
 func MigrationCreate(v elmapi.CreateMigrationResponse) string {
 	styles := theme.New()
 	expiresAt := valueOrEmpty(pointerString(v.ExpiresAt))
-	return styles.Success.Bold(true).Render("Migration successfully created") + "\n" +
+	return Success("Migration successfully created") + "\n" +
 		field("Migration ID", styles.Bold.Render(valueOrEmpty(v.MigrationID))) + "\n" +
 		styles.Muted.Render(fmt.Sprintf("  %-*s%s", fieldLabelWidth, "Expires", expiresAt)) + "\n\n"
 }
 
 // MigrationCancel renders a successful migration cancellation.
 func MigrationCancel(migrationID string) string {
-	styles := theme.New()
-	return styles.Success.Render("✓") + " Migration " + valueOrEmpty(migrationID) + " cancelled.\n\n"
+	return Success("Migration "+valueOrEmpty(migrationID)+" cancelled.") + "\n\n"
 }
 
 // MigrationStatus renders a migration status response.

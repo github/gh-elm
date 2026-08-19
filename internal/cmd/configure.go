@@ -13,6 +13,7 @@ import (
 
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/creds"
+	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
 
@@ -161,7 +162,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintln(out, "Saved gh elm configuration.")
+	fmt.Fprintln(out, render.Success("Saved gh elm configuration."))
 	fmt.Fprintf(out, "  config:      %s\n", configPathOrUnknown())
 	fmt.Fprintf(out, "  credentials: %s\n", store.Location())
 	return nil
@@ -206,7 +207,7 @@ func runConfigureReset(cmd *cobra.Command) error {
 	if err := creds.ClearAll(creds.SourceToken, creds.TargetToken); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Cleared gh elm configuration and credentials.")
+	fmt.Fprintln(cmd.OutOrStdout(), render.Success("Cleared gh elm configuration and credentials."))
 	return nil
 }
 

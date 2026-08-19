@@ -46,7 +46,7 @@ func TestInvalidCommand(t *testing.T) {
 
 	require.NotEqual(t, 0, result.ExitCode)
 	assert.Empty(t, result.Stdout)
-	assert.Contains(t, result.Stderr, "Error:")
+	assert.Contains(t, result.Stderr, "Error\n")
 	assert.Contains(t, result.Stderr, "unknown command")
 	assert.NotContains(t, result.Stderr, "Usage:")
 }
@@ -124,7 +124,7 @@ func TestMigrationStatus(t *testing.T) {
 		assert.Empty(t, result.Stdout)
 		assert.Equal(t, int32(1), requestCount.Load())
 
-		assert.Contains(t, result.Stderr, "Error:")
+		assert.Contains(t, result.Stderr, "Error\n")
 		assert.Contains(t, result.Stderr, "authentication failed")
 		assert.Contains(t, result.Stderr, "HTTP 401")
 		assert.Contains(t, result.Stderr, "GH_SOURCE_HOST")

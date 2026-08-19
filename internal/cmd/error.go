@@ -16,7 +16,8 @@ import (
 func FormatError(err error) string {
 	var httpErr *elmapi.HTTPError
 	if !errors.As(err, &httpErr) {
-		return fmt.Sprintf("Error: %v\n", err)
+		styles := theme.New()
+		return styles.Failure.Bold(true).Render("Error") + "\n" + err.Error() + "\n"
 	}
 
 	styles := theme.New()

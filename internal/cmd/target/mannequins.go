@@ -14,6 +14,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/endpoints"
 	"github.com/github/gh-elm/internal/ghapi"
+	"github.com/github/gh-elm/internal/render"
 )
 
 // newMannequinCmd builds the `gh elm target mannequin` command group — `list`
@@ -94,7 +95,7 @@ func newMannequinListCmd() *cobra.Command {
 				if err := ghapi.WriteMannequinCSV(f, records); err != nil {
 					return fmt.Errorf("writing %s: %w", output, err)
 				}
-				log.Infof("Wrote CSV to %s.", output)
+				log.Successf("Wrote CSV to %s.", output)
 				return nil
 			}
 
@@ -274,6 +275,10 @@ type mannequinLogger struct{ w io.Writer }
 
 func (l mannequinLogger) Infof(format string, args ...any) {
 	fmt.Fprintf(l.w, format+"\n", args...)
+}
+
+func (l mannequinLogger) Successf(format string, args ...any) {
+	fmt.Fprintln(l.w, render.Success(fmt.Sprintf(format, args...)))
 }
 
 func (l mannequinLogger) Warnf(format string, args ...any) {

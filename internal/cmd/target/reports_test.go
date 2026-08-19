@@ -49,7 +49,20 @@ func TestReportCreate(t *testing.T) {
 
 		assert.Equal(t, "REPORT_STAGE_BACKFILL", gotStage)
 		assert.Equal(t, "REPORT_STATE_ALL", gotState)
-		assert.Contains(t, out, "Report requested.", "expected human confirmation")
+		assert.Contains(t, out, "✓ Report requested.", "expected human confirmation")
+	})
+
+	t.Run("marks a reused in-progress report as successful", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"alreadyInProgress":true}`))
+		}))
+		defer srv.Close()
+
+		out := runReports(t, "report", "create", "--migration-id", "42", "--stage", "backfill",
+			"--target-url", srv.URL, "--target-token", "tok")
+
+		assert.Contains(t, out, "✓ A report for this stage was already in progress; reusing it.")
 	})
 
 	t.Run("emits the raw API JSON with --json", func(t *testing.T) {

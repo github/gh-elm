@@ -104,7 +104,7 @@ func TestConfigureReset(t *testing.T) {
 
 	out, err := execConfigure("--reset")
 	require.NoError(t, err, "configure --reset")
-	assert.Contains(t, out, "Cleared", "expected a cleared message")
+	assert.Contains(t, out, "✓ Cleared", "expected a successful cleared message")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)

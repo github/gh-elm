@@ -209,7 +209,7 @@ func newCreateCmd() *cobra.Command {
 				return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s created and started.\n", resp.Value.MigrationID)
+			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s created and started.", resp.Value.MigrationID)))
 			return nil
 		},
 	}
@@ -250,7 +250,7 @@ func newStartCmd() *cobra.Command {
 			if watch {
 				return runWatch(cmd, client, srcURL, migrationID)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s started.\n", migrationID)
+			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s started.", migrationID)))
 			return nil
 		},
 	}
@@ -472,7 +472,7 @@ func newCutoverCmd() *cobra.Command {
 			if watch {
 				return runWatch(cmd, client, srcURL, migrationID)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Cutover initiated for migration %s.\n", migrationID)
+			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Cutover initiated for migration %s.", migrationID)))
 			return nil
 		},
 	}
@@ -576,7 +576,7 @@ func newPauseCmd() *cobra.Command {
 			if err := client.PauseMigration(cmd.Context(), migrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s paused.\n", migrationID)
+			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s paused.", migrationID)))
 			return nil
 		},
 	}
@@ -605,7 +605,7 @@ func newResumeCmd() *cobra.Command {
 			if err := client.ResumeMigration(cmd.Context(), migrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s resumed.\n", migrationID)
+			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s resumed.", migrationID)))
 			return nil
 		},
 	}

@@ -5,12 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/github/gh-elm/internal/theme"
 )
 
 // Write writes a fully rendered human-readable document.
 func Write(out io.Writer, document string) error {
 	_, err := io.WriteString(out, document)
 	return err
+}
+
+// Success renders a successful-operation confirmation.
+func Success(message string) string {
+	return theme.New().Success.Render("✓") + " " + message
 }
 
 // WriteRawJSON writes an API JSON document followed by a newline.

@@ -47,7 +47,7 @@ func TestCreate(t *testing.T) {
 		assert.Equal(t, "acme-cloud", gotBody.TargetOrganizationLogin)
 		assert.Equal(t, "web", gotBody.TargetRepositoryName)
 		assert.Equal(t, "internal", gotBody.TargetVisibility)
-		assert.Contains(t, out, "Migration successfully created")
+		assert.Contains(t, out, "✓ Migration successfully created")
 		assert.Contains(t, out, "Migration ID")
 		assert.Contains(t, out, "mig-1")
 	})
@@ -95,7 +95,7 @@ func TestCreate(t *testing.T) {
 			"--start", "--source-url", srv.URL, "--source-token", "tok")
 
 		assert.True(t, startCalled, "start endpoint was not called")
-		assert.Contains(t, out, "created and started")
+		assert.Contains(t, out, "✓ Migration mig-2 created and started.")
 	})
 
 	t.Run("rejects mixed positional and flag repositories", func(t *testing.T) {
@@ -251,7 +251,7 @@ func TestStart(t *testing.T) {
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/start"), "path = %q", gotPath)
-		assert.Contains(t, out, "started")
+		assert.Contains(t, out, "✓ Migration mig-1 started.")
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
@@ -444,6 +444,7 @@ func TestActions(t *testing.T) {
 
 			assert.Equal(t, http.MethodPost, gotMethod)
 			assert.True(t, strings.HasSuffix(gotPath, tc.wantPath), "path = %q, want suffix %q", gotPath, tc.wantPath)
+			assert.Contains(t, out, "✓")
 			assert.Contains(t, out, tc.wantOut)
 		})
 	}

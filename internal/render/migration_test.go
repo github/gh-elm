@@ -24,7 +24,7 @@ func TestMigrationCreate(t *testing.T) {
 	t.Run("renders a successful creation", func(t *testing.T) {
 		expiresAt := "2026-09-01T16:34:20Z"
 
-		assert.Equal(t, `Migration successfully created
+		assert.Equal(t, `✓ Migration successfully created
   Migration ID        897930cf-51cb-4e2d-9806-6357a6e66b55
   Expires             2026-09-01T16:34:20Z
 
@@ -48,7 +48,7 @@ func TestMigrationCreate(t *testing.T) {
 			ExpiresAt:   &expiresAt,
 		})
 
-		assert.Contains(t, output, styles.Success.Bold(true).Render("Migration successfully created"))
+		assert.Contains(t, output, styles.Success.Render("✓")+" Migration successfully created")
 		assert.Contains(t, output, styles.Bold.Render("mig-1"))
 		assert.Contains(t, output, styles.Muted.Render("  Expires             "+expiresAt))
 	})
@@ -215,6 +215,23 @@ func TestStatusPresentation(t *testing.T) {
 }
 
 func TestOutputWriters(t *testing.T) {
+	t.Run("success confirmation uses the semantic success glyph", func(t *testing.T) {
+		assert.Equal(t, "✓ Operation completed.", Success("Operation completed."))
+	})
+
+	t.Run("success confirmation colors only the checkmark", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		output := Success("Operation completed.")
+
+		assert.Equal(t, theme.New().Success.Render("✓")+" Operation completed.", output)
+		assert.NotContains(t, output, theme.New().Success.Render("Operation completed."))
+	})
+
 	t.Run("human output surfaces writer errors", func(t *testing.T) {
 		assert.Error(t, Write(failWriter{}, "output"))
 	})
