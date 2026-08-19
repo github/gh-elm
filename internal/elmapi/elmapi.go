@@ -23,9 +23,10 @@ import (
 const (
 	defaultTimeout = 30 * time.Second
 
-	acceptHeader     = "application/vnd.github+json"
-	apiVersionHeader = "X-GitHub-Api-Version"
-	apiVersion       = "2022-11-28"
+	acceptHeader            = "application/vnd.github+json"
+	apiVersionHeader        = "X-GitHub-Api-Version"
+	apiVersion              = "2022-11-28"
+	enterpriseVersionHeader = "X-GitHub-Enterprise-Version"
 
 	// maxErrorBody bounds how much of an error response body we surface.
 	maxErrorBody = 500
@@ -73,11 +74,23 @@ func NewClient(baseURL, token string, opts ...Option) *Client {
 	return c
 }
 
+// CheckAuthentication verifies that the configured token can access the
+// authenticated-user endpoint.
+func (c *Client) CheckAuthentication(ctx context.Context) error {
+	if err := c.get(ctx, "/user", nil, nil); err != nil {
+		return fmt.Errorf("checking authentication: %w", err)
+	}
+	return nil
+}
+
 // HTTPError is returned when the API responds with a non-2xx status.
 type HTTPError struct {
-	StatusCode int
-	Status     string
-	Message    string
+	StatusCode        int
+	Status            string
+	Message           string
+	DocumentationURL  string
+	CorrelationID     string
+	EnterpriseVersion string
 }
 
 func (e *HTTPError) Error() string {
@@ -143,10 +156,14 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 	}
 
 	if resp.StatusCode != wantStatus {
+		apiErr := decodeErrorResponse(respBody)
 		return &HTTPError{
-			StatusCode: resp.StatusCode,
-			Status:     resp.Status,
-			Message:    truncate(strings.TrimSpace(string(respBody)), maxErrorBody),
+			StatusCode:        resp.StatusCode,
+			Status:            resp.Status,
+			Message:           apiErr.Message,
+			DocumentationURL:  apiErr.DocumentationURL,
+			CorrelationID:     apiErr.CorrelationID,
+			EnterpriseVersion: resp.Header.Get(enterpriseVersionHeader),
 		}
 	}
 
@@ -156,6 +173,24 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 		}
 	}
 	return nil
+}
+
+type errorResponse struct {
+	Message          string `json:"message"`
+	DocumentationURL string `json:"documentation_url"`
+	CorrelationID    string `json:"correlation_id"`
+}
+
+func decodeErrorResponse(body []byte) errorResponse {
+	var apiErr errorResponse
+	if err := json.Unmarshal(body, &apiErr); err != nil || apiErr.Message == "" {
+		apiErr.Message = strings.TrimSpace(string(body))
+	}
+
+	apiErr.Message = truncate(apiErr.Message, maxErrorBody)
+	apiErr.DocumentationURL = truncate(apiErr.DocumentationURL, maxErrorBody)
+	apiErr.CorrelationID = truncate(apiErr.CorrelationID, maxErrorBody)
+	return apiErr
 }
 
 func truncate(s string, n int) string {

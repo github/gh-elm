@@ -16,7 +16,7 @@ var version = "dev"
 
 func main() {
 	if err := cmd.NewRootCmd(version).Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		fmt.Fprint(os.Stderr, cmd.FormatError(err))
 		os.Exit(1)
 	}
 }
