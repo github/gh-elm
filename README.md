@@ -60,18 +60,20 @@ Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
 Migration responses are rendered for people by default:
 
 ```sh
-# Create a migration and show its ID and expiry
-gh elm migration create \
-  --source-org source-org --source-repo repo \
-  --target-org target-org --target-repo repo
+# Create a migration using concise repository coordinates and show its ID and expiry
+gh elm migration create source-org/repo target-org/repo
 
-# Show formatted status details or list migrations
+# Show formatted status details, or list migrations (falls back to created
+# migrations when no in-progress migrations are found)
 gh elm migration status --migration-id <uuid>
-gh elm migration list --status all
+gh elm migration list
 
 # Preserve the raw API response for scripts and jq
 gh elm migration status --migration-id <uuid> --json | jq .combined_state.status
 gh elm migration list --status all --json | jq '.migrations[]'
+
+# Cancel a migration (the -m/--migration-id flag remains supported)
+gh elm migration cancel <uuid>
 
 # Revert cutover with human-readable results, or inspect the raw response
 gh elm migration revert-cutover --migration-id <uuid>

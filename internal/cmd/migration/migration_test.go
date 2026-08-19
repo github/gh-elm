@@ -10,13 +10,21 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/github/gh-elm/internal/elmapi"
 )
 
 func TestCreate(t *testing.T) {
-	t.Run("creates a migration and prints human-readable output", func(t *testing.T) {
+	t.Run("creates a migration from positional repositories and prints human-readable output", func(t *testing.T) {
 		var gotPath, gotMethod string
 		var gotBody elmapiCreateBody
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				assert.Equal(t, elmapi.StatusCreated, r.URL.Query().Get("status"))
+				assert.Equal(t, "100", r.URL.Query().Get("page_size"))
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
 			gotPath, gotMethod = r.URL.Path, r.Method
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
 			w.WriteHeader(http.StatusCreated)
@@ -25,8 +33,7 @@ func TestCreate(t *testing.T) {
 		defer srv.Close()
 
 		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
-		out := run(t, "create", "--source-org", "acme", "--source-repo", "web",
-			"--target-org", "acme-cloud", "--target-repo", "web",
+		out := run(t, "create", "acme/web", "acme-cloud/web",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.Equal(t, http.MethodPost, gotMethod)
@@ -35,7 +42,10 @@ func TestCreate(t *testing.T) {
 		assert.Equal(t, "https://api.example.ghe.com", gotBody.TargetAPIEndpoint)
 		// pat_name is stubbed with a sentinel (API-defect workaround).
 		assert.Equal(t, "BOGON", gotBody.PATName)
+		assert.Equal(t, "acme", gotBody.SourceOrganizationLogin)
 		assert.Equal(t, "web", gotBody.SourceRepositoryName)
+		assert.Equal(t, "acme-cloud", gotBody.TargetOrganizationLogin)
+		assert.Equal(t, "web", gotBody.TargetRepositoryName)
 		assert.Equal(t, "internal", gotBody.TargetVisibility)
 		assert.Contains(t, out, "Migration successfully created")
 		assert.Contains(t, out, "Migration ID")
@@ -44,7 +54,11 @@ func TestCreate(t *testing.T) {
 
 	t.Run("--json preserves the raw create response", func(t *testing.T) {
 		const respBody = `{"migration_id":"mig-1","expires_at":null,"future_field":"preserved"}`
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(respBody))
 		}))
@@ -61,6 +75,10 @@ func TestCreate(t *testing.T) {
 	t.Run("create --start posts start and reports success", func(t *testing.T) {
 		var startCalled bool
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/start") {
 				startCalled = true
 				w.WriteHeader(http.StatusNoContent)
@@ -78,6 +96,106 @@ func TestCreate(t *testing.T) {
 
 		assert.True(t, startCalled, "start endpoint was not called")
 		assert.Contains(t, out, "created and started")
+	})
+
+	t.Run("rejects mixed positional and flag repositories", func(t *testing.T) {
+		err := runErr(t, "create", "a/r", "b/r", "--source-org", "a",
+			"--source-url", "https://x", "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be combined")
+	})
+
+	t.Run("rejects malformed positional repositories", func(t *testing.T) {
+		err := runErr(t, "create", "a/r/extra", "b/r",
+			"--source-url", "https://x", "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid source repository")
+		assert.Contains(t, err.Error(), "exactly one slash")
+	})
+
+	t.Run("rejects a partial repository flag set", func(t *testing.T) {
+		err := runErr(t, "create", "--source-org", "a", "--source-repo", "r",
+			"--source-url", "https://x", "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "all four repository flags")
+	})
+
+	t.Run("rejects a duplicate created migration case-insensitively", func(t *testing.T) {
+		var createCalled bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				createCalled = true
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
+			_, _ = w.Write([]byte(`{"migrations":[{
+				"migration_id":"existing-id",
+				"source_organization_login":"ACME",
+				"source_repository_name":"WEB",
+				"target_organization_login":"ACME-CLOUD",
+				"target_repository_name":"WEB"
+			}],"total_count":1}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		err := runErr(t, "create", "acme/web", "acme-cloud/web",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "created migration already exists")
+		assert.Contains(t, err.Error(), "existing-id")
+		assert.False(t, createCalled)
+	})
+
+	t.Run("checks every created migration page", func(t *testing.T) {
+		var cursors []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cursors = append(cursors, r.URL.Query().Get("after"))
+			if r.URL.Query().Get("after") == "" {
+				_, _ = w.Write([]byte(`{"migrations":[{
+					"migration_id":"other-id",
+					"source_organization_login":"other",
+					"source_repository_name":"repo",
+					"target_organization_login":"elsewhere",
+					"target_repository_name":"repo"
+				}],"total_count":2,"next_cursor":"page-2"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"migrations":[{
+				"migration_id":"existing-id",
+				"source_organization_login":"acme",
+				"source_repository_name":"web",
+				"target_organization_login":"acme-cloud",
+				"target_repository_name":"web"
+			}],"total_count":2}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		err := runErr(t, "create", "acme/web", "acme-cloud/web",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Equal(t, []string{"", "page-2"}, cursors)
+		assert.Contains(t, err.Error(), "existing-id")
+	})
+
+	t.Run("surfaces duplicate preflight failures", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		t.Setenv("GH_TARGET_HOST", "api.example.ghe.com")
+		err := runErr(t, "create", "acme/web", "acme-cloud/web",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "checking for an existing migration")
 	})
 
 	t.Run("rejects public visibility", func(t *testing.T) {
@@ -107,7 +225,7 @@ func TestCreate(t *testing.T) {
 	t.Run("requires the core flags", func(t *testing.T) {
 		err := runErr(t, "create", "--source-url", "https://x", "--source-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "required")
+		assert.Contains(t, err.Error(), "requires")
 	})
 
 	t.Run("errors when no target host is configured (API-defect workaround)", func(t *testing.T) {
@@ -207,6 +325,67 @@ func TestList(t *testing.T) {
 		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
 	})
 
+	t.Run("bare list falls back to created migrations", func(t *testing.T) {
+		const createdBody = `{"migrations":[{"migration_id":"created-id","status":"created"}],"total_count":1}`
+		var statuses []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			status := r.URL.Query().Get("status")
+			statuses = append(statuses, status)
+			if status == "" {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+				return
+			}
+			_, _ = w.Write([]byte(createdBody))
+		}))
+		defer srv.Close()
+
+		out := run(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, []string{"", elmapi.StatusCreated}, statuses)
+		assert.Contains(t, out, "Migrations (1)")
+		assert.Contains(t, out, "created-id")
+	})
+
+	t.Run("does not fall back when page size is explicit", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+		}))
+		defer srv.Close()
+
+		run(t, "list", "--page-size", "25", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+	})
+
+	t.Run("does not fall back when a cursor is explicit", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
+		}))
+		defer srv.Close()
+
+		run(t, "list", "--after", "cursor", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+	})
+
+	t.Run("does not fall back when the default response is non-empty", func(t *testing.T) {
+		var requests int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			_, _ = w.Write([]byte(`{"migrations":[{"migration_id":"active-id","status":"in_progress"}],"total_count":1}`))
+		}))
+		defer srv.Close()
+
+		out := run(t, "list", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.Equal(t, 1, requests)
+		assert.Contains(t, out, "active-id")
+	})
+
 	t.Run("rejects an invalid status", func(t *testing.T) {
 		err := runErr(t, "list", "--status", "bogus",
 			"--source-url", "https://x", "--source-token", "tok")
@@ -224,7 +403,7 @@ func TestActions(t *testing.T) {
 		respBody string
 		wantOut  string
 	}{
-		{"cancel", []string{"cancel", "--migration-id", "m"}, "/enterprise/live-migrations/m/cancel", http.StatusNoContent, "", "cancelled"},
+		{"cancel", []string{"cancel", "m"}, "/enterprise/live-migrations/m/cancel", http.StatusNoContent, "", "cancelled"},
 		{"cutover", []string{"cutover-to-destination", "--migration-id", "m"}, "/enterprise/live-migrations/m/cutover", http.StatusNoContent, "", "Cutover initiated"},
 		{"pause", []string{"pause", "--migration-id", "m"}, "/enterprise/live-migrations/m/pause", http.StatusNoContent, "", "paused"},
 		{"resume", []string{"resume", "--migration-id", "m"}, "/enterprise/live-migrations/m/resume", http.StatusNoContent, "", "resumed"},
@@ -268,6 +447,63 @@ func TestRevertCutoverJSON(t *testing.T) {
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+	})
+}
+
+func TestCancel(t *testing.T) {
+	t.Run("accepts the kill alias", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		run(t, "kill", "mig-1", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/cancel"))
+	})
+
+	t.Run("accepts the migration ID flag", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		run(t, "cancel", "--migration-id", "mig-1", "--source-url", srv.URL, "--source-token", "tok")
+
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/cancel"))
+	})
+
+	t.Run("rejects positional and flag IDs together", func(t *testing.T) {
+		err := runErr(t, "cancel", "mig-1", "--migration-id", "mig-2")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be combined")
+	})
+
+	t.Run("requires a migration ID", func(t *testing.T) {
+		err := runErr(t, "cancel")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migration ID required")
+	})
+
+	t.Run("rejects extra migration IDs", func(t *testing.T) {
+		err := runErr(t, "cancel", "mig-1", "mig-2")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "at most 1 arg")
+	})
+
+	t.Run("help hides the alias", func(t *testing.T) {
+		out, err := exec(t, "cancel", "--help")
+
+		require.NoError(t, err)
+		assert.NotContains(t, out, "ALIASES")
+		assert.NotContains(t, out, "kill")
 	})
 }
 
@@ -378,10 +614,13 @@ func TestLookupTargetID(t *testing.T) {
 
 // elmapiCreateBody mirrors the create request body for assertions.
 type elmapiCreateBody struct {
-	SourceRepositoryName string `json:"source_repository_name"`
-	TargetAPIEndpoint    string `json:"target_api_endpoint"`
-	PATName              string `json:"pat_name"`
-	TargetVisibility     string `json:"target_visibility"`
+	SourceOrganizationLogin string `json:"source_organization_login"`
+	SourceRepositoryName    string `json:"source_repository_name"`
+	TargetOrganizationLogin string `json:"target_organization_login"`
+	TargetRepositoryName    string `json:"target_repository_name"`
+	TargetAPIEndpoint       string `json:"target_api_endpoint"`
+	PATName                 string `json:"pat_name"`
+	TargetVisibility        string `json:"target_visibility"`
 }
 
 // run executes a `migration` subcommand and returns output, failing on error.
