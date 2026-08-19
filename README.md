@@ -102,23 +102,22 @@ gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id
 
 # Resolve the target ID and feed it straight into a target command
 TARGET_ID=$(gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id)
-gh elm target resources --migration-id "$TARGET_ID"
+gh elm target resources --migration-id "$TARGET_ID" --repository octo-org/octo-repo
 ```
 
 Migration resources — `gh elm target resources`:
 
 ```sh
-# All resources for a migration (both backfill and live_update origins)
-gh elm target resources --migration-id 42
-
-# Filter by repository, origin, and state
+# Resources for a repository (both backfill and live_update origins)
 gh elm target resources --migration-id 42 --repository octo-org/octo-repo
-gh elm target resources --migration-id 42 --origin backfill
-gh elm target resources --migration-id 42 --state failed
+
+# Filter further by origin and state
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --origin backfill
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --state failed
 
 # Cap results and emit newline-delimited JSON for scripting
-gh elm target resources --migration-id 42 --max-results 20
-gh elm target resources --migration-id 42 --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --max-results 20
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
 ```
 
 Node reports — `gh elm target report create|status|url` (human-readable by default; add

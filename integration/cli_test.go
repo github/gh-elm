@@ -157,6 +157,7 @@ func TestTargetResourcesJSON(t *testing.T) {
 		assert.Equal(t, "/enterprise/migration/42/nodes", r.URL.Path)
 		assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
 		assert.Equal(t, "NODE_ORIGIN_BACKFILL", r.URL.Query().Get("origin"))
+		assert.Equal(t, "octo/repo", r.URL.Query().Get("repository_nwo"))
 		assert.Equal(t, "100", r.URL.Query().Get("page_size"))
 
 		w.Header().Set("Content-Type", "application/json")
@@ -171,6 +172,8 @@ func TestTargetResourcesJSON(t *testing.T) {
 		"resources",
 		"--migration-id",
 		"42",
+		"--repository",
+		"octo/repo",
 		"--origin",
 		"backfill",
 		"--json",
