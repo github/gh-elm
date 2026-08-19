@@ -247,17 +247,17 @@ func TestStart(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := run(t, "start", "--migration-id", "mig-1",
+		out := run(t, "start", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/mig-1/start"), "path = %q", gotPath)
 		assert.Contains(t, out, "✓ Migration mig-1 started.")
 	})
 
-	t.Run("requires --migration-id", func(t *testing.T) {
+	t.Run("requires a migration ID", func(t *testing.T) {
 		err := runErr(t, "start", "--source-url", "https://x", "--source-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "migration-id")
+		assert.Contains(t, err.Error(), "migration ID required")
 	})
 }
 
@@ -270,7 +270,7 @@ func TestStatus(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := run(t, "status", "--migration-id", "mig-1",
+		out := run(t, "status", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		for _, want := range []string{"Migration", "Migration ID", "mig-1", "In progress"} {
@@ -418,10 +418,10 @@ func TestActions(t *testing.T) {
 		wantOut  string
 	}{
 		{"cancel", []string{"cancel", "m"}, "/enterprise/live-migrations/m/cancel", http.StatusNoContent, "", "cancelled"},
-		{"cutover", []string{"cutover-to-destination", "--migration-id", "m"}, "/enterprise/live-migrations/m/cutover", http.StatusNoContent, "", "Cutover initiated"},
-		{"pause", []string{"pause", "--migration-id", "m"}, "/enterprise/live-migrations/m/pause", http.StatusNoContent, "", "paused"},
-		{"resume", []string{"resume", "--migration-id", "m"}, "/enterprise/live-migrations/m/resume", http.StatusNoContent, "", "resumed"},
-		{"revert-cutover", []string{"revert-cutover", "--migration-id", "m"}, "/enterprise/live-migrations/m/revert-cutover", http.StatusOK, `{"success":true,"unarchived_source_repository":true,"in_progress_cutover_terminated":false,"in_progress_migration_terminated":false}`, "Cutover reverted"},
+		{"cutover", []string{"cutover", "m"}, "/enterprise/live-migrations/m/cutover", http.StatusNoContent, "", "Cutover initiated"},
+		{"pause", []string{"pause", "m"}, "/enterprise/live-migrations/m/pause", http.StatusNoContent, "", "paused"},
+		{"resume", []string{"resume", "m"}, "/enterprise/live-migrations/m/resume", http.StatusNoContent, "", "resumed"},
+		{"revert-cutover", []string{"revert-cutover", "m"}, "/enterprise/live-migrations/m/revert-cutover", http.StatusOK, `{"success":true,"unarchived_source_repository":true,"in_progress_cutover_terminated":false,"in_progress_migration_terminated":false}`, "Cutover reverted"},
 	}
 
 	for _, tc := range cases {
@@ -535,10 +535,32 @@ func TestCutover(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		run(t, "cutover-to-destination", "--migration-id", "m", "--force",
+		run(t, "cutover", "m", "--force",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.True(t, gotForce, "expected force=true in cutover body")
+	})
+
+	t.Run("accepts the old command name as an alias", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		run(t, "cutover-to-destination", "m",
+			"--source-url", srv.URL, "--source-token", "tok")
+
+		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations/m/cutover"))
+	})
+
+	t.Run("shows the compatibility alias in help", func(t *testing.T) {
+		out, err := exec(t, "cutover", "--help")
+
+		require.NoError(t, err)
+		assert.Contains(t, out, "Aliases:")
+		assert.Contains(t, out, "cutover-to-destination")
 	})
 }
 
@@ -550,7 +572,7 @@ func TestCutoverStatus(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := run(t, "cutover-status", "--migration-id", "m",
+		out := run(t, "cutover-status", "m",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		for _, want := range []string{"Ready for cutover: false", "backfill incomplete", "acme/web"} {
@@ -733,7 +755,7 @@ func TestLookupTargetID(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := run(t, "lookup-target-id", "--migration-id", "mig-1",
+		out := run(t, "lookup-target-id", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
 
 		assert.Contains(t, out, "Target migration ID: 12345")
@@ -771,10 +793,27 @@ func TestLookupTargetID(t *testing.T) {
 		assert.NotContains(t, out, "Target migration ID", "missing migration must not print a target ID")
 	})
 
-	t.Run("requires --migration-id", func(t *testing.T) {
+	t.Run("requires a migration ID", func(t *testing.T) {
 		err := runErr(t, "lookup-target-id", "--source-url", "https://x", "--source-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "required")
+		assert.Contains(t, err.Error(), "migration ID required")
+	})
+}
+
+func TestWatchArguments(t *testing.T) {
+	t.Run("accepts a positional migration ID", func(t *testing.T) {
+		err := runErr(t, "watch", "mig-1", "--interval", "invalid")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid interval")
+		assert.NotContains(t, err.Error(), "migration ID required")
+	})
+
+	t.Run("requires a migration ID", func(t *testing.T) {
+		err := runErr(t, "watch")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migration ID required")
 	})
 }
 

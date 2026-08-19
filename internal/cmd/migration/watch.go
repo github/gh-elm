@@ -179,12 +179,16 @@ func newWatchCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "watch",
+		Use:   "watch [MIGRATION-ID]",
 		Short: "Watch migration progress with a live-updating display",
 		Long: "Display a live-updating phased timeline of migration progress, including\n" +
 			"export, backfill, and cutover status.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			interval, err := time.ParseDuration(intervalStr)
 			if err != nil {
 				return fmt.Errorf("invalid interval %q: %w", intervalStr, err)
@@ -197,14 +201,13 @@ func newWatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runWatchInterval(cmd, client, srcURL, migrationID, interval)
+			return runWatchInterval(cmd, client, srcURL, resolvedMigrationID, interval)
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to watch (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to watch (alternative to the positional argument).")
 	cmd.Flags().StringVarP(&intervalStr, "interval", "i", "2s", "Refresh interval (e.g. 2s, 5s, 1m).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }

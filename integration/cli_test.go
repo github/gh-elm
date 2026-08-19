@@ -74,7 +74,6 @@ func TestMigrationStatus(t *testing.T) {
 			"migration",
 			"status",
 			"--json",
-			"--migration-id",
 			"mig-1",
 			"--source-url",
 			srv.URL,
@@ -112,7 +111,6 @@ func TestMigrationStatus(t *testing.T) {
 			nil,
 			"migration",
 			"status",
-			"--migration-id",
 			"mig-1",
 			"--source-url",
 			srv.URL,
@@ -242,7 +240,6 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			"migration",
 			"status",
 			"--json",
-			"--migration-id",
 			"mig-1",
 		)
 
@@ -262,7 +259,6 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			"migration",
 			"status",
 			"--json",
-			"--migration-id",
 			"mig-1",
 		)
 
@@ -282,7 +278,6 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			"migration",
 			"status",
 			"--json",
-			"--migration-id",
 			"mig-1",
 			"--source-url",
 			flagServer.URL,

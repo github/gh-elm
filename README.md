@@ -63,21 +63,26 @@ Migration responses are rendered for people by default:
 # Create a migration using concise repository coordinates and show its ID and expiry
 gh elm migration create source-org/repo target-org/repo
 
-# Show formatted status details, or list migrations (falls back to created
-# migrations when no in-progress migrations are found)
-gh elm migration status --migration-id <uuid>
+# List in-progress migrations, falling back to created migrations when empty
 gh elm migration list
 
-# Preserve the raw API response for scripts and jq
-gh elm migration status --migration-id <uuid> --json | jq .combined_state.status
-gh elm migration list --status all --json | jq '.migrations[]'
-
-# Cancel a migration (the -m/--migration-id flag remains supported)
+# Migration commands accept the ID positionally (-m/--migration-id remains supported)
 gh elm migration cancel <uuid>
 
+# Show formatted status details or list migrations
+gh elm migration status <uuid>
+gh elm migration list --status all
+
+# Preserve the raw API response for scripts and jq
+gh elm migration status <uuid> --json | jq .combined_state.status
+gh elm migration list --status all --json | jq '.migrations[]'
+
+# Initiate cutover
+gh elm migration cutover <uuid>
+
 # Revert cutover with human-readable results, or inspect the raw response
-gh elm migration revert-cutover --migration-id <uuid>
-gh elm migration revert-cutover --migration-id <uuid> --json | jq .success
+gh elm migration revert-cutover <uuid>
+gh elm migration revert-cutover <uuid> --json | jq .success
 ```
 
 Look up a migration's destination (GitHub with Data Residency) migration ID —
@@ -89,13 +94,13 @@ target ID those commands need:
 
 ```sh
 # Human-readable
-gh elm migration lookup-target-id --migration-id <uuid>
+gh elm migration lookup-target-id <uuid>
 
 # Machine-readable, e.g. piped to jq
-gh elm migration lookup-target-id --migration-id <uuid> --json | jq .target_migration_id
+gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id
 
 # Resolve the target ID and feed it straight into a target command
-TARGET_ID=$(gh elm migration lookup-target-id --migration-id <uuid> --json | jq .target_migration_id)
+TARGET_ID=$(gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id)
 gh elm target resources --migration-id "$TARGET_ID"
 ```
 
