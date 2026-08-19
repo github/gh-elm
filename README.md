@@ -7,6 +7,15 @@ against the GitHub Enterprise Server (GHES) REST API.
 `/enterprise/live-migrations` REST API with a normal personal access token, so it runs from
 your own machine — no SSH into the appliance required.
 
+## Project status
+
+`gh-elm` is under active development and maintained by GitHub's migrations team.
+External contributions are welcome.
+
+The extension is focused on Enterprise Live Migrations from GitHub Enterprise Server. It
+requires a GHES version that provides the ELM REST API and is not a replacement for other
+GitHub migration tools.
+
 ## Installation
 
 ```sh
@@ -34,9 +43,9 @@ gh elm configure --reset # remove stored config and credentials
 
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
-  migration's destination (GHEC) migration ID for use with the `gh elm target *` commands.
-  Create, status, list, and revert-cutover output is human-readable by default; add
-  `--json` for the raw API response.
+  migration's destination (GitHub with Data Residency) migration ID for use with the
+  `gh elm target *` commands. Create, status, list, and revert-cutover output is
+  human-readable by default; add `--json` for the raw API response.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -69,11 +78,12 @@ gh elm migration revert-cutover --migration-id <uuid>
 gh elm migration revert-cutover --migration-id <uuid> --json | jq .success
 ```
 
-Look up a migration's destination (GHEC) migration ID — `gh elm migration lookup-target-id`
-(human-readable by default; add `--json` for a machine-readable object). The numeric target
-migration ID it returns is the `--migration-id` value the `gh elm target *` commands (for
-example `gh elm target resources` and `gh elm target report`) expect, so use this to bridge
-from a migration's source UUID to the target ID those commands need:
+Look up a migration's destination (GitHub with Data Residency) migration ID —
+`gh elm migration lookup-target-id` (human-readable by default; add `--json` for a
+machine-readable object). The numeric target migration ID it returns is the `--migration-id`
+value the `gh elm target *` commands (for example `gh elm target resources` and
+`gh elm target report`) expect, so use this to bridge from a migration's source UUID to the
+target ID those commands need:
 
 ```sh
 # Human-readable
@@ -145,7 +155,7 @@ gh elm target mannequin claim --github-org octo-org --csv mannequins.csv --skip-
 
 - **Source** — your GitHub Enterprise Server (GHES) appliance (URL + a PAT with the
   `admin:enterprise` scope).
-- **Target** — the GitHub Enterprise Cloud (Proxima) migration target (URL + a PAT). Optional;
+- **Target** — the GitHub with Data Residency migration target (URL + a PAT). Optional;
   only needed for `gh elm target` commands.
 
 Where values are stored:
@@ -190,12 +200,20 @@ Requires [Go](https://go.dev) (version pinned in [`go.mod`](go.mod)) and the `gh
 make build     # build the ./gh-elm binary
 make install   # build and install this checkout as a local gh extension
 make test      # run unit tests (with -race)
-make audit     # fmt + vet + lint + test (what CI runs)
+make test-integration  # build and exercise gh-elm as a real subprocess
+make audit     # run formatting, vet, lint, unit, and integration tests
 gh elm --version  # verify your local build is installed
 ```
 
 `make install` registers this directory as the `elm` extension, so `gh elm ...` runs your
 local build. Rebuild with `make build` to pick up changes.
+
+Integration tests build a temporary `gh-elm` executable and run it as a real
+subprocess against local HTTP test servers. They use isolated configuration and
+a file-backed credential store, require no GitHub credentials, and do not
+contact live GHES or GitHub with Data Residency environments.
+
+CI runs these tests natively on Linux, macOS, and Windows.
 
 ## Releasing
 
@@ -217,3 +235,21 @@ Releases are drafted automatically and built with GoReleaser:
 
 The published binaries are named `gh-elm_<version>_<os>-<arch>` so that
 `gh extension install github/gh-elm` and `gh extension upgrade` can pick the right asset.
+
+## Contributing
+
+External contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development
+requirements and pull request guidance.
+
+## Maintainers
+
+See [CODEOWNERS](CODEOWNERS).
+
+## Support
+
+See [SUPPORT.md](SUPPORT.md) for support channels and expectations.
+
+## License
+
+This project is licensed under the terms of the MIT open source license. See
+[LICENSE](LICENSE) for the full terms.
