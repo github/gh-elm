@@ -178,7 +178,7 @@ func renderMessages(messages []elmapi.MigrationMessage) string {
 // MigrationList renders a migration list response.
 func MigrationList(v elmapi.ListMigrationsResponse) string {
 	styles := theme.New()
-if len(v.Migrations) == 0 {
+	if len(v.Migrations) == 0 {
 		lines := []string{
 			styles.Bold.Render("Migrations"),
 			"  No migrations returned for this page.",

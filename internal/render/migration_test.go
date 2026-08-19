@@ -148,14 +148,24 @@ func TestMigrationList(t *testing.T) {
 		assert.Equal(t, "Migrations\n  No migrations available.\n  Create one with `gh elm migration create --help`.\n\n", output)
 	})
 
-	t.Run("renders an empty state when total count is zero", func(t *testing.T) {
+	t.Run("renders returned migrations even when total count is zero", func(t *testing.T) {
 		output := MigrationList(elmapi.ListMigrationsResponse{
 			Migrations: []elmapi.MigrationSummary{{MigrationID: "mig-1"}},
 			TotalCount: 0,
 		})
 
-		assert.Contains(t, output, "No migrations available.")
-		assert.NotContains(t, output, "mig-1")
+		assert.NotContains(t, output, "No migrations available.")
+		assert.Contains(t, output, "mig-1")
+	})
+
+	t.Run("renders a page-empty state when a cursor page has no migrations but a positive total", func(t *testing.T) {
+		output := MigrationList(elmapi.ListMigrationsResponse{
+			TotalCount: 5,
+		})
+
+		assert.Contains(t, output, "No migrations returned for this page.")
+		assert.NotContains(t, output, "No migrations available.")
+		assert.NotContains(t, output, "Create one with")
 	})
 
 	t.Run("mutes the empty state hint", func(t *testing.T) {
