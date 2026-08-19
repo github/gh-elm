@@ -102,7 +102,8 @@ func TestRootHelp(t *testing.T) {
 	require.NoError(t, root.Execute())
 
 	help := out.String()
-	assert.True(t, strings.HasPrefix(help, "\n"))
+	assert.False(t, strings.HasPrefix(help, "\n"))
+	assert.True(t, strings.HasSuffix(help, "\n\n"))
 	assert.Contains(t, help, "Drive Enterprise Live Migrations (ELM) against the GitHub Enterprise Server REST API.")
 	assert.Contains(t, help, "\nUSAGE\n  gh elm <command> <subcommand> [flags]\n")
 	assert.Contains(t, help, "\nCOMMANDS\n")

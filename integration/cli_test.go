@@ -73,7 +73,6 @@ func TestMigrationStatus(t *testing.T) {
 			nil,
 			"migration",
 			"status",
-			"--json",
 			"mig-1",
 			"--source-url",
 			srv.URL,
@@ -82,7 +81,9 @@ func TestMigrationStatus(t *testing.T) {
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
-		assert.Equal(t, response+"\n", result.Stdout)
+		for _, want := range []string{"Migration", "mig-1", "In progress"} {
+			assert.Contains(t, result.Stdout, want)
+		}
 		assert.Empty(t, result.Stderr)
 		assert.Equal(t, int32(1), requestCount.Load())
 
@@ -239,8 +240,8 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			baseEnv,
 			"migration",
 			"status",
-			"--json",
 			"mig-1",
+			"--json",
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
@@ -258,8 +259,8 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			},
 			"migration",
 			"status",
-			"--json",
 			"mig-1",
+			"--json",
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
@@ -277,8 +278,8 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			},
 			"migration",
 			"status",
-			"--json",
 			"mig-1",
+			"--json",
 			"--source-url",
 			flagServer.URL,
 			"--source-token",

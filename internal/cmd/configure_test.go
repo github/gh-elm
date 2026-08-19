@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -63,6 +64,8 @@ func TestConfigureShow(t *testing.T) {
 
 	out, err := execConfigure("--show")
 	require.NoError(t, err, "configure --show")
+	assert.False(t, strings.HasPrefix(out, "\n"))
+	assert.True(t, strings.HasSuffix(out, "\n\n"))
 	assert.Contains(t, out, "https://ghes.example.com", "missing source url in output")
 	assert.Contains(t, out, "set (hidden)", "seeded source token should read as set")
 	assert.Contains(t, out, "not set", "unset target token should read as not set")
@@ -104,6 +107,8 @@ func TestConfigureReset(t *testing.T) {
 
 	out, err := execConfigure("--reset")
 	require.NoError(t, err, "configure --reset")
+	assert.False(t, strings.HasPrefix(out, "\n"))
+	assert.True(t, strings.HasSuffix(out, "\n\n"))
 	assert.Contains(t, out, "✓ Cleared", "expected a successful cleared message")
 
 	cfg, err := config.Load()

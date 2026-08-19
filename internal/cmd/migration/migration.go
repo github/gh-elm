@@ -209,8 +209,7 @@ func newCreateCmd() *cobra.Command {
 				return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
 			}
 
-			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s created and started.", resp.Value.MigrationID)))
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s created and started.", resp.Value.MigrationID)))
 		},
 	}
 
@@ -254,8 +253,7 @@ func newStartCmd() *cobra.Command {
 			if watch {
 				return runWatch(cmd, client, srcURL, resolvedMigrationID)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s started.", resolvedMigrationID)))
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s started.", resolvedMigrationID)))
 		},
 	}
 
@@ -486,8 +484,7 @@ func newCutoverCmd() *cobra.Command {
 			if watch {
 				return runWatch(cmd, client, srcURL, resolvedMigrationID)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Cutover initiated for migration %s.", resolvedMigrationID)))
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Cutover initiated for migration %s.", resolvedMigrationID)))
 		},
 	}
 
@@ -525,7 +522,7 @@ func newCutoverStatusCmd() *cobra.Command {
 			if err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			return writeCutoverStatus(cmd.OutOrStdout(), detail)
+			return render.Write(cmd.OutOrStdout(), render.CutoverStatus(*detail))
 		},
 	}
 
@@ -599,8 +596,7 @@ func newPauseCmd() *cobra.Command {
 			if err := client.PauseMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s paused.", resolvedMigrationID)))
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s paused.", resolvedMigrationID)))
 		},
 	}
 
@@ -631,8 +627,7 @@ func newResumeCmd() *cobra.Command {
 			if err := client.ResumeMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s resumed.", resolvedMigrationID)))
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s resumed.", resolvedMigrationID)))
 		},
 	}
 

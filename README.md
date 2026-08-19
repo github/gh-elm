@@ -44,8 +44,9 @@ gh elm configure --reset # remove stored config and credentials
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
   migration's destination (GitHub with Data Residency) migration ID for use with the
-  `gh elm target *` commands. Create, status, list, and revert-cutover output is
-  human-readable by default; add `--json` for the raw API response.
+  `gh elm target *` commands.
+  Create, status, list, and revert-cutover output is human-readable by default; add
+  `--json` for the raw API response.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.

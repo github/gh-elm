@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,40 +133,6 @@ func authenticationError(err *elmapi.HTTPError, sourceURL string) error {
 		err.StatusCode, sourceURL, err.Message, config.EnvSourceURL, config.EnvSourceToken)
 }
 
-// writeCutoverStatus renders the cutover-readiness view derived from a
-// migration's combined state.
-func writeCutoverStatus(w io.Writer, detail *elmapi.MigrationDetail) error {
-	cs := detail.CombinedState
-	if cs == nil {
-		_, err := fmt.Fprintln(w, "No combined state reported for this migration yet.")
-		return err
-	}
-
-	fmt.Fprintf(w, "Status:            %s\n", deref(cs.Status))
-	if cs.DisplayMessage != "" {
-		fmt.Fprintf(w, "Message:           %s\n", cs.DisplayMessage)
-	}
-	fmt.Fprintf(w, "Ready for cutover: %t\n", cs.ReadyForCutover)
-
-	if len(cs.CutoverBlockers) > 0 {
-		fmt.Fprintln(w, "Blockers:")
-		for _, b := range cs.CutoverBlockers {
-			fmt.Fprintf(w, "  - %s\n", b)
-		}
-	}
-
-	for _, r := range cs.Repositories {
-		phase := deref(r.Phase)
-		fmt.Fprintf(w, "Repository %s: %s", r.RepositoryNWO, r.DisplayStatus)
-		if phase != "" {
-			fmt.Fprintf(w, " (phase: %s)", phase)
-		}
-		fmt.Fprintln(w)
-	}
-
-	return nil
-}
-
 // defaultWatchInterval is the default refresh interval for watch mode.
 const defaultWatchInterval = 2 * time.Second
 
@@ -229,12 +194,4 @@ func runWatchInterval(cmd *cobra.Command, client *elmapi.Client, _ /* sourceURL 
 		return fmt.Errorf("watch display error: %w", err)
 	}
 	return nil
-}
-
-// deref returns the value of a *string, or "" when nil.
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

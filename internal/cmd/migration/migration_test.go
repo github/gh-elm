@@ -450,21 +450,6 @@ func TestActions(t *testing.T) {
 	}
 }
 
-func TestRevertCutoverJSON(t *testing.T) {
-	t.Run("preserves the raw response", func(t *testing.T) {
-		const respBody = `{"success":true,"unarchived_source_repository":true,"future_field":"preserved"}`
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(respBody))
-		}))
-		defer srv.Close()
-
-		out := run(t, "revert-cutover", "--migration-id", "m", "--json",
-			"--source-url", srv.URL, "--source-token", "tok")
-
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
-	})
-}
-
 func TestCancel(t *testing.T) {
 	t.Run("accepts the kill alias", func(t *testing.T) {
 		var gotPath string
@@ -522,6 +507,20 @@ func TestCancel(t *testing.T) {
 	})
 }
 
+func TestRevertCutoverJSON(t *testing.T) {
+	t.Run("preserves the raw response", func(t *testing.T) {
+		const respBody = `{"success":true,"unarchived_source_repository":true,"future_field":"preserved"}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(respBody))
+		}))
+		defer srv.Close()
+
+		out := run(t, "revert-cutover", "--migration-id", "m", "--json",
+			"--source-url", srv.URL, "--source-token", "tok")
+		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+	})
+}
+
 func TestCutover(t *testing.T) {
 	t.Run("sends force in the body", func(t *testing.T) {
 		var gotForce bool
@@ -575,9 +574,10 @@ func TestCutoverStatus(t *testing.T) {
 		out := run(t, "cutover-status", "m",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		for _, want := range []string{"Ready for cutover: false", "backfill incomplete", "acme/web"} {
+		for _, want := range []string{"○ Not ready for cutover", "Backfill in progress", "backfill incomplete", "acme/web · Backfill · In progress"} {
 			assert.Contains(t, out, want)
 		}
+		assert.NotContains(t, out, "Ready for cutover: false")
 	})
 }
 

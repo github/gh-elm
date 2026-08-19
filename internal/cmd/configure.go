@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net/url"
@@ -113,9 +114,6 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		),
 	).WithTheme(theme.Form())
 
-	if _, err := fmt.Fprintln(cmd.OutOrStdout()); err != nil {
-		return err
-	}
 	if err := runForm(sourceForm); err != nil {
 		return err
 	}
@@ -161,11 +159,11 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		}
 	}
 
-	out := cmd.OutOrStdout()
-	fmt.Fprintln(out, render.Success("Saved gh elm configuration."))
-	fmt.Fprintf(out, "  config:      %s\n", configPathOrUnknown())
-	fmt.Fprintf(out, "  credentials: %s\n", store.Location())
-	return nil
+	var output bytes.Buffer
+	fmt.Fprintln(&output, render.Success("Saved gh elm configuration."))
+	fmt.Fprintf(&output, "  config:      %s\n", configPathOrUnknown())
+	fmt.Fprintf(&output, "  credentials: %s\n", store.Location())
+	return render.Write(cmd.OutOrStdout(), output.String())
 }
 
 func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
@@ -185,16 +183,16 @@ func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
 		return err
 	}
 
-	out := cmd.OutOrStdout()
-	fmt.Fprintln(out, "Source (GHES):")
-	fmt.Fprintf(out, "  url:   %s\n", orUnset(cfg.SourceURL))
-	fmt.Fprintf(out, "  token: %s\n", sourceToken)
-	fmt.Fprintln(out, "Target (GitHub with Data Residency):")
-	fmt.Fprintf(out, "  url:   %s\n", orUnset(cfg.TargetURL))
-	fmt.Fprintf(out, "  token: %s\n", targetToken)
-	fmt.Fprintf(out, "\nStored at:\n  config:      %s\n  credentials: %s\n",
+	var output bytes.Buffer
+	fmt.Fprintln(&output, "Source (GHES):")
+	fmt.Fprintf(&output, "  url:   %s\n", orUnset(cfg.SourceURL))
+	fmt.Fprintf(&output, "  token: %s\n", sourceToken)
+	fmt.Fprintln(&output, "Target (GitHub with Data Residency):")
+	fmt.Fprintf(&output, "  url:   %s\n", orUnset(cfg.TargetURL))
+	fmt.Fprintf(&output, "  token: %s\n", targetToken)
+	fmt.Fprintf(&output, "\nStored at:\n  config:      %s\n  credentials: %s\n",
 		configPathOrUnknown(), store.Location())
-	return nil
+	return render.Write(cmd.OutOrStdout(), output.String())
 }
 
 func runConfigureReset(cmd *cobra.Command) error {
@@ -207,8 +205,7 @@ func runConfigureReset(cmd *cobra.Command) error {
 	if err := creds.ClearAll(creds.SourceToken, creds.TargetToken); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), render.Success("Cleared gh elm configuration and credentials."))
-	return nil
+	return render.Write(cmd.OutOrStdout(), render.Success("Cleared gh elm configuration and credentials."))
 }
 
 // runForm runs a huh form, translating a user cancellation (Ctrl-C / Esc) into a

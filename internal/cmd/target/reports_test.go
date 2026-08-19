@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,6 +50,8 @@ func TestReportCreate(t *testing.T) {
 
 		assert.Equal(t, "REPORT_STAGE_BACKFILL", gotStage)
 		assert.Equal(t, "REPORT_STATE_ALL", gotState)
+		assert.False(t, strings.HasPrefix(out, "\n"))
+		assert.True(t, strings.HasSuffix(out, "\n\n"))
 		assert.Contains(t, out, "✓ Report requested.", "expected human confirmation")
 	})
 

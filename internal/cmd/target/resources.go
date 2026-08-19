@@ -15,6 +15,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/render"
 )
 
 // newResourcesCmd builds `gh elm target resources`, which lists a migration's
@@ -96,7 +97,7 @@ func newResourcesCmd() *cobra.Command {
 			}
 
 			if !asJSON {
-				fmt.Fprintln(out, resourceCountSummary(printed))
+				return render.Write(out, resourceCountSummary(printed))
 			}
 			return nil
 		},

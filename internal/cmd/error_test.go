@@ -27,6 +27,7 @@ func TestFormatError(t *testing.T) {
 creating migration: Error creating migration: The migration service is temporarily unavailable. Please retry later.
 Correlation ID: c515203b-1baf-46ff-bac8-44cab2af11f2
 Documentation: https://docs.github.com/enterprise-server@3.22/rest/enterprise-admin/live-migrations
+
 `, FormatError(err))
 	})
 
@@ -39,11 +40,12 @@ Documentation: https://docs.github.com/enterprise-server@3.22/rest/enterprise-ad
 
 		assert.Equal(t, `Error (503 - Service unavailable)
 migration mig-1 created but failed to start: The migration service is temporarily unavailable. Please retry later.
+
 `, FormatError(err))
 	})
 
 	t.Run("renders other errors with a separate header", func(t *testing.T) {
-		assert.Equal(t, "Error\nsomething broke\n", FormatError(errors.New("something broke")))
+		assert.Equal(t, "Error\nsomething broke\n\n", FormatError(errors.New("something broke")))
 	})
 
 	t.Run("styles the native error header as a failure", func(t *testing.T) {
@@ -54,8 +56,8 @@ migration mig-1 created but failed to start: The migration service is temporaril
 		})
 
 		output := FormatError(errors.New("something broke"))
-		assert.Equal(t, theme.New().Failure.Bold(true).Render("Error")+"\nsomething broke\n", output)
-		assert.Equal(t, theme.New().Failure.Bold(true).Render("Error")+"\nsomething broke\n", output)
+
+		assert.Equal(t, theme.New().Failure.Bold(true).Render("Error")+"\nsomething broke\n\n", output)
 	})
 
 	t.Run("capitalizes a non-ASCII fallback status", func(t *testing.T) {

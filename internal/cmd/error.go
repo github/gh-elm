@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/github/gh-elm/internal/elmapi"
+	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
 
@@ -17,7 +18,7 @@ func FormatError(err error) string {
 	var httpErr *elmapi.HTTPError
 	if !errors.As(err, &httpErr) {
 		styles := theme.New()
-		return styles.Failure.Bold(true).Render("Error") + "\n" + err.Error() + "\n"
+		return render.Human(styles.Failure.Bold(true).Render("Error") + "\n" + err.Error())
 	}
 
 	styles := theme.New()
@@ -42,7 +43,7 @@ func FormatError(err error) string {
 			styles.Info.Underline(true).Render(httpErr.DocumentationURL),
 		)
 	}
-	return output.String()
+	return render.Human(output.String())
 }
 
 func formatHTTPErrorMessage(err error, httpErr *elmapi.HTTPError) string {

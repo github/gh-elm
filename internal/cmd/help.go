@@ -8,14 +8,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
 
 func renderHelp(cmd *cobra.Command, _ []string) {
-	out := cmd.OutOrStdout()
+	var output strings.Builder
+	out := &output
 	heading := theme.New().Primary.Bold(true)
 
-	fmt.Fprintln(out)
 	writeDescription(out, cmd)
 	fmt.Fprintf(out, "\n%s\n  %s\n", heading.Render("USAGE"), usageLine(cmd))
 
@@ -41,6 +42,7 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 		fmt.Fprintf(out, "\n%s\n  Use `gh %s <command> --help` for more information about a command.\n",
 			heading.Render("LEARN MORE"), cmd.CommandPath())
 	}
+	_, _ = io.WriteString(cmd.OutOrStdout(), render.Human(output.String()))
 }
 
 func usageLine(cmd *cobra.Command) string {

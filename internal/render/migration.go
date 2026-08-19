@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -38,6 +39,14 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 		renderCombinedState(v.CombinedState),
 		renderMessages(v.Messages),
 	)
+}
+
+// CutoverStatus renders the cutover portion of a migration status response.
+func CutoverStatus(v elmapi.MigrationDetail) string {
+	if v.CombinedState == nil {
+		return "No combined state reported for this migration yet.\n"
+	}
+	return renderCombinedState(v.CombinedState)
 }
 
 func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
@@ -113,16 +122,35 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	}
 
 	styles := theme.New()
+	status := pointerString(combined.Status)
 	readiness := positiveState(combined.ReadyForCutover, "Ready for cutover", "Not ready for cutover")
 	lines := []string{
-		bullet(statusGlyph(pointerString(combined.Status)), statusText(pointerString(combined.Status))),
-		bullet(readiness.glyph, readiness.text),
+		bullet(statusGlyph(status), statusText(status)),
 	}
-	if combined.DisplayMessage != "" {
-		lines = append(lines, detail(combined.DisplayMessage))
+	renderedValues := []string{status}
+	completed := completedStatus(status)
+	readinessText := "Not ready for cutover"
+	if combined.ReadyForCutover {
+		readinessText = "Ready for cutover"
 	}
-	for _, blocker := range combined.CutoverBlockers {
-		lines = append(lines, bullet(styles.Warning.Render("!"), styles.Warning.Render(blocker)))
+	if !completed && !equivalentValue(status, readinessText) {
+		lines = append(lines, bullet(readiness.glyph, readiness.text))
+		renderedValues = append(renderedValues, readinessText)
+	}
+	if displayMessage := strings.TrimSpace(combined.DisplayMessage); displayMessage != "" &&
+		!containsEquivalentValue(renderedValues, displayMessage) {
+		lines = append(lines, detail(displayMessage))
+		renderedValues = append(renderedValues, displayMessage)
+	}
+	if !completed {
+		for _, blocker := range combined.CutoverBlockers {
+			blocker = strings.TrimSpace(blocker)
+			if blocker == "" || containsEquivalentValue(renderedValues, blocker) {
+				continue
+			}
+			lines = append(lines, bullet(styles.Warning.Render("!"), styles.Warning.Render(blocker)))
+			renderedValues = append(renderedValues, blocker)
+		}
 	}
 
 	var sections []string
@@ -130,17 +158,52 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	if len(combined.Repositories) > 0 {
 		repositoryLines := make([]string, 0, len(combined.Repositories))
 		for _, repository := range combined.Repositories {
-			phase := friendlyValue(pointerString(repository.Phase))
-			status := valueOrEmpty(repository.DisplayStatus)
+			phaseValue := strings.TrimSpace(pointerString(repository.Phase))
+			statusValue := strings.TrimSpace(repository.DisplayStatus)
+			var states []string
+			if phaseValue != "" {
+				states = append(states, friendlyValue(phaseValue))
+			}
+			if statusValue != "" && !equivalentValue(phaseValue, statusValue) {
+				states = append(states, statusValue)
+			}
+			if len(states) == 0 {
+				states = append(states, emptyValue)
+			}
 			repositoryLines = append(repositoryLines, bullet(
 				styles.Muted.Render("•"),
 				styles.Bold.Render(valueOrEmpty(repository.RepositoryNWO))+
-					styles.Muted.Render(" · "+phase+" · "+status),
+					styles.Muted.Render(" · "+strings.Join(states, " · ")),
 			))
 		}
 		sections = append(sections, renderSection("Repository states", repositoryLines...))
 	}
 	return joinSections(sections...)
+}
+
+func completedStatus(status string) bool {
+	switch normalizedValue(status) {
+	case "completed", "complete", "success", "succeeded":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsEquivalentValue(values []string, candidate string) bool {
+	return slices.ContainsFunc(values, func(value string) bool {
+		return equivalentValue(value, candidate)
+	})
+}
+
+func equivalentValue(a, b string) bool {
+	normalizedA := normalizedValue(a)
+	return normalizedA != "" && normalizedA == normalizedValue(b)
+}
+
+func normalizedValue(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), " .!?:;")
+	return strings.ToLower(strings.Join(strings.Fields(strings.ReplaceAll(value, "_", " ")), " "))
 }
 
 func renderMessages(messages []elmapi.MigrationMessage) string {
