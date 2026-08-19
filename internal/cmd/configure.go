@@ -61,6 +61,13 @@ func newConfigureCmd() *cobra.Command {
 	return cmd
 }
 
+func newConfigAliasCmd() *cobra.Command {
+	cmd := newConfigureCmd()
+	cmd.Use = "config"
+	cmd.Hidden = true
+	return cmd
+}
+
 func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	//nolint:gosec // os.Stdin.Fd() returns a small, non-negative file descriptor that always fits in an int
 	if !term.IsTerminal(int(os.Stdin.Fd())) {

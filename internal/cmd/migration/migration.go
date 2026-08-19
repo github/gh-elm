@@ -5,10 +5,12 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -40,6 +42,7 @@ func NewCommand() *cobra.Command {
 		newLookupTargetIDCmd(),
 		newListCmd(),
 		newCancelCmd(),
+		newKillCmd(),
 		newCutoverCmd(),
 		newCutoverStatusCmd(),
 		newRevertCutoverCmd(),
@@ -111,13 +114,27 @@ func newCreateCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "create",
+		Use:   "create [SOURCE-OWNER/SOURCE-REPO TARGET-OWNER/TARGET-REPO]",
 		Short: "Create a new migration",
 		Long: "Create a new Enterprise Live Migration to prepare for repository export and\n" +
 			"import. The migration is created in a `created` state; pass --start to launch\n" +
-			"it immediately.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"it immediately. Pass source and target as owner/repo arguments, or use all four\n" +
+			"repository flags for compatibility.",
+		Example: "  gh elm migration create source-org/repo target-org/repo\n" +
+			"  gh elm migration create --source-org source-org --source-repo repo --target-org target-org --target-repo repo",
+		Args: cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repositories, err := resolveCreateRepositories(args, createRepositoryFlags{
+				sourceOrg:        sourceOrg,
+				sourceRepo:       sourceRepo,
+				targetOrg:        targetOrg,
+				targetRepo:       targetRepo,
+				anyFlagSpecified: anyFlagChanged(cmd, "source-org", "source-repo", "target-org", "target-repo"),
+			})
+			if err != nil {
+				return err
+			}
+
 			visibility, err := resolveVisibility(targetVisibility)
 			if err != nil {
 				return err
@@ -146,10 +163,10 @@ func newCreateCmd() *cobra.Command {
 			}
 
 			req := elmapi.CreateMigrationRequest{
-				SourceOrganizationLogin: sourceOrg,
-				SourceRepositoryName:    sourceRepo,
-				TargetOrganizationLogin: targetOrg,
-				TargetRepositoryName:    targetRepo,
+				SourceOrganizationLogin: repositories.source.organization,
+				SourceRepositoryName:    repositories.source.repository,
+				TargetOrganizationLogin: repositories.target.organization,
+				TargetRepositoryName:    repositories.target.repository,
 				TargetAPIEndpoint:       targetAPI,
 				// WORKAROUND (API defect): the create endpoint requires a
 				// non-empty pat_name, but migration credentials are supplied by
@@ -157,6 +174,10 @@ func newCreateCmd() *cobra.Command {
 				// to send. Stub it with a sentinel until the API stops requiring it.
 				PATName:          "BOGON",
 				TargetVisibility: visibility,
+			}
+
+			if err := ensureUniqueCreatedMigration(cmd.Context(), client, req); err != nil {
+				return annotateAuthError(err, srcURL)
 			}
 
 			resp, err := client.CreateMigration(cmd.Context(), req)
@@ -181,17 +202,14 @@ func newCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&sourceOrg, "source-org", "", "Source organization login (required).")
-	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "Source repository name (required).")
-	cmd.Flags().StringVar(&targetOrg, "target-org", "", "Target organization login (required).")
-	cmd.Flags().StringVar(&targetRepo, "target-repo", "", "Target repository name (required).")
+	cmd.Flags().StringVar(&sourceOrg, "source-org", "", "Source organization login (use with --source-repo, --target-org, and --target-repo).")
+	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "Source repository name (use with --source-org, --target-org, and --target-repo).")
+	cmd.Flags().StringVar(&targetOrg, "target-org", "", "Target organization login (use with --source-org, --source-repo, and --target-repo).")
+	cmd.Flags().StringVar(&targetRepo, "target-repo", "", "Target repository name (use with --source-org, --source-repo, and --target-org).")
 	cmd.Flags().StringVar(&targetVisibility, "target-visibility", "internal", "Target repository visibility (private or internal).")
 	cmd.Flags().BoolVar(&start, "start", false, "Automatically start the migration after creating it.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After creating and starting, enter live watch mode (requires --start).")
 	sourceFlags(cmd)
-	for _, f := range []string{"source-org", "source-repo", "target-org", "target-repo"} {
-		_ = cmd.MarkFlagRequired(f)
-	}
 
 	return cmd
 }
@@ -312,11 +330,12 @@ func newListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List migrations (defaults to in-progress only)",
+		Short: "List migrations",
 		Long: "List migrations, with optional filtering by status and cursor-based pagination.\n" +
 			"Use --status to filter (created, queued, in_progress, paused, completed, failed,\n" +
 			"terminated) or --status=all to list migrations in every state. Prints the API's\n" +
-			"raw JSON response.",
+			"raw JSON response. A bare list first checks in-progress migrations and falls back\n" +
+			"to created migrations when none are found.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if status != "" {
@@ -336,6 +355,20 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return annotateAuthError(err, srcURL)
 			}
+			if status == "" && pageSize == 0 && after == "" {
+				var list migrationListResponse
+				if err := json.Unmarshal(raw, &list); err != nil {
+					return fmt.Errorf("decoding migration list: %w", err)
+				}
+				if migrationListEmpty(list) {
+					raw, err = client.ListMigrations(cmd.Context(), elmapi.ListMigrationsOptions{
+						Status: elmapi.StatusCreated,
+					})
+					if err != nil {
+						return annotateAuthError(err, srcURL)
+					}
+				}
+			}
 			return writeRaw(cmd.OutOrStdout(), raw)
 		},
 	}
@@ -353,28 +386,41 @@ func newCancelCmd() *cobra.Command {
 	var migrationID string
 
 	cmd := &cobra.Command{
-		Use:   "cancel",
+		Use:   "cancel [MIGRATION-ID]",
 		Short: "Cancel and terminate a migration",
 		Long: "Terminate a migration: it is cancelled locally, aborted on the ELM backend, and\n" +
-			"its work items are removed. This is a terminal action with no recovery.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"its work items are removed. This is a terminal action with no recovery. Pass the\n" +
+			"migration ID positionally or use --migration-id for compatibility.",
+		Example: "  gh elm migration cancel 897930cf-51cb-4e2d-9806-6357a6e66b55",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
+
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			if err := client.CancelMigration(cmd.Context(), migrationID); err != nil {
+			if err := client.CancelMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateAuthError(err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s cancelled.\n", migrationID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s cancelled.\n", resolvedMigrationID)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to cancel (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to cancel (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
+	return cmd
+}
+
+func newKillCmd() *cobra.Command {
+	cmd := newCancelCmd()
+	cmd.Use = "kill [MIGRATION-ID]"
+	cmd.Hidden = true
 	return cmd
 }
 
@@ -552,6 +598,154 @@ func sourceURLFlag(cmd *cobra.Command) *string {
 func sourceTokenFlag(cmd *cobra.Command) *string {
 	v, _ := cmd.Flags().GetString("source-token")
 	return &v
+}
+
+type repositoryCoordinate struct {
+	organization string
+	repository   string
+}
+
+type createRepositories struct {
+	source repositoryCoordinate
+	target repositoryCoordinate
+}
+
+type createRepositoryFlags struct {
+	sourceOrg        string
+	sourceRepo       string
+	targetOrg        string
+	targetRepo       string
+	anyFlagSpecified bool
+}
+
+func resolveCreateRepositories(args []string, flags createRepositoryFlags) (createRepositories, error) {
+	if len(args) > 0 && flags.anyFlagSpecified {
+		return createRepositories{}, errors.New("repository arguments cannot be combined with --source-org, --source-repo, --target-org, or --target-repo")
+	}
+
+	if len(args) > 0 {
+		if len(args) != 2 {
+			return createRepositories{}, errors.New("create requires both source and target repositories in owner/repo format")
+		}
+		source, err := parseRepositoryCoordinate(args[0])
+		if err != nil {
+			return createRepositories{}, fmt.Errorf("invalid source repository: %w", err)
+		}
+		target, err := parseRepositoryCoordinate(args[1])
+		if err != nil {
+			return createRepositories{}, fmt.Errorf("invalid target repository: %w", err)
+		}
+		return createRepositories{source: source, target: target}, nil
+	}
+
+	sourceOrg := strings.TrimSpace(flags.sourceOrg)
+	sourceRepo := strings.TrimSpace(flags.sourceRepo)
+	targetOrg := strings.TrimSpace(flags.targetOrg)
+	targetRepo := strings.TrimSpace(flags.targetRepo)
+	if sourceOrg == "" || sourceRepo == "" || targetOrg == "" || targetRepo == "" {
+		return createRepositories{}, errors.New("create requires SOURCE-OWNER/SOURCE-REPO and TARGET-OWNER/TARGET-REPO, or all four repository flags")
+	}
+
+	return createRepositories{
+		source: repositoryCoordinate{organization: sourceOrg, repository: sourceRepo},
+		target: repositoryCoordinate{organization: targetOrg, repository: targetRepo},
+	}, nil
+}
+
+func parseRepositoryCoordinate(value string) (repositoryCoordinate, error) {
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return repositoryCoordinate{}, fmt.Errorf("%q must contain exactly one slash with a non-empty owner and repository", value)
+	}
+	return repositoryCoordinate{
+		organization: strings.TrimSpace(parts[0]),
+		repository:   strings.TrimSpace(parts[1]),
+	}, nil
+}
+
+func resolveMigrationID(args []string, flagValue string, flagSpecified bool) (string, error) {
+	if len(args) > 0 && flagSpecified {
+		return "", errors.New("MIGRATION-ID cannot be combined with --migration-id")
+	}
+	if len(args) == 1 {
+		migrationID := strings.TrimSpace(args[0])
+		if migrationID == "" {
+			return "", errors.New("MIGRATION-ID cannot be empty")
+		}
+		return migrationID, nil
+	}
+	if flagSpecified {
+		migrationID := strings.TrimSpace(flagValue)
+		if migrationID != "" {
+			return migrationID, nil
+		}
+	}
+	return "", errors.New("migration ID required: pass MIGRATION-ID or use --migration-id")
+}
+
+func anyFlagChanged(cmd *cobra.Command, names ...string) bool {
+	return slices.ContainsFunc(names, func(name string) bool {
+		return cmd.Flags().Changed(name)
+	})
+}
+
+func ensureUniqueCreatedMigration(ctx context.Context, client *elmapi.Client, req elmapi.CreateMigrationRequest) error {
+	const pageSize = 100
+
+	after := ""
+	for {
+		raw, err := client.ListMigrations(ctx, elmapi.ListMigrationsOptions{
+			Status:   elmapi.StatusCreated,
+			PageSize: pageSize,
+			After:    after,
+		})
+		if err != nil {
+			return fmt.Errorf("checking for an existing migration: %w", err)
+		}
+
+		var resp migrationListResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return fmt.Errorf("checking for an existing migration: decoding response: %w", err)
+		}
+
+		for _, migration := range resp.Migrations {
+			if sameMigrationRepositories(migration, req) {
+				return fmt.Errorf(
+					"a created migration already exists for %s/%s → %s/%s (migration ID: %s)",
+					req.SourceOrganizationLogin,
+					req.SourceRepositoryName,
+					req.TargetOrganizationLogin,
+					req.TargetRepositoryName,
+					migration.MigrationID,
+				)
+			}
+		}
+
+		if resp.NextCursor == "" {
+			return nil
+		}
+		if resp.NextCursor == after {
+			return errors.New("checking for an existing migration: API returned a repeated pagination cursor")
+		}
+		after = resp.NextCursor
+	}
+}
+
+type migrationListResponse struct {
+	Migrations []elmapi.MigrationSummary `json:"migrations"`
+	TotalCount int64                     `json:"total_count"`
+	NextCursor string                    `json:"next_cursor"`
+}
+
+func sameMigrationRepositories(migration elmapi.MigrationSummary, req elmapi.CreateMigrationRequest) bool {
+	return strings.EqualFold(migration.SourceOrganizationLogin, req.SourceOrganizationLogin) &&
+		strings.EqualFold(migration.SourceRepositoryName, req.SourceRepositoryName) &&
+		strings.EqualFold(migration.TargetOrganizationLogin, req.TargetOrganizationLogin) &&
+		strings.EqualFold(migration.TargetRepositoryName, req.TargetRepositoryName)
+}
+
+func migrationListEmpty(list migrationListResponse) bool {
+	return len(list.Migrations) == 0 || list.TotalCount == 0
 }
 
 // resolveVisibility validates the --target-visibility flag. The REST API accepts
