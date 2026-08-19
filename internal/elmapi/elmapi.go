@@ -1,7 +1,7 @@
 // Package elmapi is a minimal REST client for the Enterprise Live Migrations
 // (ELM) REST API. The same client type talks to either side of a migration —
 // the source (GHES) API that backs the `migration` commands, or the target
-// (GHEC/Proxima) API that backs the `target` commands — since both are GitHub
+// (GitHub with Data Residency) API that backs the `target` commands — since both are GitHub
 // REST APIs reached with a base URL and a bearer token. gh-elm resolves those
 // two values elsewhere (see the endpoints package) and hands them to NewClient;
 // the per-endpoint request/response types live in their own files (for example
@@ -33,7 +33,7 @@ const (
 )
 
 // Client talks to an ELM REST API — either the source (GHES) or target
-// (GHEC/Proxima) endpoint. It carries a base URL and bearer token and provides
+// (GitHub with Data Residency) endpoint. It carries a base URL and bearer token and provides
 // the shared request, auth, and error-handling plumbing; endpoint-specific
 // operations are methods defined alongside their wire types.
 type Client struct {

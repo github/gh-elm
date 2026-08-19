@@ -21,7 +21,7 @@ func newReportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Create, check, and download a migration's node reports",
-		Long: "Work with a migration's node reports on the target (GHEC/Proxima) side:\n" +
+		Long: "Work with a migration's node reports on the target (GitHub with Data Residency) side:\n" +
 			"`create` requests one, `status` polls it, and `url` returns a signed download URL.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -49,7 +49,7 @@ func newReportCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Request a node report for a migration",
-		Long: "Request a node report for a migration from the target (GHEC/Proxima) REST API.\n" +
+		Long: "Request a node report for a migration from the target (GitHub with Data Residency) REST API.\n" +
 			"The report is generated asynchronously; poll `gh elm target report status` and\n" +
 			"then download it with `gh elm target report url`.",
 		Args: cobra.NoArgs,
@@ -102,7 +102,7 @@ func newReportStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Query the status of a migration's node report",
-		Long:  "Query the status of a migration's node report from the target (GHEC/Proxima) REST API.",
+		Long:  "Query a migration's node report status from the target (GitHub with Data Residency) REST API.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stage, err := resolveReportStage(stageFlag)
