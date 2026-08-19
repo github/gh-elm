@@ -27,7 +27,7 @@ func FormatError(err error) string {
 			httpErr.StatusCode,
 			formatHTTPStatus(httpErr.StatusCode, httpErr.Status),
 		)),
-		httpErr.Message,
+		formatHTTPErrorMessage(err, httpErr),
 	)
 	if httpErr.CorrelationID != "" {
 		fmt.Fprintln(&output, styles.Muted.Render("Correlation ID: "+httpErr.CorrelationID))
@@ -40,6 +40,18 @@ func FormatError(err error) string {
 		)
 	}
 	return output.String()
+}
+
+func formatHTTPErrorMessage(err error, httpErr *elmapi.HTTPError) string {
+	context := strings.TrimSuffix(err.Error(), httpErr.Error())
+	context = strings.TrimSuffix(context, ": ")
+	if context == "" {
+		return httpErr.Message
+	}
+	if httpErr.Message == "" {
+		return context
+	}
+	return context + ": " + httpErr.Message
 }
 
 func formatHTTPStatus(statusCode int, status string) string {

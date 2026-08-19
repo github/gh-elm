@@ -21,9 +21,21 @@ func TestFormatError(t *testing.T) {
 		})
 
 		assert.Equal(t, `Error (503 - Service unavailable)
-Error creating migration: The migration service is temporarily unavailable. Please retry later.
+creating migration: Error creating migration: The migration service is temporarily unavailable. Please retry later.
 Correlation ID: c515203b-1baf-46ff-bac8-44cab2af11f2
 Documentation: https://docs.github.com/enterprise-server@3.22/rest/enterprise-admin/live-migrations
+`, FormatError(err))
+	})
+
+	t.Run("preserves context when a created migration fails to start", func(t *testing.T) {
+		err := fmt.Errorf("migration mig-1 created but failed to start: %w", &elmapi.HTTPError{
+			StatusCode: 503,
+			Status:     "503 Service Unavailable",
+			Message:    "The migration service is temporarily unavailable. Please retry later.",
+		})
+
+		assert.Equal(t, `Error (503 - Service unavailable)
+migration mig-1 created but failed to start: The migration service is temporarily unavailable. Please retry later.
 `, FormatError(err))
 	})
 
