@@ -34,27 +34,28 @@ gh extension upgrade elm
 gh elm --help            # list available commands
 gh elm --version         # print the extension version
 
-gh elm configure         # interactively set up credentials
-gh elm configure --show  # print current config (tokens redacted)
-gh elm configure --reset # remove stored config and credentials
+gh elm config       # interactively set up credentials
+gh elm config show  # print current config (tokens redacted)
+gh elm config reset # remove stored config and credentials
 ```
 
 ### Command groups
 
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
-  cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
+  cancel, cutover) against the GHES REST API, plus `target-id` to resolve a
   migration's destination (GitHub with Data Residency) migration ID for use with the
   `gh elm target *` commands.
-  Create, status, list, and revert-cutover output is human-readable by default; add
+  Create, status, list, and cutover-revert output is human-readable by default; add
   `--json` for the raw API response.
-- `gh elm target report create|status|url` — request a migration's node report, poll its
+- `gh elm target report request|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
-- `gh elm target mannequin list|claim` — manage mannequins for a target org. Use --output on list command to save mannequins to a CSV, then edit and feed that CSV to the claim command via the --csv flag. See the `gh elm target mannequin` help for details.
+- `gh elm target mannequin list|reclaim` — manage mannequins for a target organization.
+  Use `--output` on `list` to save a CSV, then edit and pass it to `reclaim --csv`.
 
 ### Examples
 
-Resolve the target endpoint via `gh elm configure` (or `GH_TARGET_HOST` /
+Resolve the target endpoint via `gh elm config` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
 `--target-token` overrides.
 
@@ -81,84 +82,84 @@ gh elm migration list --status all --json | jq '.migrations[]'
 # Initiate cutover
 gh elm migration cutover <uuid>
 
-# Revert cutover with human-readable results, or inspect the raw response
-gh elm migration revert-cutover <uuid>
-gh elm migration revert-cutover <uuid> --json | jq .success
+# Inspect or revert cutover
+gh elm migration cutover status <uuid>
+gh elm migration cutover revert <uuid>
+gh elm migration cutover revert <uuid> --json | jq .success
 ```
 
 Look up a migration's destination (GitHub with Data Residency) migration ID —
-`gh elm migration lookup-target-id` (human-readable by default; add `--json` for a
-machine-readable object). The numeric target migration ID it returns is the `--migration-id`
-value the `gh elm target *` commands (for example `gh elm target resources` and
-`gh elm target report`) expect, so use this to bridge from a migration's source UUID to the
-target ID those commands need:
+`gh elm migration target-id` (human-readable by default; add `--json` for a
+machine-readable object). The numeric target migration ID it returns is the positional
+`TARGET-MIGRATION-ID` accepted by `gh elm target *` commands, so use this to bridge from a
+migration's source UUID to the target ID those commands need:
 
 ```sh
 # Human-readable
-gh elm migration lookup-target-id <uuid>
+gh elm migration target-id <uuid>
 
 # Machine-readable, e.g. piped to jq
-gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id
+gh elm migration target-id <uuid> --json | jq .target_migration_id
 
 # Resolve the target ID and feed it straight into a target command
-TARGET_ID=$(gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id)
-gh elm target resources --migration-id "$TARGET_ID" --repository octo-org/octo-repo
+TARGET_ID=$(gh elm migration target-id <uuid> --json | jq .target_migration_id)
+gh elm target resources "$TARGET_ID" octo-org/octo-repo
 ```
 
 Migration resources — `gh elm target resources`:
 
 ```sh
-# Resources for a repository (both backfill and live_update origins)
-gh elm target resources --migration-id 42 --repository octo-org/octo-repo
+# Resources for a repository (both backfill and live-update origins)
+gh elm target resources 42 octo-org/octo-repo
 
 # Filter further by origin and state
-gh elm target resources --migration-id 42 --repository octo-org/octo-repo --origin backfill
-gh elm target resources --migration-id 42 --repository octo-org/octo-repo --state failed
+gh elm target resources 42 octo-org/octo-repo --origin backfill
+gh elm target resources 42 octo-org/octo-repo --state failed
 
 # Cap results and emit newline-delimited JSON for scripting
-gh elm target resources --migration-id 42 --repository octo-org/octo-repo --max-results 20
-gh elm target resources --migration-id 42 --repository octo-org/octo-repo --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
+gh elm target resources 42 octo-org/octo-repo --max-results 20
+gh elm target resources 42 octo-org/octo-repo --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
 ```
 
-Node reports — `gh elm target report create|status|url` (human-readable by default; add
+Node reports — `gh elm target report request|status|url` (human-readable by default; add
 `--json` for the raw API response):
 
 ```sh
 # Request a backfill report over all nodes (default --state all)
-gh elm target report create --migration-id 42 --stage backfill
+gh elm target report request 42 --stage backfill
 
 # Request a live-updates report over only unmigrated nodes
-gh elm target report create --migration-id 42 --stage live_updates --state unmigrated
+gh elm target report request 42 --stage live-update --state unmigrated
 
 # Poll status (human-readable), or as raw JSON piped to jq
-gh elm target report status --migration-id 42 --stage backfill
-gh elm target report status --migration-id 42 --stage backfill --json | jq -r .status
+gh elm target report status 42 --stage backfill
+gh elm target report status 42 --stage backfill --json | jq -r .status
 
 # Grab the signed download URL and fetch the finished archive
-URL=$(gh elm target report url --migration-id 42 --stage backfill --json | jq -r .url)
+URL=$(gh elm target report url 42 --stage backfill --json | jq -r .url)
 curl -sSL "$URL" -o report.zip
 ```
 
-Mannequins — `gh elm target mannequin list` / `claim`:
+Mannequins — `gh elm target mannequin list` / `reclaim`:
 
 ```sh
 # List unclaimed mannequins to stdout, or all of them to a file
-gh elm target mannequin list --github-org octo-org
-gh elm target mannequin list --github-org octo-org --include-reclaimed --output mannequins.csv
+gh elm target mannequin list octo-org
+gh elm target mannequin list octo-org --include-reclaimed --output mannequins.csv
 
-# Claim a single mannequin via the invitation email flow
-gh elm target mannequin claim --github-org octo-org --mannequin-user octocat --target-user real-user
+# Reclaim a single mannequin via the invitation email flow
+gh elm target mannequin reclaim octo-org octocat real-user
 
 # Claim in bulk from an edited CSV
-gh elm target mannequin claim --github-org octo-org --csv mannequins.csv
+gh elm target mannequin reclaim octo-org --csv mannequins.csv
 
 # Immediate reattribution (EMU orgs only); prompts unless --no-prompt
-gh elm target mannequin claim --github-org octo-org --csv mannequins.csv --skip-invitation
+gh elm target mannequin reclaim octo-org --csv mannequins.csv --skip-invitation
 ```
 
 ## Configuration
 
-`gh elm configure` walks you through the two systems `gh elm` talks to:
+`gh elm config` walks you through the two systems `gh elm` talks to:
 
 - **Source** — your GitHub Enterprise Server (GHES) appliance (URL + a PAT with the
   `admin:enterprise` scope).
@@ -174,12 +175,12 @@ Where values are stored:
   **Codespaces and CI** (matching how `gh` itself behaves).
 
 Force a specific backend with `GH_ELM_CREDENTIAL_STORE=keyring` or `GH_ELM_CREDENTIAL_STORE=file`.
-`gh elm configure --show` prints which backend is active.
+`gh elm config show` prints which backend is active.
 
 ### Environment variables and precedence
 
 Every command resolves each URL and token in this order, so scripts and CI can skip
-`gh elm configure` entirely:
+`gh elm config` entirely:
 
 ```
 --flag  >  environment variable  >  stored config/credentials

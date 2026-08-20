@@ -26,7 +26,7 @@ const (
 
 	// graphQLFeaturesHeader opts into preview GraphQL schema features. The
 	// mannequin_claiming_emu feature exposes the reattributeMannequinToUser
-	// mutation used by `mannequin claim --skip-invitation`; without it the
+	// mutation used by `mannequin reclaim --skip-invitation`; without it the
 	// mutation is absent from the schema and the call fails with "doesn't exist
 	// on type 'Mutation'". gh-gei sends this header on every request (it is
 	// ignored by REST), so we do the same.

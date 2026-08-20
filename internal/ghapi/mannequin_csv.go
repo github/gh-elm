@@ -10,7 +10,7 @@ import (
 // MannequinRecord is one row of the mannequin CSV: the source mannequin
 // (login + node ID) and the target user login to reclaim it to. It is the
 // single schema shared by the writer (`mannequin list`) and the reader
-// (`mannequin claim --csv`), so the two can't drift.
+// (`mannequin reclaim --csv`), so the two can't drift.
 type MannequinRecord struct {
 	MannequinUser string
 	MannequinID   string
