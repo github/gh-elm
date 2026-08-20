@@ -23,6 +23,7 @@ func NewCommand() *cobra.Command {
 	targetCmd.AddCommand(newResourcesCmd())
 	targetCmd.AddCommand(newReportCmd())
 	targetCmd.AddCommand(newMannequinCmd())
+	targetCmd.AddCommand(newMigrationCmd())
 
 	return targetCmd
 }
