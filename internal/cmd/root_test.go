@@ -47,15 +47,30 @@ func TestUnknownSubcommandFails(t *testing.T) {
 // handling: a genuine unknown flag on a leaf command must still be rejected
 // rather than silently ignored.
 func TestUnknownFlagOnLeafStillFails(t *testing.T) {
-	root := NewRootCmd("test")
-	var out bytes.Buffer
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs([]string{"target", "report", "create", "--bogus", "--migration-id", "5", "--stage", "backfill"})
+	t.Run("without positional operands", func(t *testing.T) {
+		root := NewRootCmd("test")
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs([]string{"target", "report", "create", "--bogus", "--migration-id", "5", "--stage", "backfill"})
 
-	err := root.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown flag")
+		err := root.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown flag")
+	})
+
+	t.Run("with positional operands", func(t *testing.T) {
+		root := NewRootCmd("test")
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs([]string{"migration", "status", "mig-1", "--josn"})
+
+		err := root.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown flag")
+		assert.NotContains(t, err.Error(), "unknown command")
+	})
 }
 
 // TestUnknownFlagWithoutSubcommandFails ensures a bad flag with no mistyped

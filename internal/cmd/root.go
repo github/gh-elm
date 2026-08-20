@@ -48,6 +48,9 @@ func NewRootCmd(version string) *cobra.Command {
 // a genuine bad flag isn't silently ignored. Set on the root and inherited by
 // every subcommand.
 func groupFlagErrorFunc(cmd *cobra.Command, err error) error {
+	if !cmd.HasSubCommands() {
+		return err
+	}
 	if args := cmd.Flags().Args(); len(args) > 0 {
 		return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
 	}
