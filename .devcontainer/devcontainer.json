@@ -4,10 +4,8 @@
     "dockerfile": "Dockerfile"
   },
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/node:2": {
-      "version": "22"
-    }
+    "ghcr.io/devcontainers/features/copilot-cli:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "customizations": {
     "vscode": {
@@ -16,8 +14,5 @@
       ]
     }
   },
-  "onCreateCommand": {
-    "copilot-cli": "npm install -g @github/copilot",
-    "go-modules": "go mod download"
-  }
+  "onCreateCommand": "go mod download"
 }
