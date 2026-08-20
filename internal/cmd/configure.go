@@ -18,17 +18,18 @@ import (
 	"github.com/github/gh-elm/internal/theme"
 )
 
-// newConfigureCmd builds the `gh elm configure` command: an interactive setup
+// newConfigCmd builds the `gh elm config` command: an interactive setup
 // for the source (GHES) and target (GitHub with Data Residency) API URLs and tokens.
-func newConfigureCmd() *cobra.Command {
+func newConfigCmd() *cobra.Command {
 	var (
 		showFlag  bool
 		resetFlag bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "configure",
-		Short: "Interactively set up credentials for gh elm",
+		Use:         "config",
+		Short:       "Interactively set up credentials for gh elm",
+		Annotations: map[string]string{directActionAnnotation: "true"},
 		Long: "Configure the source (GHES) and target (GitHub with Data Residency) API URLs and tokens that\n" +
 			"gh elm uses.\n\n" +
 			"URLs are saved to gh-elm's config file. Tokens are stored in your OS keyring\n" +
@@ -59,21 +60,50 @@ func newConfigureCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&showFlag, "show", false, "Print the current configuration (tokens redacted)")
 	cmd.Flags().BoolVar(&resetFlag, "reset", false, "Remove stored configuration and credentials")
 	cmd.MarkFlagsMutuallyExclusive("show", "reset")
+	_ = cmd.Flags().MarkHidden("show")
+	_ = cmd.Flags().MarkHidden("reset")
+	cmd.AddCommand(newConfigShowCmd(), newConfigResetCmd())
 
 	return cmd
 }
 
-func newConfigAliasCmd() *cobra.Command {
-	cmd := newConfigureCmd()
-	cmd.Use = "config"
+func newConfigureAliasCmd() *cobra.Command {
+	cmd := newConfigCmd()
+	cmd.Use = "configure"
 	cmd.Hidden = true
 	return cmd
+}
+
+func newConfigShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Show the current configuration with tokens redacted",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			store, err := creds.NewStore()
+			if err != nil {
+				return err
+			}
+			return runConfigureShow(cmd, store)
+		},
+	}
+}
+
+func newConfigResetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset",
+		Short: "Remove stored configuration and credentials",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runConfigureReset(cmd)
+		},
+	}
 }
 
 func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	//nolint:gosec // os.Stdin.Fd() returns a small, non-negative file descriptor that always fits in an int
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return errors.New("gh elm configure is interactive and needs a terminal; " +
+		return errors.New("gh elm config is interactive and needs a terminal; " +
 			"in non-interactive environments set GH_SOURCE_HOST/GH_SOURCE_TOKEN (and " +
 			"GH_TARGET_HOST/GH_TARGET_TOKEN)")
 	}
@@ -161,8 +191,10 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 
 	var output bytes.Buffer
 	fmt.Fprintln(&output, render.Success("Saved gh elm configuration."))
-	fmt.Fprintf(&output, "  config:      %s\n", configPathOrUnknown())
-	fmt.Fprintf(&output, "  credentials: %s\n", store.Location())
+	fmt.Fprintln(&output, render.Fields(
+		render.Field{Label: "Config", Value: configPathOrUnknown()},
+		render.Field{Label: "Credentials", Value: store.Location()},
+	))
 	return render.Write(cmd.OutOrStdout(), output.String())
 }
 
@@ -185,13 +217,20 @@ func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
 
 	var output bytes.Buffer
 	fmt.Fprintln(&output, "Source (GHES):")
-	fmt.Fprintf(&output, "  url:   %s\n", orUnset(cfg.SourceURL))
-	fmt.Fprintf(&output, "  token: %s\n", sourceToken)
+	fmt.Fprintln(&output, render.Fields(
+		render.Field{Label: "URL", Value: orUnset(cfg.SourceURL)},
+		render.Field{Label: "Token", Value: sourceToken},
+	))
 	fmt.Fprintln(&output, "Target (GitHub with Data Residency):")
-	fmt.Fprintf(&output, "  url:   %s\n", orUnset(cfg.TargetURL))
-	fmt.Fprintf(&output, "  token: %s\n", targetToken)
-	fmt.Fprintf(&output, "\nStored at:\n  config:      %s\n  credentials: %s\n",
-		configPathOrUnknown(), store.Location())
+	fmt.Fprintln(&output, render.Fields(
+		render.Field{Label: "URL", Value: orUnset(cfg.TargetURL)},
+		render.Field{Label: "Token", Value: targetToken},
+	))
+	fmt.Fprintln(&output, "\nStored at:")
+	fmt.Fprintln(&output, render.Fields(
+		render.Field{Label: "Config", Value: configPathOrUnknown()},
+		render.Field{Label: "Credentials", Value: store.Location()},
+	))
 	return render.Write(cmd.OutOrStdout(), output.String())
 }
 

@@ -47,15 +47,30 @@ func TestUnknownSubcommandFails(t *testing.T) {
 // handling: a genuine unknown flag on a leaf command must still be rejected
 // rather than silently ignored.
 func TestUnknownFlagOnLeafStillFails(t *testing.T) {
-	root := NewRootCmd("test")
-	var out bytes.Buffer
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs([]string{"target", "report", "create", "--bogus", "--migration-id", "5", "--stage", "backfill"})
+	t.Run("without positional operands", func(t *testing.T) {
+		root := NewRootCmd("test")
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs([]string{"target", "report", "create", "--bogus", "--migration-id", "5", "--stage", "backfill"})
 
-	err := root.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown flag")
+		err := root.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown flag")
+	})
+
+	t.Run("with positional operands", func(t *testing.T) {
+		root := NewRootCmd("test")
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs([]string{"migration", "status", "mig-1", "--josn"})
+
+		err := root.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown flag")
+		assert.NotContains(t, err.Error(), "unknown command")
+	})
 }
 
 // TestUnknownFlagWithoutSubcommandFails ensures a bad flag with no mistyped
@@ -107,15 +122,27 @@ func TestRootHelp(t *testing.T) {
 	assert.Contains(t, help, "Drive Enterprise Live Migrations (ELM) against the GitHub Enterprise Server REST API.")
 	assert.Contains(t, help, "\nUSAGE\n  gh elm <command> <subcommand> [flags]\n")
 	assert.Contains(t, help, "\nCOMMANDS\n")
-	assert.Contains(t, help, "  configure:     Interactively set up credentials for gh elm")
+	assert.Contains(t, help, "  config:")
+	assert.Contains(t, help, "  config show:")
+	assert.Contains(t, help, "  config reset:")
 	assert.Contains(t, help, "  help:          Help about any command")
 	assert.Contains(t, help, "\nMIGRATION COMMANDS\n")
 	assert.Contains(t, help, "  migration create:")
+	assert.Contains(t, help, "  migration cutover:")
 	assert.Contains(t, help, "  migration watch:")
 	assert.Contains(t, help, "\nTARGET COMMANDS\n")
-	assert.Contains(t, help, "  target report create:")
-	assert.Contains(t, help, "  target mannequin claim:")
+	assert.Contains(t, help, "  migration cutover status:")
+	assert.Contains(t, help, "  migration cutover revert:")
+	assert.Contains(t, help, "  migration target-id:")
+	assert.Contains(t, help, "  target report request:")
+	assert.Contains(t, help, "  target mannequin reclaim:")
 	assert.Contains(t, help, "  target resources:")
+	assert.NotContains(t, help, "lookup-target-id")
+	assert.NotContains(t, help, "cutover-status")
+	assert.NotContains(t, help, "cutover-to-destination")
+	assert.NotContains(t, help, "revert-cutover")
+	assert.NotContains(t, help, "target report create:")
+	assert.NotContains(t, help, "target mannequin claim:")
 	assert.Contains(t, help, "\nFLAGS\n")
 	assert.Contains(t, help, "\nLEARN MORE\n")
 	assert.NotContains(t, help, "Available Commands:")

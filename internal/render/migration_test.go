@@ -291,6 +291,18 @@ func TestOutputWriters(t *testing.T) {
 		assert.Equal(t, "✓ Operation completed.", Success("Operation completed."))
 	})
 
+	t.Run("warning uses the semantic warning glyph", func(t *testing.T) {
+		assert.Equal(t, "! Needs attention.", Warning("Needs attention."))
+	})
+
+	t.Run("fields align labels and skip empty values", func(t *testing.T) {
+		assert.Equal(t, "  ID      42\n  Status  ready", Fields(
+			Field{Label: "ID", Value: "42"},
+			Field{Label: "Ignored"},
+			Field{Label: "Status", Value: "ready"},
+		))
+	})
+
 	t.Run("success confirmation colors only the checkmark", func(t *testing.T) {
 		previousProfile := lipgloss.ColorProfile()
 		lipgloss.SetColorProfile(termenv.ANSI256)

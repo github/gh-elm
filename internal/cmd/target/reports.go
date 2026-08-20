@@ -16,28 +16,29 @@ import (
 	"github.com/github/gh-elm/internal/render"
 )
 
-// newReportCmd builds the `gh elm target report` command group — `create`,
+// newReportCmd builds the `gh elm target report` command group — `request`,
 // `status`, and `url` — for a migration's node reports.
 func newReportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "report",
-		Short: "Create, check, and download a migration's node reports",
+		Short: "Request, check, and download a migration's node reports",
 		Long: "Work with a migration's node reports on the target (GitHub with Data Residency) side:\n" +
-			"`create` requests one, `status` polls it, and `url` returns a signed download URL.",
+			"`request` starts one, `status` polls it, and `url` returns a signed download URL.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
+	cmd.AddCommand(newReportRequestCmd())
 	cmd.AddCommand(newReportCreateCmd())
 	cmd.AddCommand(newReportStatusCmd())
 	cmd.AddCommand(newReportURLCmd())
 	return cmd
 }
 
-// newReportCreateCmd builds `gh elm target report create`, which requests a node
+// newReportRequestCmd builds `gh elm target report request`, which requests a node
 // report for a migration. POST /enterprise/migration/:id/reports.
-func newReportCreateCmd() *cobra.Command {
+func newReportRequestCmd() *cobra.Command {
 	var (
 		migrationID int64
 		stageFlag   string
@@ -48,13 +49,23 @@ func newReportCreateCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "create",
+		Use:   "request [TARGET-MIGRATION-ID]",
 		Short: "Request a node report for a migration",
 		Long: "Request a node report for a migration from the target (GitHub with Data Residency) REST API.\n" +
 			"The report is generated asynchronously; poll `gh elm target report status` and\n" +
 			"then download it with `gh elm target report url`.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Example: "  gh elm target report request 42 --stage backfill\n" +
+			"  gh elm target report request 42 --stage live-update --state unmigrated",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var positionalID string
+			if len(args) == 1 {
+				positionalID = args[0]
+			}
+			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			stage, err := resolveReportStage(stageFlag)
 			if err != nil {
 				return err
@@ -69,7 +80,7 @@ func newReportCreateCmd() *cobra.Command {
 				return err
 			}
 
-			raw, err := client.CreateReport(cmd.Context(), migrationID, stage, state)
+			raw, err := client.CreateReport(cmd.Context(), resolvedMigrationID, stage, state)
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
 			}
@@ -77,15 +88,21 @@ func newReportCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to request a report for (required).")
-	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage the report should cover: backfill or live_updates (required).")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage the report should cover: backfill or live-update (required).")
 	cmd.Flags().StringVar(&stateFlag, "state", "all", "Node states the report should cover: migrated, unmigrated, or all.")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("migration-id")
 	_ = cmd.MarkFlagRequired("stage")
 
+	return cmd
+}
+
+func newReportCreateCmd() *cobra.Command {
+	cmd := newReportRequestCmd()
+	cmd.Use = "create"
+	cmd.Hidden = true
 	return cmd
 }
 
@@ -101,11 +118,20 @@ func newReportStatusCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Query the status of a migration's node report",
-		Long:  "Query a migration's node report status from the target (GitHub with Data Residency) REST API.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:     "status [TARGET-MIGRATION-ID]",
+		Short:   "Query the status of a migration's node report",
+		Long:    "Query a migration's node report status from the target (GitHub with Data Residency) REST API.",
+		Example: "  gh elm target report status 42 --stage backfill",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var positionalID string
+			if len(args) == 1 {
+				positionalID = args[0]
+			}
+			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			stage, err := resolveReportStage(stageFlag)
 			if err != nil {
 				return err
@@ -116,7 +142,7 @@ func newReportStatusCmd() *cobra.Command {
 				return err
 			}
 
-			raw, err := client.GetReportStatus(cmd.Context(), migrationID, stage)
+			raw, err := client.GetReportStatus(cmd.Context(), resolvedMigrationID, stage)
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
 			}
@@ -124,12 +150,11 @@ func newReportStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to query the report for (required).")
-	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live_updates (required).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live-update (required).")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("migration-id")
 	_ = cmd.MarkFlagRequired("stage")
 
 	return cmd
@@ -147,13 +172,22 @@ func newReportURLCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "url",
+		Use:   "url [TARGET-MIGRATION-ID]",
 		Short: "Get a signed download URL for a finished report",
 		Long: "Get a short-lived, read-only signed URL to download a finished node report\n" +
 			"archive directly from blob storage. The report must be finished; check with\n" +
 			"`gh elm target report status` first.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Example: "  gh elm target report url 42 --stage backfill",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var positionalID string
+			if len(args) == 1 {
+				positionalID = args[0]
+			}
+			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			stage, err := resolveReportStage(stageFlag)
 			if err != nil {
 				return err
@@ -164,7 +198,7 @@ func newReportURLCmd() *cobra.Command {
 				return err
 			}
 
-			raw, err := client.GetReportURL(cmd.Context(), migrationID, stage)
+			raw, err := client.GetReportURL(cmd.Context(), resolvedMigrationID, stage)
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
 			}
@@ -172,12 +206,11 @@ func newReportURLCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64Var(&migrationID, "migration-id", 0, "Migration ID to download the report for (required).")
-	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live_updates (required).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live-update (required).")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("migration-id")
 	_ = cmd.MarkFlagRequired("stage")
 
 	return cmd
@@ -196,10 +229,10 @@ func targetClient(targetURL, targetToken string) (*elmapi.Client, string, error)
 		return nil, "", err
 	}
 	if ep.URL == "" {
-		return nil, "", fmt.Errorf("no target URL configured; run `gh elm configure`, set %s, or pass --target-url", config.EnvTargetURL)
+		return nil, "", fmt.Errorf("no target URL configured; run `gh elm config`, set %s, or pass --target-url", config.EnvTargetURL)
 	}
 	if ep.Token == "" {
-		return nil, "", fmt.Errorf("no target token configured; run `gh elm configure`, set %s, or pass --target-token", config.EnvTargetToken)
+		return nil, "", fmt.Errorf("no target token configured; run `gh elm config`, set %s, or pass --target-token", config.EnvTargetToken)
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), ep.URL, nil
 }
@@ -210,10 +243,10 @@ func resolveReportStage(s string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "backfill":
 		return elmapi.ReportStageBackfill, nil
-	case "live_updates", "live-updates":
+	case "live_update", "live-update", "live_updates", "live-updates":
 		return elmapi.ReportStageLiveUpdates, nil
 	default:
-		return "", fmt.Errorf("invalid --stage %q: must be backfill or live_updates", s)
+		return "", fmt.Errorf("invalid --stage %q: must be backfill or live-update", s)
 	}
 }
 
@@ -231,27 +264,13 @@ func resolveReportState(s string) (string, error) {
 	}
 }
 
-// writeRaw writes the API's raw JSON response followed by a newline. The report
-// endpoints return small, structured responses that callers typically pipe to
-// jq, so we echo the API JSON verbatim rather than reformat it.
-func writeRaw(w io.Writer, raw json.RawMessage) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	if _, err := w.Write(raw); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintln(w)
-	return err
-}
-
 // renderReport writes either the API's raw JSON (asJSON) or a human-readable
 // rendering parsed from it. The raw path echoes the response verbatim so unknown
 // fields survive and no zero values are fabricated; the human path only reads
 // the fields it displays.
 func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, renderView func(io.Writer, T)) error {
 	if asJSON {
-		return writeRaw(out, raw)
+		return render.WriteRawJSON(out, raw)
 	}
 	var v T
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -279,7 +298,7 @@ func printReportCreate(w io.Writer, v reportCreateView) {
 		fmt.Fprintln(w, render.Success("Report requested."))
 	}
 	if !v.RequestedAt.IsZero() {
-		fmt.Fprintf(w, "Requested at: %s\n", v.RequestedAt.Format(time.RFC3339))
+		fmt.Fprintln(w, render.Fields(render.Field{Label: "Requested", Value: v.RequestedAt.Format(time.RFC3339)}))
 	}
 }
 
@@ -299,27 +318,40 @@ type reportStatusView struct {
 }
 
 func printReportStatus(w io.Writer, v reportStatusView) {
-	fmt.Fprintf(w, "Status: %s\n", friendlyEnum(v.Status, "REPORT_STATUS_"))
-	if v.Stage != "" {
-		fmt.Fprintf(w, "Stage:  %s\n", friendlyEnum(v.Stage, "REPORT_STAGE_"))
+	status := friendlyEnum(v.Status, "REPORT_STATUS_")
+	if status == "" {
+		status = "unknown"
 	}
-	if v.State != "" {
-		fmt.Fprintf(w, "State:  %s\n", friendlyEnum(v.State, "REPORT_STATE_"))
+	if status == "finished" {
+		fmt.Fprintln(w, render.Success("Report finished."))
+	} else {
+		fmt.Fprintf(w, "○ Report %s.\n", status)
 	}
+
+	requested := ""
 	if !v.RequestedAt.IsZero() {
-		fmt.Fprintf(w, "Requested: %s\n", v.RequestedAt.Format(time.RFC3339))
+		requested = v.RequestedAt.Format(time.RFC3339)
 	}
+	finished := ""
 	if !v.FinishedAt.IsZero() {
-		fmt.Fprintf(w, "Finished:  %s\n", v.FinishedAt.Format(time.RFC3339))
+		finished = v.FinishedAt.Format(time.RFC3339)
 	}
-	if v.Format != "" {
-		fmt.Fprintf(w, "Format: %s\n", v.Format)
+	fields := render.Fields(
+		render.Field{Label: "Stage", Value: friendlyEnum(v.Stage, "REPORT_STAGE_")},
+		render.Field{Label: "State", Value: friendlyEnum(v.State, "REPORT_STATE_")},
+		render.Field{Label: "Requested", Value: requested},
+		render.Field{Label: "Finished", Value: finished},
+		render.Field{Label: "Format", Value: v.Format},
+		render.Field{Label: "Size", Value: byteCount(v.TotalSizeBytes)},
+	)
+	if fields != "" {
+		fmt.Fprintln(w, fields)
 	}
-	if v.TotalSizeBytes != "" {
-		fmt.Fprintf(w, "Total size (bytes): %s\n", v.TotalSizeBytes)
-	}
-	for _, f := range v.Files {
-		fmt.Fprintf(w, "  - %s (%s bytes)\n", f.Name, f.SizeBytes)
+	if len(v.Files) > 0 {
+		fmt.Fprintln(w, "Files")
+		for _, f := range v.Files {
+			fmt.Fprintf(w, "  • %s · %s\n", f.Name, byteCount(f.SizeBytes))
+		}
 	}
 }
 
@@ -335,6 +367,13 @@ type reportURLView struct {
 func printReportURL(w io.Writer, v reportURLView) {
 	fmt.Fprintln(w, v.URL)
 	if !v.ExpiresAt.IsZero() {
-		fmt.Fprintf(w, "Expires at: %s\n", v.ExpiresAt.Format(time.RFC3339))
+		fmt.Fprintln(w, render.Fields(render.Field{Label: "Expires", Value: v.ExpiresAt.Format(time.RFC3339)}))
 	}
+}
+
+func byteCount(value string) string {
+	if value == "" {
+		return ""
+	}
+	return value + " bytes"
 }

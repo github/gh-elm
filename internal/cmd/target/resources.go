@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -34,14 +33,39 @@ func newResourcesCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "resources",
+		Use:   "resources [TARGET-MIGRATION-ID] [REPOSITORY]",
 		Short: "List a migration's resources from the target",
 		Long: "List a migration's resources from the target (GitHub with Data Residency) REST API.\n" +
 			"A repository filter is currently required. Filter further by state and origin.\n" +
 			"When --origin is omitted, resources\n" +
-			"from both the backfill and live_update origins are listed.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"from both the backfill and live-update origins are listed.",
+		Example: "  gh elm target resources 42 octo-org/octo-repo\n" +
+			"  gh elm target resources 42 octo-org/octo-repo --state failed",
+		Args: cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var positionalID, positionalRepository string
+			argIndex := 0
+			if !cmd.Flags().Changed("migration-id") && argIndex < len(args) {
+				positionalID = args[argIndex]
+				argIndex++
+			}
+			if !cmd.Flags().Changed("repository") && argIndex < len(args) {
+				positionalRepository = args[argIndex]
+				argIndex++
+			}
+			if argIndex < len(args) {
+				return errors.New("positional target migration ID or repository duplicates a value already supplied by flag")
+			}
+
+			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
+			resolvedRepository := positionalRepository
+			if resolvedRepository == "" {
+				resolvedRepository = repository
+			}
+
 			origins, err := resolveOrigins(originFlag)
 			if err != nil {
 				return err
@@ -54,9 +78,9 @@ func newResourcesCmd() *cobra.Command {
 			// TEMPORARY API WORKAROUND: the target list-nodes endpoint currently
 			// rejects requests without repository_nwo. Remove this block once the
 			// API supports listing resources without a repository filter.
-			repository = strings.TrimSpace(repository)
-			if repository == "" {
-				return errors.New("--repository is required because the target API currently requires repository_nwo")
+			resolvedRepository = strings.TrimSpace(resolvedRepository)
+			if resolvedRepository == "" {
+				return errors.New("REPOSITORY is required because the target API currently requires repository_nwo")
 			}
 
 			resolver, err := endpoints.NewResolver()
@@ -68,10 +92,10 @@ func newResourcesCmd() *cobra.Command {
 				return err
 			}
 			if ep.URL == "" {
-				return fmt.Errorf("no target URL configured; run `gh elm configure`, set %s, or pass --target-url", config.EnvTargetURL)
+				return fmt.Errorf("no target URL configured; run `gh elm config`, set %s, or pass --target-url", config.EnvTargetURL)
 			}
 			if ep.Token == "" {
-				return fmt.Errorf("no target token configured; run `gh elm configure`, set %s, or pass --target-token", config.EnvTargetToken)
+				return fmt.Errorf("no target token configured; run `gh elm config`, set %s, or pass --target-token", config.EnvTargetToken)
 			}
 
 			client := elmapi.NewClient(ep.URL, ep.Token)
@@ -80,11 +104,11 @@ func newResourcesCmd() *cobra.Command {
 			printed := 0
 			for _, origin := range origins {
 				opts := elmapi.ListNodesOptions{
-					RepositoryNWO: repository,
+					RepositoryNWO: resolvedRepository,
 					Origin:        origin,
 					State:         state,
 				}
-				for node, err := range client.IterNodes(cmd.Context(), migrationID, opts) {
+				for node, err := range client.IterNodes(cmd.Context(), resolvedMigrationID, opts) {
 					if err != nil {
 						return annotateAuthError(err, ep.URL)
 					}
@@ -106,22 +130,23 @@ func newResourcesCmd() *cobra.Command {
 			}
 
 			if !asJSON {
+				if printed > 0 {
+					fmt.Fprintln(out)
+				}
 				return render.Write(out, resourceCountSummary(printed))
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Migration ID to list resources for (required).")
-	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Repository to list resources for in owner/repo format (currently required).")
-	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live_update (default: both).")
+	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Repository in owner/repo format (alternative to the positional argument; currently required).")
+	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live-update (default: both).")
 	cmd.Flags().StringVar(&stateFlag, "state", "", "Filter by state: pending, processed, failed, or eligible (default: all).")
 	cmd.Flags().IntVar(&maxResults, "max-results", 0, "Maximum number of resources to return (0 = all).")
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output resources as newline-delimited JSON.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("migration-id")
-
 	return cmd
 }
 
@@ -136,7 +161,7 @@ func resolveOrigins(s string) ([]string, error) {
 	case "live_update", "live-update":
 		return []string{elmapi.OriginLiveUpdate}, nil
 	default:
-		return nil, fmt.Errorf("invalid --origin %q: must be backfill or live_update", s)
+		return nil, fmt.Errorf("invalid --origin %q: must be backfill or live-update", s)
 	}
 }
 
@@ -149,7 +174,7 @@ func annotateAuthError(err error, targetURL string) error {
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
 		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
 		return fmt.Errorf("authentication failed (HTTP %d) for target %s: %s\n"+
-			"Check the target token with `gh elm configure --show`. Note the %s and %s environment variables override stored config.",
+			"Check the target token with `gh elm config show`. Note the %s and %s environment variables override stored config.",
 			httpErr.StatusCode, targetURL, httpErr.Message, config.EnvTargetURL, config.EnvTargetToken)
 	}
 	return err
@@ -175,20 +200,21 @@ func resolveState(s string) (string, error) {
 }
 
 func printResource(w io.Writer, n elmapi.Node) {
-	fmt.Fprintf(w, "Resource ID: %s\n", n.ID)
-	fmt.Fprintf(w, "Type:        %s\n", n.Type)
-	fmt.Fprintf(w, "Origin:      %s\n", friendlyEnum(n.Origin, "NODE_ORIGIN_"))
-	fmt.Fprintf(w, "State:       %s\n", friendlyEnum(n.State, "NODE_STATE_"))
+	parts := make([]string, 0, 4)
+	for _, value := range []string{
+		friendlyEnum(n.Type, "NODE_TYPE_"),
+		friendlyEnum(n.State, "NODE_STATE_"),
+		friendlyEnum(n.Origin, "NODE_ORIGIN_"),
+		n.ID,
+	} {
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	fmt.Fprintf(w, "• %s\n", strings.Join(parts, " · "))
 	if n.Error != "" {
-		fmt.Fprintf(w, "Error:       %s\n", n.Error)
+		fmt.Fprintf(w, "  %s\n", render.Warning(n.Error))
 	}
-	if !n.CreatedAt.IsZero() {
-		fmt.Fprintf(w, "Created:     %s\n", n.CreatedAt.Format(time.RFC3339))
-	}
-	if !n.UpdatedAt.IsZero() {
-		fmt.Fprintf(w, "Updated:     %s\n", n.UpdatedAt.Format(time.RFC3339))
-	}
-	fmt.Fprintln(w)
 }
 
 // printResourceJSON writes a node's raw API JSON as one NDJSON line. Emitting

@@ -154,7 +154,7 @@ var fixtures = []struct {
 		render: renderList,
 	},
 	{
-		name: "gh elm migration revert-cutover",
+		name: "gh elm migration cutover revert",
 		raw: json.RawMessage(`{
   "success": true,
   "unarchived_source_repository": true,

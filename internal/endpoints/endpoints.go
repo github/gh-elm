@@ -5,7 +5,7 @@
 //
 // The environment variables (GH_SOURCE_HOST/GH_SOURCE_TOKEN,
 // GH_TARGET_HOST/GH_TARGET_TOKEN) are a working override so scripts and CI can
-// bypass `gh elm configure` entirely.
+// bypass `gh elm config` entirely.
 package endpoints
 
 import (

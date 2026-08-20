@@ -61,7 +61,7 @@ func TestMannequinList(t *testing.T) {
 		defer srv.Close()
 
 		out, err := runMannequin(t, newMannequinListCmd, "",
-			"--github-org", "octo", "--target-url", srv.URL, "--target-token", "tok")
+			"octo", "--target-url", srv.URL, "--target-token", "tok")
 		require.NoErrorf(t, err, "list output:\n%s", out)
 		assert.Contains(t, out, "mannequin-user,mannequin-id,target-user", "missing header")
 		assert.Contains(t, out, "alice,m1,", "missing alice")
@@ -83,19 +83,19 @@ func TestMannequinList(t *testing.T) {
 		assert.Contains(t, string(data), "alice,m1,", "output file missing alice")
 	})
 
-	t.Run("requires --github-org", func(t *testing.T) {
+	t.Run("requires an organization", func(t *testing.T) {
 		_, err := runMannequin(t, newMannequinListCmd, "", "--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "github-org")
+		assert.Contains(t, err.Error(), "ORGANIZATION")
 	})
 }
 
-func TestMannequinClaim(t *testing.T) {
-	t.Run("requires csv or user+target", func(t *testing.T) {
-		_, err := runMannequin(t, newMannequinClaimCmd, "",
-			"--github-org", "octo", "--target-url", "https://x", "--target-token", "tok")
+func TestMannequinReclaim(t *testing.T) {
+	t.Run("requires mannequin and target user without csv", func(t *testing.T) {
+		_, err := runMannequin(t, newMannequinReclaimCmd, "",
+			"octo", "--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "either --csv")
+		assert.Contains(t, err.Error(), "MANNEQUIN is required")
 	})
 
 	t.Run("reclaims a single mannequin via invitation", func(t *testing.T) {
@@ -122,8 +122,8 @@ func TestMannequinClaim(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out, err := runMannequin(t, newMannequinClaimCmd, "",
-			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
+		out, err := runMannequin(t, newMannequinReclaimCmd, "",
+			"octo", "alice", "alice-t",
 			"--target-url", srv.URL, "--target-token", "tok")
 		require.NoErrorf(t, err, "claim output:\n%s", out)
 		assert.True(t, invited, "expected createAttributionInvitation to be called")
@@ -149,8 +149,8 @@ func TestMannequinClaim(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		_, err := runMannequin(t, newMannequinClaimCmd, "",
-			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
+		_, err := runMannequin(t, newMannequinReclaimCmd, "",
+			"octo", "alice", "alice-t",
 			"--skip-invitation", "--no-prompt",
 			"--target-url", srv.URL, "--target-token", "tok")
 		require.Error(t, err)
@@ -178,11 +178,40 @@ func TestMannequinClaim(t *testing.T) {
 
 		// Admin passes the eligibility check, but declines the confirmation
 		// prompt ("n"); the command must abort before any reclaim call.
-		_, err := runMannequin(t, newMannequinClaimCmd, "n\n",
+		_, err := runMannequin(t, newMannequinReclaimCmd, "n\n",
 			"--github-org", "octo", "--mannequin-user", "alice", "--target-user", "alice-t",
 			"--skip-invitation",
 			"--target-url", srv.URL, "--target-token", "tok")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "aborted")
+	})
+
+	t.Run("accepts the legacy claim command and flags", func(t *testing.T) {
+		_, err := runMannequin(t, newMannequinClaimCmd, "",
+			"--github-org", "octo", "--target-url", "https://x", "--target-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "MANNEQUIN is required")
+		assert.NotContains(t, err.Error(), "unknown command")
+	})
+
+	t.Run("rejects positional and flag organizations together", func(t *testing.T) {
+		_, err := runMannequin(t, newMannequinReclaimCmd, "",
+			"octo", "alice", "alice-t", "--org", "other")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicates a value already supplied by flag")
+	})
+
+	t.Run("mixes positional users with compatibility flags", func(t *testing.T) {
+		_, err := runMannequin(t, newMannequinReclaimCmd, "", "--org", "octo", "alice", "alice-t")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no target URL configured")
+		assert.NotContains(t, err.Error(), "duplicates")
+
+		_, err = runMannequin(t, newMannequinReclaimCmd, "", "octo", "--mannequin-user", "alice", "alice-t")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no target URL configured")
+		assert.NotContains(t, err.Error(), "duplicates")
 	})
 }

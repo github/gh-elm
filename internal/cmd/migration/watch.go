@@ -129,7 +129,7 @@ func isAuthenticationError(err *elmapi.HTTPError) bool {
 
 func authenticationError(err *elmapi.HTTPError, sourceURL string) error {
 	return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s; "+
-		"check the source token with `gh elm configure --show`. Note the %s and %s environment variables override stored config",
+		"check the source token with `gh elm config show`. Note the %s and %s environment variables override stored config",
 		err.StatusCode, sourceURL, err.Message, config.EnvSourceURL, config.EnvSourceToken)
 }
 
