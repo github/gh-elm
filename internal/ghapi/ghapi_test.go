@@ -2,9 +2,11 @@ package ghapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,10 +19,11 @@ func graphQLServer(t *testing.T, respond func(query string, vars map[string]any)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/graphql", r.URL.Path)
 		assert.Equal(t, "Bearer tok", r.Header.Get("Authorization"))
-		// The mannequin_claiming_emu feature must be requested so the
-		// reattributeMannequinToUser mutation (--skip-invitation) exists.
-		assert.Equal(t, "mannequin_claiming_emu", r.Header.Get("GraphQL-Features"),
-			"GraphQL-Features header must request mannequin_claiming_emu")
+		// The mannequin_claiming_emu and mannequin_claiming_bot features must be
+		// requested so the reattributeMannequinToUser (--skip-invitation) and
+		// reattributeMannequinToBot mutations exist.
+		assert.Equal(t, "mannequin_claiming_emu,mannequin_claiming_bot", r.Header.Get("GraphQL-Features"),
+			"GraphQL-Features header must request mannequin_claiming_emu,mannequin_claiming_bot")
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
 			Query     string         `json:"query"`
@@ -132,5 +135,69 @@ func TestReattributeMannequinToUser(t *testing.T) {
 		require.NoError(t, err, "ReattributeMannequinToUser")
 		assert.Equal(t, "m1", res.SourceID)
 		assert.Equal(t, "u1", res.TargetID)
+	})
+}
+
+func TestBotID(t *testing.T) {
+	t.Run("returns the node id for a bot", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.Path, "/users/") {
+				t.Errorf("path = %q", r.URL.Path)
+			}
+			_, _ = io.WriteString(w, `{"type":"Bot","node_id":"BOT_kgDNAbc"}`)
+		}))
+		defer srv.Close()
+
+		id, err := NewClient(srv.URL, "tok").BotID(t.Context(), "example-ci[bot]")
+		if err != nil {
+			t.Fatalf("BotID: %v", err)
+		}
+		if id != "BOT_kgDNAbc" {
+			t.Errorf("id = %q", id)
+		}
+	})
+
+	t.Run("errors when the account is not a bot", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"type":"User","node_id":"U_abc"}`)
+		}))
+		defer srv.Close()
+
+		_, err := NewClient(srv.URL, "tok").BotID(t.Context(), "mona")
+		if err == nil || !strings.Contains(err.Error(), "not a GitHub App / bot account") {
+			t.Fatalf("expected not-a-bot error, got %v", err)
+		}
+	})
+
+	t.Run("returns ErrUserNotFound on 404", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		_, err := NewClient(srv.URL, "tok").BotID(t.Context(), "ghost[bot]")
+		if !errors.Is(err, ErrUserNotFound) {
+			t.Fatalf("expected ErrUserNotFound, got %v", err)
+		}
+	})
+}
+
+func TestReattributeMannequinToBot(t *testing.T) {
+	t.Run("returns the source/target pair", func(t *testing.T) {
+		srv := graphQLServer(t, func(q string, _ map[string]any) string {
+			if !strings.Contains(q, "reattributeMannequinToBot") {
+				t.Errorf("unexpected query: %s", q)
+			}
+			return `{"data":{"reattributeMannequinToBot":{"source":{"id":"m1","login":"alice"},"target":{"id":"b1","login":"example-ci[bot]"}}}}`
+		})
+		defer srv.Close()
+
+		res, err := NewClient(srv.URL, "tok").ReattributeMannequinToBot(t.Context(), "ORG", "m1", "b1")
+		if err != nil {
+			t.Fatalf("ReattributeMannequinToBot: %v", err)
+		}
+		if res.SourceID != "m1" || res.TargetID != "b1" {
+			t.Errorf("result = %+v", res)
+		}
 	})
 }

@@ -12,10 +12,12 @@ import (
 type reclaimClient interface {
 	OrganizationID(ctx context.Context, org string) (string, error)
 	UserID(ctx context.Context, login string) (string, error)
+	BotID(ctx context.Context, login string) (string, error)
 	Mannequins(ctx context.Context, orgID string) ([]Mannequin, error)
 	MannequinsByLogin(ctx context.Context, orgID, login string) ([]Mannequin, error)
 	CreateAttributionInvitation(ctx context.Context, orgID, mannequinID, targetUserID string) (*AttributionResult, error)
 	ReattributeMannequinToUser(ctx context.Context, orgID, mannequinID, targetUserID string) (*AttributionResult, error)
+	ReattributeMannequinToBot(ctx context.Context, orgID, mannequinID, targetBotID string) (*AttributionResult, error)
 }
 
 // Logger receives human-readable progress and warnings from the service.
@@ -58,17 +60,18 @@ func (s *ReclaimService) ReclaimMannequin(ctx context.Context, mannequinUser, ma
 		return fmt.Errorf("user %s is already mapped to a user; use --force to reclaim again", mannequinUser)
 	}
 
-	targetUserID, err := s.client.UserID(ctx, targetUser)
+	isBot := isBotLogin(targetUser)
+	targetUserID, err := s.resolveTargetID(ctx, targetUser, isBot)
 	if err != nil {
 		return err
 	}
 
 	failed := false
 	for _, m := range uniqueMannequins(matches) {
-		if !s.reclaimOne(ctx, orgID, m, targetUser, targetUserID, skipInvitation) {
+		if !s.reclaimOne(ctx, orgID, m, targetUser, targetUserID, skipInvitation, isBot) {
 			failed = true
-			if skipInvitation {
-				// Skip-invitation failures are fail-fast in gh-gei.
+			if skipInvitation || isBot {
+				// Skip-invitation and bot reclaims are fail-fast in gh-gei.
 				return errors.New("failed to reclaim mannequin")
 			}
 		}
@@ -116,7 +119,8 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, records []Manneq
 			continue
 		}
 
-		claimantID, err := s.client.UserID(ctx, r.TargetUser)
+		isBot := isBotLogin(r.TargetUser)
+		claimantID, err := s.resolveTargetID(ctx, r.TargetUser, isBot)
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
 				s.log.Warnf("Claimant %q not found. Skipping.", r.TargetUser)
@@ -127,8 +131,8 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, records []Manneq
 		}
 
 		m := Mannequin{ID: r.MannequinID, Login: r.MannequinUser}
-		if !s.reclaimOne(ctx, orgID, m, r.TargetUser, claimantID, skipInvitation) && skipInvitation {
-			// Fail-fast for skip-invitation, matching gh-gei.
+		if !s.reclaimOne(ctx, orgID, m, r.TargetUser, claimantID, skipInvitation, isBot) && (skipInvitation || isBot) {
+			// Fail-fast for skip-invitation and bot reclaims, matching gh-gei.
 			return nil
 		}
 	}
@@ -137,13 +141,36 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, records []Manneq
 
 // reclaimOne performs one reclaim and logs the outcome. It returns false on a
 // hard failure that the caller should treat as an error.
-func (s *ReclaimService) reclaimOne(ctx context.Context, orgID string, m Mannequin, targetUser, targetUserID string, skipInvitation bool) bool {
+func (s *ReclaimService) reclaimOne(ctx context.Context, orgID string, m Mannequin, targetUser, targetUserID string, skipInvitation, isBot bool) bool {
+	if isBot {
+		result, err := s.client.ReattributeMannequinToBot(ctx, orgID, m.ID, targetUserID)
+		if err != nil && isBotReclaimUnavailable(err) {
+			s.log.Warnf("Reclaiming mannequins to a GitHub App / bot account is not enabled for your GitHub organization. For more details, contact GitHub Support.")
+			return false
+		}
+		return s.handleReattribution(m, targetUser, targetUserID, result, err)
+	}
 	if skipInvitation {
 		result, err := s.client.ReattributeMannequinToUser(ctx, orgID, m.ID, targetUserID)
 		return s.handleReattribution(m, targetUser, targetUserID, result, err)
 	}
 	result, err := s.client.CreateAttributionInvitation(ctx, orgID, m.ID, targetUserID)
 	return s.handleInvitation(m, targetUser, targetUserID, result, err)
+}
+
+// resolveTargetID resolves a reclaim target login to a node ID: a [bot]-suffixed
+// login via the REST users endpoint (BotID), everything else via UserID.
+func (s *ReclaimService) resolveTargetID(ctx context.Context, targetUser string, isBot bool) (string, error) {
+	if isBot {
+		return s.client.BotID(ctx, targetUser)
+	}
+	return s.client.UserID(ctx, targetUser)
+}
+
+// isBotLogin reports whether a target login is a GitHub App / bot account, which
+// GitHub renders with a trailing "[bot]" suffix.
+func isBotLogin(login string) bool {
+	return strings.HasSuffix(login, "[bot]")
 }
 
 func (s *ReclaimService) handleInvitation(m Mannequin, targetUser, targetUserID string, result *AttributionResult, err error) bool {
@@ -191,6 +218,22 @@ func isSkipInvitationUnavailable(err error) bool {
 	for _, m := range gqlErr.Messages {
 		if (strings.Contains(m, "reattributeMannequinToUser") && strings.Contains(m, "doesn't exist")) ||
 			strings.Contains(m, "is not an Enterprise Managed Users (EMU) organization") {
+			return true
+		}
+	}
+	return false
+}
+
+// isBotReclaimUnavailable reports whether err indicates the reattributeMannequinToBot
+// mutation is absent from the target's schema, i.e. the mannequin_claiming_bot
+// feature is not enabled for the org.
+func isBotReclaimUnavailable(err error) bool {
+	var gqlErr *GraphQLError
+	if !errors.As(err, &gqlErr) {
+		return false
+	}
+	for _, m := range gqlErr.Messages {
+		if strings.Contains(m, "reattributeMannequinToBot") && strings.Contains(m, "doesn't exist") {
 			return true
 		}
 	}
