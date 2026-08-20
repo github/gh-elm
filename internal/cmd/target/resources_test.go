@@ -21,10 +21,10 @@ func TestResources(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runResources(t, "--migration-id", "42", "--repository", "octo/repo",
+		out := runResources(t, "42", "octo/repo",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Contains(t, out, "Resource ID: n1", "missing resource line")
+		assert.Contains(t, out, "• issue · pending · backfill · n1", "missing resource line")
 		assert.Contains(t, out, "Found 2 resources.", "missing summary")
 		assert.Len(t, origins, 2, "expected 2 origin queries (backfill+live_update)")
 	})
@@ -69,7 +69,7 @@ func TestResources(t *testing.T) {
 		out := runResources(t, "--migration-id", "1", "--repository", "octo/repo", "--origin", "backfill", "--max-results", "2",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, 2, strings.Count(out, "Resource ID:"), "expected 2 resources")
+		assert.Equal(t, 2, strings.Count(out, "• "), "expected 2 resources")
 	})
 
 	t.Run("rejects an invalid state", func(t *testing.T) {
@@ -94,10 +94,10 @@ func TestResources(t *testing.T) {
 		}
 	})
 
-	t.Run("requires --migration-id", func(t *testing.T) {
+	t.Run("requires a target migration ID", func(t *testing.T) {
 		err := runResourcesErr(t, "--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "migration-id")
+		assert.Contains(t, err.Error(), "TARGET-MIGRATION-ID")
 	})
 
 	t.Run("requires --repository before making a request", func(t *testing.T) {
@@ -111,7 +111,7 @@ func TestResources(t *testing.T) {
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "--repository is required")
+		assert.Contains(t, err.Error(), "REPOSITORY is required")
 		assert.Zero(t, requests)
 	})
 
@@ -120,7 +120,46 @@ func TestResources(t *testing.T) {
 			"--target-url", "https://x", "--target-token", "tok")
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "--repository is required")
+		assert.Contains(t, err.Error(), "REPOSITORY is required")
+	})
+
+	t.Run("accepts legacy ID and repository flags", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "octo/repo", r.URL.Query().Get("repository_nwo"))
+			_, _ = w.Write([]byte(`{"nodes":[],"after":""}`))
+		}))
+		defer srv.Close()
+
+		runResources(t, "--migration-id", "42", "--repository", "octo/repo", "--origin", "backfill",
+			"--target-url", srv.URL, "--target-token", "tok")
+	})
+
+	t.Run("rejects duplicate positional and flag operands", func(t *testing.T) {
+		err := runResourcesErr(t, "42", "octo/repo", "--repository", "other/repo",
+			"--target-url", "https://x", "--target-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicates a value already supplied by flag")
+	})
+
+	t.Run("rejects duplicate positional and flag target migration IDs", func(t *testing.T) {
+		err := runResourcesErr(t, "42", "octo/repo", "--migration-id", "43")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicates a value already supplied by flag")
+	})
+
+	t.Run("mixes positional operands with compatibility flags", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "octo/repo", r.URL.Query().Get("repository_nwo"))
+			_, _ = w.Write([]byte(`{"nodes":[],"after":""}`))
+		}))
+		defer srv.Close()
+
+		runResources(t, "--migration-id", "42", "octo/repo", "--origin", "backfill",
+			"--target-url", srv.URL, "--target-token", "tok")
+		runResources(t, "42", "--repository", "octo/repo", "--origin", "backfill",
+			"--target-url", srv.URL, "--target-token", "tok")
 	})
 }
 

@@ -1,5 +1,5 @@
-// Package target implements the `gh elm target` command group, which works with
-// migration-target (GitHub with Data Residency) resources.
+// Package target implements commands that operate on the destination side of a
+// migration.
 package target
 
 import (
@@ -11,9 +11,9 @@ import (
 func NewCommand() *cobra.Command {
 	targetCmd := &cobra.Command{
 		Use:   "target",
-		Short: "Work with migration-target (GitHub with Data Residency) resources",
-		Long: "Read and write migration-target resources (for example migration resources\n" +
-			"and mannequins) on the GitHub with Data Residency side of a migration.",
+		Short: "Work with destination migration data",
+		Long: "Inspect resources and reports, and reclaim mannequins, on the destination\n" +
+			"(GitHub with Data Residency) side of a migration.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

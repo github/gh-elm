@@ -36,17 +36,22 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
+	cutoverCmd := newCutoverCmd()
+	cutoverCmd.AddCommand(newCutoverStatusCmd(), newRevertCutoverCmd())
+
 	migrationCmd.AddCommand(
 		newCreateCmd(),
 		newStartCmd(),
 		newStatusCmd(),
-		newLookupTargetIDCmd(),
+		newTargetIDCmd(),
+		newLookupTargetIDAliasCmd(),
 		newListCmd(),
 		newCancelCmd(),
 		newKillCmd(),
-		newCutoverCmd(),
-		newCutoverStatusCmd(),
-		newRevertCutoverCmd(),
+		cutoverCmd,
+		newCutoverDestinationAliasCmd(),
+		newCutoverStatusAliasCmd(),
+		newRevertCutoverAliasCmd(),
 		newPauseCmd(),
 		newResumeCmd(),
 		newWatchCmd(),
@@ -68,10 +73,10 @@ func sourceClient(sourceURL, sourceToken string) (*elmapi.Client, string, error)
 		return nil, "", err
 	}
 	if ep.URL == "" {
-		return nil, "", fmt.Errorf("no source URL configured; run `gh elm configure`, set %s, or pass --source-url", config.EnvSourceURL)
+		return nil, "", fmt.Errorf("no source URL configured; run `gh elm config`, set %s, or pass --source-url", config.EnvSourceURL)
 	}
 	if ep.Token == "" {
-		return nil, "", fmt.Errorf("no source token configured; run `gh elm configure`, set %s, or pass --source-token", config.EnvSourceToken)
+		return nil, "", fmt.Errorf("no source token configured; run `gh elm config`, set %s, or pass --source-token", config.EnvSourceToken)
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), ep.URL, nil
 }
@@ -164,7 +169,7 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 			if targetAPI == "" {
-				return fmt.Errorf("the create API requires a target endpoint; set %s (for example api.staffship-01.ghe.com) or run `gh elm configure`", config.EnvTargetURL)
+				return fmt.Errorf("the create API requires a target endpoint; set %s (for example api.staffship-01.ghe.com) or run `gh elm config`", config.EnvTargetURL)
 			}
 
 			req := elmapi.CreateMigrationRequest{
@@ -220,7 +225,7 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetVisibility, "target-visibility", "internal", "Target repository visibility (private or internal).")
 	cmd.Flags().BoolVar(&start, "start", false, "Automatically start the migration after creating it.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After creating and starting, enter live watch mode (requires --start).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
@@ -302,27 +307,29 @@ func newStatusCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (alternative to the positional argument).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
 }
 
-// newLookupTargetIDCmd builds `gh elm migration lookup-target-id`. It fetches the
+// newTargetIDCmd builds `gh elm migration target-id`. It fetches the
 // migration's status document from the GHES REST API and surfaces the target
 // migration ID that ELM assigned on the destination (GitHub with Data Residency) side.
-func newLookupTargetIDCmd() *cobra.Command {
+func newTargetIDCmd() *cobra.Command {
 	var (
 		migrationID string
 		asJSON      bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "lookup-target-id [MIGRATION-ID]",
+		Use:   "target-id [MIGRATION-ID]",
 		Short: "Look up the target (destination) migration ID for a migration",
 		Long: "Fetch a migration's status from the GHES REST API and report the target\n" +
 			"migration ID that ELM assigned on the destination (GitHub with Data Residency) side. Human-readable\n" +
 			"by default; add --json for a machine-readable object.",
+		Example: "  gh elm migration target-id 897930cf-51cb-4e2d-9806-6357a6e66b55\n" +
+			"  gh elm migration target-id 897930cf-51cb-4e2d-9806-6357a6e66b55 --json",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
@@ -345,9 +352,16 @@ func newLookupTargetIDCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to look up the target ID for (alternative to the positional argument).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output a machine-readable JSON object instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output a machine-readable JSON object instead of human-readable text.")
 	sourceFlags(cmd)
 
+	return cmd
+}
+
+func newLookupTargetIDAliasCmd() *cobra.Command {
+	cmd := newTargetIDCmd()
+	cmd.Use = "lookup-target-id [MIGRATION-ID]"
+	cmd.Hidden = true
 	return cmd
 }
 
@@ -405,7 +419,7 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (all, created, queued, in_progress, paused, completed, failed, terminated). Defaults to in_progress.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 0, "Number of migrations per page (1-100).")
 	cmd.Flags().StringVar(&after, "after", "", "Cursor for pagination (from next_cursor in a previous response).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
@@ -462,9 +476,9 @@ func newCutoverCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "cutover [MIGRATION-ID]",
-		Aliases: []string{"cutover-to-destination"},
-		Short:   "Initiate a cutover to the destination for a migration",
+		Use:         "cutover [MIGRATION-ID]",
+		Short:       "Initiate a cutover to the destination for a migration",
+		Annotations: map[string]string{"gh-elm/direct-action": "true"},
 		Long: "Initiate a cutover to the destination, archiving the source repository and\n" +
 			"draining remaining changes. Cutover is asynchronous; query status to observe\n" +
 			"progress. Use --force to bypass the readiness check.",
@@ -496,19 +510,27 @@ func newCutoverCmd() *cobra.Command {
 	return cmd
 }
 
-// newCutoverStatusCmd builds `gh elm migration cutover-status`. The REST API has
+func newCutoverDestinationAliasCmd() *cobra.Command {
+	cmd := newCutoverCmd()
+	cmd.Use = "cutover-to-destination [MIGRATION-ID]"
+	cmd.Hidden = true
+	return cmd
+}
+
+// newCutoverStatusCmd builds `gh elm migration cutover status`. The REST API has
 // no dedicated cutover-status endpoint; cutover readiness is derived from the
 // combined_state of the GET status document.
 func newCutoverStatusCmd() *cobra.Command {
 	var migrationID string
 
 	cmd := &cobra.Command{
-		Use:   "cutover-status [MIGRATION-ID]",
+		Use:   "status [MIGRATION-ID]",
 		Short: "Get the cutover status and progress for a migration",
 		Long: "Report cutover readiness for a migration, including whether it is ready for\n" +
 			"cutover and any outstanding blockers. Derived from the migration's combined\n" +
 			"state (there is no dedicated cutover-status REST endpoint).",
-		Args: cobra.MaximumNArgs(1),
+		Example: "  gh elm migration cutover status 897930cf-51cb-4e2d-9806-6357a6e66b55",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
 			if err != nil {
@@ -532,7 +554,14 @@ func newCutoverStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// newRevertCutoverCmd builds `gh elm migration revert-cutover`.
+func newCutoverStatusAliasCmd() *cobra.Command {
+	cmd := newCutoverStatusCmd()
+	cmd.Use = "cutover-status [MIGRATION-ID]"
+	cmd.Hidden = true
+	return cmd
+}
+
+// newRevertCutoverCmd builds `gh elm migration cutover revert`.
 func newRevertCutoverCmd() *cobra.Command {
 	var (
 		migrationID string
@@ -540,12 +569,13 @@ func newRevertCutoverCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "revert-cutover [MIGRATION-ID]",
+		Use:   "revert [MIGRATION-ID]",
 		Short: "Revert the effects of a cutover so the source repository can be migrated again",
 		Long: "Revert the effects of a cutover, unarchiving the source repository and\n" +
 			"terminating any cutover or migration still in progress so the source repository\n" +
 			"can be migrated again. Human-readable by default; add --json for the raw API response.",
-		Args: cobra.MaximumNArgs(1),
+		Example: "  gh elm migration cutover revert 897930cf-51cb-4e2d-9806-6357a6e66b55",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
 			if err != nil {
@@ -567,9 +597,16 @@ func newRevertCutoverCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to revert cutover for (alternative to the positional argument).")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
+	return cmd
+}
+
+func newRevertCutoverAliasCmd() *cobra.Command {
+	cmd := newRevertCutoverCmd()
+	cmd.Use = "revert-cutover [MIGRATION-ID]"
+	cmd.Hidden = true
 	return cmd
 }
 
@@ -821,7 +858,7 @@ func writeJSON(w io.Writer, v any) error {
 	return err
 }
 
-// targetIDView is the machine-readable shape emitted by `lookup-target-id --json`.
+// targetIDView is the machine-readable shape emitted by `target-id --json`.
 type targetIDView struct {
 	MigrationID       string `json:"migration_id"`
 	TargetMigrationID int64  `json:"target_migration_id"`

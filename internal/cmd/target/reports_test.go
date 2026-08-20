@@ -32,7 +32,7 @@ func TestRenderReportSurfacesWriterError(t *testing.T) {
 	})
 }
 
-func TestReportCreate(t *testing.T) {
+func TestReportRequest(t *testing.T) {
 	t.Run("requests a report and prints human-readable confirmation", func(t *testing.T) {
 		var gotStage, gotState string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +44,7 @@ func TestReportCreate(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runReports(t, "report", "create", "--migration-id", "42",
+		out := runReports(t, "report", "request", "42",
 			"--stage", "backfill", "--state", "all",
 			"--target-url", srv.URL, "--target-token", "tok")
 
@@ -62,7 +62,7 @@ func TestReportCreate(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runReports(t, "report", "create", "--migration-id", "42", "--stage", "backfill",
+		out := runReports(t, "report", "request", "42", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Contains(t, out, "✓ A report for this stage was already in progress; reusing it.")
@@ -76,7 +76,7 @@ func TestReportCreate(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runReports(t, "report", "create", "--migration-id", "42", "--stage", "backfill", "--json",
+		out := runReports(t, "report", "request", "42", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
@@ -93,28 +93,28 @@ func TestReportCreate(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		runReports(t, "report", "create", "--migration-id", "1", "--stage", "backfill",
+		runReports(t, "report", "request", "1", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, "REPORT_STATE_ALL", gotState, "default state")
 	})
 
 	t.Run("rejects an invalid stage", func(t *testing.T) {
-		err := runReportsErr(t, "report", "create", "--migration-id", "1", "--stage", "bogus",
+		err := runReportsErr(t, "report", "request", "1", "--stage", "bogus",
 			"--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid --stage")
 	})
 
 	t.Run("rejects an invalid state", func(t *testing.T) {
-		err := runReportsErr(t, "report", "create", "--migration-id", "1", "--stage", "backfill", "--state", "bogus",
+		err := runReportsErr(t, "report", "request", "1", "--stage", "backfill", "--state", "bogus",
 			"--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid --state")
 	})
 
 	t.Run("requires --stage", func(t *testing.T) {
-		err := runReportsErr(t, "report", "create", "--migration-id", "1",
+		err := runReportsErr(t, "report", "request", "1",
 			"--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "stage")
@@ -126,12 +126,23 @@ func TestReportCreate(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		err := runReportsErr(t, "report", "create", "--migration-id", "1", "--stage", "backfill",
+		err := runReportsErr(t, "report", "request", "1", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "bad")
 		require.Error(t, err, "expected an error on 401")
 		for _, want := range []string{"authentication failed", "401", "GH_TARGET_TOKEN"} {
 			assert.Contains(t, err.Error(), want)
 		}
+	})
+
+	t.Run("accepts the legacy create command and migration ID flag", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer srv.Close()
+
+		runReports(t, "report", "create", "--migration-id", "42", "--stage", "live_updates",
+			"--target-url", srv.URL, "--target-token", "tok")
 	})
 }
 
@@ -144,11 +155,12 @@ func TestReportStatus(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runReports(t, "report", "status", "--migration-id", "3", "--stage", "backfill",
+		out := runReports(t, "report", "status", "3", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, "REPORT_STAGE_BACKFILL", gotStage)
-		assert.Contains(t, out, "Status: finished", "expected humanized status")
+		assert.Contains(t, out, "✓ Report finished.", "expected successful status")
+		assert.Contains(t, out, "Stage", "expected structured fields")
 		assert.Contains(t, out, "nodes.jsonl", "expected file listing")
 	})
 
@@ -165,11 +177,18 @@ func TestReportStatus(t *testing.T) {
 		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
 	})
 
-	t.Run("requires --migration-id", func(t *testing.T) {
+	t.Run("requires a target migration ID", func(t *testing.T) {
 		err := runReportsErr(t, "report", "status", "--stage", "backfill",
 			"--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "migration-id")
+		assert.Contains(t, err.Error(), "TARGET-MIGRATION-ID")
+	})
+
+	t.Run("rejects positional and flag target migration IDs together", func(t *testing.T) {
+		err := runReportsErr(t, "report", "status", "3", "--migration-id", "4", "--stage", "backfill")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both positionally and with --migration-id")
 	})
 }
 
@@ -180,11 +199,12 @@ func TestReportURL(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runReports(t, "report", "url", "--migration-id", "3", "--stage", "backfill",
+		out := runReports(t, "report", "url", "3", "--stage", "backfill",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Contains(t, out, "https://blob.example/report.zip?sig=abc")
-		assert.Contains(t, out, "Expires at:")
+		assert.Contains(t, out, "Expires")
+		assert.True(t, strings.HasPrefix(out, "https://blob.example/report.zip?sig=abc\n"))
 	})
 
 	t.Run("emits the raw API JSON with --json", func(t *testing.T) {

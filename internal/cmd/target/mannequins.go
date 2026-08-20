@@ -18,16 +18,16 @@ import (
 )
 
 // newMannequinCmd builds the `gh elm target mannequin` command group — `list`
-// (fetch a target org's mannequins as CSV) and `claim` (reclaim one or more
+// (fetch a target org's mannequins as CSV) and `reclaim` (reclaim one or more
 // mannequins), ported from gh-gei's generate-mannequin-csv and
 // reclaim-mannequin. Both operate on the target (GitHub with Data Residency) organization via
 // its GitHub GraphQL/REST API.
 func newMannequinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mannequin",
-		Short: "List and claim mannequins on the target org",
+		Short: "List and reclaim mannequins on the target org",
 		Long: "Work with mannequins on a target (GitHub with Data Residency) organization: `list` writes\n" +
-			"them as CSV, and `claim` reclaims them (mapping each mannequin to a target user).",
+			"them as CSV, and `reclaim` maps each mannequin to a target user.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -35,6 +35,7 @@ func newMannequinCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newMannequinListCmd())
+	cmd.AddCommand(newMannequinReclaimCmd())
 	cmd.AddCommand(newMannequinClaimCmd())
 
 	return cmd
@@ -45,7 +46,8 @@ func newMannequinCmd() *cobra.Command {
 // --output).
 func newMannequinListCmd() *cobra.Command {
 	var (
-		githubOrg        string
+		orgFlag          string
+		githubOrgFlag    string
 		output           string
 		includeReclaimed bool
 		targetURL        string
@@ -53,13 +55,31 @@ func newMannequinListCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   "list [ORGANIZATION]",
 		Short: "List a target org's mannequins as CSV",
 		Long: "List mannequins for a target (GitHub with Data Residency) organization and write them\n" +
 			"as CSV. By default the CSV is written to stdout; pass --output to write a file.\n" +
-			"The CSV can then be edited and fed to `gh elm target mannequin claim --csv`.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+			"The CSV can then be edited and fed to `gh elm target mannequin reclaim --csv`.",
+		Example: "  gh elm target mannequin list octo-org\n" +
+			"  gh elm target mannequin list octo-org --include-reclaimed --output mannequins.csv",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			orgFromFlag, orgFlagName, orgFlagChanged, err := resolveAliasedFlag(
+				"org", orgFlag, cmd.Flags().Changed("org"),
+				"github-org", githubOrgFlag, cmd.Flags().Changed("github-org"),
+			)
+			if err != nil {
+				return err
+			}
+			var positionalOrg string
+			if len(args) == 1 {
+				positionalOrg = args[0]
+			}
+			githubOrg, err := resolveStringOperand("ORGANIZATION", positionalOrg, orgFlagName, orgFromFlag, orgFlagChanged)
+			if err != nil {
+				return err
+			}
+
 			client, targetURLResolved, err := mannequinClient(targetURL, targetToken)
 			if err != nil {
 				return err
@@ -103,21 +123,23 @@ func newMannequinListCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&githubOrg, "github-org", "", "Target organization login to list mannequins for (required).")
+	cmd.Flags().StringVar(&orgFlag, "org", "", "Target organization login (alternative to the positional argument).")
+	cmd.Flags().StringVar(&githubOrgFlag, "github-org", "", "Target organization login (legacy alias for --org).")
 	cmd.Flags().StringVar(&output, "output", "", "Write the CSV to this file instead of stdout.")
 	cmd.Flags().BoolVar(&includeReclaimed, "include-reclaimed", false, "Include mannequins that have already been reclaimed.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("github-org")
+	_ = cmd.Flags().MarkHidden("github-org")
 
 	return cmd
 }
 
-// newMannequinClaimCmd builds `gh elm target mannequin claim`, which reclaims a
+// newMannequinReclaimCmd builds `gh elm target mannequin reclaim`, which reclaims a
 // single mannequin or a batch from a CSV against the target org.
-func newMannequinClaimCmd() *cobra.Command {
+func newMannequinReclaimCmd() *cobra.Command {
 	var (
-		githubOrg      string
+		orgFlag        string
+		githubOrgFlag  string
 		csvPath        string
 		mannequinUser  string
 		mannequinID    string
@@ -130,17 +152,65 @@ func newMannequinClaimCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "claim",
-		Short: "Claim (reclaim) one or more mannequins on the target org",
-		Long: "Claim mannequins on a target (GitHub with Data Residency) organization, mapping each\n" +
-			"mannequin to a target user. Claim a single mannequin with --mannequin-user\n" +
-			"and --target-user, or claim many at once with --csv (see `gh elm target\n" +
+		Use:   "reclaim [ORGANIZATION] [MANNEQUIN] [TARGET-USER]",
+		Short: "Reclaim one or more mannequins on the target org",
+		Long: "Reclaim mannequins on a target (GitHub with Data Residency) organization, mapping each\n" +
+			"mannequin to a target user. Pass the organization, mannequin, and target user\n" +
+			"positionally, or reclaim many at once with --csv (see `gh elm target\n" +
 			"mannequin list`). Use --skip-invitation to reattribute immediately without\n" +
 			"the invitation email flow (EMU organizations only).",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if csvPath == "" && (mannequinUser == "" || targetUser == "") {
-				return errors.New("either --csv or both --mannequin-user and --target-user must be specified")
+		Example: "  gh elm target mannequin reclaim octo-org mannequin-login target-login\n" +
+			"  gh elm target mannequin reclaim octo-org --csv mannequins.csv",
+		Args: cobra.MaximumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			orgFromFlag, orgFlagName, orgFlagChanged, err := resolveAliasedFlag(
+				"org", orgFlag, cmd.Flags().Changed("org"),
+				"github-org", githubOrgFlag, cmd.Flags().Changed("github-org"),
+			)
+			if err != nil {
+				return err
+			}
+
+			var positionalOrg string
+			argIndex := 0
+			if !orgFlagChanged && argIndex < len(args) {
+				positionalOrg = args[argIndex]
+				argIndex++
+			}
+			githubOrg, err := resolveStringOperand("ORGANIZATION", positionalOrg, orgFlagName, orgFromFlag, orgFlagChanged)
+			if err != nil {
+				return err
+			}
+
+			if csvPath != "" {
+				if argIndex < len(args) || cmd.Flags().Changed("mannequin-user") || cmd.Flags().Changed("target-user") {
+					return errors.New("--csv cannot be combined with MANNEQUIN, TARGET-USER, --mannequin-user, or --target-user")
+				}
+			} else {
+				var positionalMannequin, positionalTarget string
+				if !cmd.Flags().Changed("mannequin-user") && argIndex < len(args) {
+					positionalMannequin = args[argIndex]
+					argIndex++
+				}
+				if !cmd.Flags().Changed("target-user") && argIndex < len(args) {
+					positionalTarget = args[argIndex]
+					argIndex++
+				}
+				if argIndex < len(args) {
+					return errors.New("positional organization or user duplicates a value already supplied by flag")
+				}
+				mannequinUser, err = resolveStringOperand(
+					"MANNEQUIN", positionalMannequin, "mannequin-user", mannequinUser, cmd.Flags().Changed("mannequin-user"),
+				)
+				if err != nil {
+					return err
+				}
+				targetUser, err = resolveStringOperand(
+					"TARGET-USER", positionalTarget, "target-user", targetUser, cmd.Flags().Changed("target-user"),
+				)
+				if err != nil {
+					return err
+				}
 			}
 
 			client, targetURLResolved, err := mannequinClient(targetURL, targetToken)
@@ -157,7 +227,7 @@ func newMannequinClaimCmd() *cobra.Command {
 			}
 
 			if csvPath != "" {
-				log.Infof("Claiming mannequins from CSV...")
+				log.Infof("Reclaiming mannequins from CSV...")
 				f, err := os.Open(csvPath)
 				if err != nil {
 					return fmt.Errorf("opening %s: %w", csvPath, err)
@@ -173,7 +243,7 @@ func newMannequinClaimCmd() *cobra.Command {
 				return nil
 			}
 
-			log.Infof("Claiming mannequin...")
+			log.Infof("Reclaiming mannequin...")
 			if err := svc.ReclaimMannequin(cmd.Context(), mannequinUser, mannequinID, targetUser, githubOrg, force, skipInvitation); err != nil {
 				return annotateMannequinAuthError(err, targetURLResolved)
 			}
@@ -181,18 +251,26 @@ func newMannequinClaimCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&githubOrg, "github-org", "", "Target organization login (required).")
+	cmd.Flags().StringVar(&orgFlag, "org", "", "Target organization login (alternative to the positional argument).")
+	cmd.Flags().StringVar(&githubOrgFlag, "github-org", "", "Target organization login (legacy alias for --org).")
 	cmd.Flags().StringVar(&csvPath, "csv", "", "Path to a mannequin CSV (from 'gh elm target mannequin list').")
-	cmd.Flags().StringVar(&mannequinUser, "mannequin-user", "", "Login of the mannequin to claim (single mode).")
+	cmd.Flags().StringVar(&mannequinUser, "mannequin-user", "", "Mannequin login (alternative to the positional argument).")
 	cmd.Flags().StringVar(&mannequinID, "mannequin-id", "", "Optional mannequin ID to disambiguate a login (single mode).")
-	cmd.Flags().StringVar(&targetUser, "target-user", "", "Login of the target user to claim to (single mode).")
-	cmd.Flags().BoolVar(&force, "force", false, "Claim even if the mannequin is already mapped to a user.")
+	cmd.Flags().StringVar(&targetUser, "target-user", "", "Target user login (alternative to the positional argument).")
+	cmd.Flags().BoolVar(&force, "force", false, "Reclaim even if the mannequin is already mapped to a user.")
 	cmd.Flags().BoolVar(&skipInvitation, "skip-invitation", false, "Reattribute immediately without the invitation email (EMU orgs only).")
 	cmd.Flags().BoolVar(&noPrompt, "no-prompt", false, "Do not prompt for confirmation when using --skip-invitation.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	_ = cmd.MarkFlagRequired("github-org")
+	_ = cmd.Flags().MarkHidden("github-org")
 
+	return cmd
+}
+
+func newMannequinClaimCmd() *cobra.Command {
+	cmd := newMannequinReclaimCmd()
+	cmd.Use = "claim"
+	cmd.Hidden = true
 	return cmd
 }
 
@@ -248,10 +326,10 @@ func mannequinClient(targetURL, targetToken string) (*ghapi.Client, string, erro
 		return nil, "", err
 	}
 	if ep.URL == "" {
-		return nil, "", fmt.Errorf("no target URL configured; run `gh elm configure`, set %s, or pass --target-url", config.EnvTargetURL)
+		return nil, "", fmt.Errorf("no target URL configured; run `gh elm config`, set %s, or pass --target-url", config.EnvTargetURL)
 	}
 	if ep.Token == "" {
-		return nil, "", fmt.Errorf("no target token configured; run `gh elm configure`, set %s, or pass --target-token", config.EnvTargetToken)
+		return nil, "", fmt.Errorf("no target token configured; run `gh elm config`, set %s, or pass --target-token", config.EnvTargetToken)
 	}
 	return ghapi.NewClient(ep.URL, ep.Token), ep.URL, nil
 }
@@ -263,7 +341,7 @@ func annotateMannequinAuthError(err error, targetURL string) error {
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
 		//nolint:staticcheck // ST1005: intentional multi-line, user-facing CLI error message
 		return fmt.Errorf("authentication failed (HTTP %d) for target %s: %s\n"+
-			"Check the target token with `gh elm configure --show`. Note the %s and %s environment variables override stored config.",
+			"Check the target token with `gh elm config show`. Note the %s and %s environment variables override stored config.",
 			httpErr.StatusCode, targetURL, httpErr.Message, config.EnvTargetURL, config.EnvTargetToken)
 	}
 	return err
@@ -282,5 +360,5 @@ func (l mannequinLogger) Successf(format string, args ...any) {
 }
 
 func (l mannequinLogger) Warnf(format string, args ...any) {
-	fmt.Fprintf(l.w, "warning: "+format+"\n", args...)
+	fmt.Fprintln(l.w, render.Warning(fmt.Sprintf(format, args...)))
 }

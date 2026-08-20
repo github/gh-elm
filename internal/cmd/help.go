@@ -12,6 +12,8 @@ import (
 	"github.com/github/gh-elm/internal/theme"
 )
 
+const directActionAnnotation = "gh-elm/direct-action"
+
 func renderHelp(cmd *cobra.Command, _ []string) {
 	var output strings.Builder
 	out := &output
@@ -50,6 +52,9 @@ func usageLine(cmd *cobra.Command) string {
 		return "gh " + cmd.CommandPath() + " <command> <subcommand> [flags]"
 	}
 	if cmd.HasAvailableSubCommands() {
+		if hasDirectAction(cmd) {
+			return "gh " + cmd.UseLine() + "\n  gh " + cmd.CommandPath() + " <command> [flags]"
+		}
 		return "gh " + cmd.CommandPath() + " <command> [flags]"
 	}
 	return "gh " + cmd.UseLine()
@@ -118,7 +123,11 @@ func writeCommandSection(out io.Writer, heading lipgloss.Style, title string, co
 }
 
 func writeLeafCommandSection(out io.Writer, heading lipgloss.Style, title string, root *cobra.Command) {
-	commands := leafCommands(root, root.Name())
+	var commands []helpCommand
+	if hasDirectAction(root) {
+		commands = append(commands, helpCommand{name: root.Name(), description: root.Short})
+	}
+	commands = append(commands, leafCommands(root, root.Name())...)
 	width := 0
 	for _, command := range commands {
 		width = max(width, len(command.name)+1)
@@ -144,12 +153,19 @@ func leafCommands(cmd *cobra.Command, prefix string) []helpCommand {
 
 		name := prefix + " " + child.Name()
 		if child.HasAvailableSubCommands() {
+			if hasDirectAction(child) {
+				commands = append(commands, helpCommand{name: name, description: child.Short})
+			}
 			commands = append(commands, leafCommands(child, name)...)
 			continue
 		}
 		commands = append(commands, helpCommand{name: name, description: child.Short})
 	}
 	return commands
+}
+
+func hasDirectAction(cmd *cobra.Command) bool {
+	return cmd.Annotations[directActionAnnotation] == "true"
 }
 
 func isListedCommand(cmd *cobra.Command) bool {
