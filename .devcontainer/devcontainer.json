@@ -16,7 +16,7 @@
       ]
     }
   },
-  "postCreateCommand": {
+  "onCreateCommand": {
     "copilot-cli": "npm install -g @github/copilot",
     "go-modules": "go mod download"
   }
