@@ -132,3 +132,15 @@ func TestRootHelp(t *testing.T) {
 	assert.Contains(t, help, "\nLEARN MORE\n")
 	assert.NotContains(t, help, "Available Commands:")
 }
+
+func TestRootNoArgsNonInteractiveShowsHelp(t *testing.T) {
+	root := NewRootCmd("test")
+	var out bytes.Buffer
+	root.SetIn(strings.NewReader(""))
+	root.SetOut(&out)
+	root.SetArgs(nil)
+
+	require.NoError(t, root.Execute())
+	assert.Contains(t, out.String(), "gh elm <command> <subcommand> [flags]")
+	assert.Contains(t, out.String(), "MIGRATION COMMANDS")
+}

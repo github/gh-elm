@@ -41,6 +41,15 @@ func TestHelp(t *testing.T) {
 	assert.Empty(t, result.Stderr)
 }
 
+func TestNoArgsShowsHelpNonInteractive(t *testing.T) {
+	result := runCLI(t, nil)
+
+	require.Equal(t, 0, result.ExitCode, result.Stderr)
+	assert.Contains(t, result.Stdout, "gh elm <command> <subcommand> [flags]")
+	assert.Contains(t, result.Stdout, "MIGRATION COMMANDS")
+	assert.Empty(t, result.Stderr)
+}
+
 func TestInvalidCommand(t *testing.T) {
 	result := runCLI(t, nil, "definitely-not-a-command")
 

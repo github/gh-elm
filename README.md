@@ -31,6 +31,7 @@ gh extension upgrade elm
 ## Usage
 
 ```sh
+gh elm                   # launch the interactive terminal UI
 gh elm --help            # list available commands
 gh elm --version         # print the extension version
 
@@ -38,6 +39,16 @@ gh elm config       # interactively set up credentials
 gh elm config show  # print current config (tokens redacted)
 gh elm config reset # remove stored config and credentials
 ```
+
+When standard input and output are interactive terminals, invoking `gh elm` with no
+arguments opens a full-screen TUI. It links source migrations to their numeric target
+migration records and provides source/target lifecycle actions, resources, reports,
+mannequin reclaiming, and configuration without repeatedly copying IDs. Use arrow keys
+or `j`/`k` to move, Enter to select, Escape to go back, and `q` to quit.
+
+In scripts, redirected output, and other non-interactive environments, bare `gh elm`
+continues to print help and exit successfully. Explicit commands and machine-readable
+formats remain the supported automation interface.
 
 ### Command groups
 

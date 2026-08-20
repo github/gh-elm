@@ -1,0 +1,98 @@
+package workflow
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestParseTargetMigrationID(t *testing.T) {
+	t.Run("accepts positive integer", func(t *testing.T) {
+		id, err := ParseTargetMigrationID(" 42 ")
+
+		require.NoError(t, err)
+		assert.Equal(t, TargetMigrationID(42), id)
+	})
+
+	t.Run("rejects non-positive integer", func(t *testing.T) {
+		_, err := ParseTargetMigrationID("0")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "positive integer")
+	})
+
+	t.Run("rejects non-numeric value", func(t *testing.T) {
+		_, err := ParseTargetMigrationID("source-uuid")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "positive integer")
+	})
+}
+
+func TestConfiguration(t *testing.T) {
+	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
+
+	service := New()
+	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
+		SourceURL:   "https://source.example",
+		SourceToken: "source-token",
+		TargetURL:   "https://target.example",
+		TargetToken: "target-token",
+	}))
+
+	configuration, err := service.GetConfiguration(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "https://source.example", configuration.SourceURL)
+	assert.True(t, configuration.SourceTokenSet)
+	assert.Equal(t, "https://target.example", configuration.TargetURL)
+	assert.True(t, configuration.TargetTokenSet)
+
+	require.NoError(t, service.ResetConfiguration(t.Context()))
+	configuration, err = service.GetConfiguration(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, configuration.SourceURL)
+	assert.False(t, configuration.SourceTokenSet)
+	assert.Empty(t, configuration.TargetURL)
+	assert.False(t, configuration.TargetTokenSet)
+}
+
+func TestListSourceMigrations(t *testing.T) {
+	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
+
+	var statuses []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		statuses = append(statuses, r.URL.Query().Get("status"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("status") == "created" {
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"migrations":  []map[string]any{{"migration_id": "created-1"}},
+				"total_count": 1,
+			}))
+			return
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"migrations":  []any{},
+			"total_count": 0,
+		}))
+	}))
+	t.Cleanup(server.Close)
+
+	service := New()
+	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
+		SourceURL:   server.URL,
+		SourceToken: "source-token",
+	}))
+
+	migrations, err := service.ListSourceMigrations(t.Context(), "")
+
+	require.NoError(t, err)
+	require.Len(t, migrations, 1)
+	assert.Equal(t, "created-1", migrations[0].MigrationID)
+	assert.Equal(t, []string{"", "created"}, statuses)
+}
