@@ -39,7 +39,12 @@ func resolveStringOperand(name, positional, flagName, flagValue string, flagChan
 	return "", fmt.Errorf("%s is required", name)
 }
 
-func resolveAliasedFlag(primaryName, primaryValue string, primaryChanged bool, legacyName, legacyValue string, legacyChanged bool) (string, string, bool, error) {
+func resolveAliasedFlag(
+	primaryName, primaryValue string,
+	primaryChanged bool,
+	legacyName, legacyValue string,
+	legacyChanged bool,
+) (value, flagName string, changed bool, err error) {
 	if primaryChanged && legacyChanged {
 		return "", "", false, fmt.Errorf("--%s and --%s cannot be used together", primaryName, legacyName)
 	}
