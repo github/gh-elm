@@ -66,6 +66,9 @@ type capturingLogger struct{ lines []string }
 func (l *capturingLogger) Infof(format string, args ...any) {
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 }
+func (l *capturingLogger) Successf(format string, args ...any) {
+	l.lines = append(l.lines, "SUCCESS: "+fmt.Sprintf(format, args...))
+}
 func (l *capturingLogger) Warnf(format string, args ...any) {
 	l.lines = append(l.lines, "WARN: "+fmt.Sprintf(format, args...))
 }
@@ -90,10 +93,11 @@ func TestReclaimMannequin(t *testing.T) {
 			byLogin: map[string][]Mannequin{"alice": {{ID: "m1", Login: "alice"}}},
 			userIDs: map[string]string{"alice-target": "u1"},
 		}
-		svc, _ := newService(f)
+		svc, log := newService(f)
 
 		require.NoError(t, svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, false), "ReclaimMannequin")
 		assert.Equal(t, []string{"m1->u1"}, f.invitations)
+		assert.True(t, log.contains("SUCCESS: Mannequin reclaim invitation email successfully sent"))
 	})
 
 	t.Run("errors when the login is not a mannequin", func(t *testing.T) {
@@ -125,11 +129,12 @@ func TestReclaimMannequin(t *testing.T) {
 			byLogin: map[string][]Mannequin{"alice": {{ID: "m1", Login: "alice"}}},
 			userIDs: map[string]string{"alice-target": "u1"},
 		}
-		svc, _ := newService(f)
+		svc, log := newService(f)
 
 		require.NoError(t, svc.ReclaimMannequin(t.Context(), "alice", "", "alice-target", "octo", false, true), "ReclaimMannequin")
 		assert.Len(t, f.reattributions, 1)
 		assert.Empty(t, f.invitations)
+		assert.True(t, log.contains("SUCCESS: Successfully reclaimed content"))
 	})
 }
 

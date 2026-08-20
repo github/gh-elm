@@ -73,10 +73,11 @@ func TestMannequinList(t *testing.T) {
 		defer srv.Close()
 
 		path := filepath.Join(t.TempDir(), "mannequins.csv")
-		_, err := runMannequin(t, newMannequinListCmd, "",
+		out, err := runMannequin(t, newMannequinListCmd, "",
 			"--github-org", "octo", "--output", path,
 			"--target-url", srv.URL, "--target-token", "tok")
 		require.NoError(t, err, "list")
+		assert.Contains(t, out, "✓ Wrote CSV to "+path+".")
 		data, err := os.ReadFile(path)
 		require.NoError(t, err, "read output")
 		assert.Contains(t, string(data), "alice,m1,", "output file missing alice")
@@ -126,6 +127,7 @@ func TestMannequinClaim(t *testing.T) {
 			"--target-url", srv.URL, "--target-token", "tok")
 		require.NoErrorf(t, err, "claim output:\n%s", out)
 		assert.True(t, invited, "expected createAttributionInvitation to be called")
+		assert.Contains(t, out, "✓ Mannequin reclaim invitation email successfully sent")
 	})
 
 	t.Run("skip-invitation requires org admin", func(t *testing.T) {

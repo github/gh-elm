@@ -209,8 +209,7 @@ func newCreateCmd() *cobra.Command {
 				return render.WriteRawJSON(cmd.OutOrStdout(), resp.Raw)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s created and started.\n", resp.Value.MigrationID)
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s created and started.", resp.Value.MigrationID)))
 		},
 	}
 
@@ -235,30 +234,32 @@ func newStartCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start",
+		Use:   "start [MIGRATION-ID]",
 		Short: "Start a previously created migration",
 		Long:  "Start a created migration, launching backfill and enabling live updates.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			if err := client.StartMigration(cmd.Context(), migrationID); err != nil {
+			if err := client.StartMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
 			if watch {
-				return runWatch(cmd, client, srcURL, migrationID)
+				return runWatch(cmd, client, srcURL, resolvedMigrationID)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s started.\n", migrationID)
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s started.", resolvedMigrationID)))
 		},
 	}
 
 	cmd.Flags().BoolVar(&watch, "watch", false, "After starting, enter live watch mode.")
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to start (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to start (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -271,17 +272,21 @@ func newStatusCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "status",
+		Use:   "status [MIGRATION-ID]",
 		Short: "Get the status and details of a migration",
 		Long: "Retrieve combined status, progress, cutover readiness, expiration, and timing\n" +
 			"for a migration. Human-readable by default; add --json for the raw API response.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			raw, err := client.GetMigration(cmd.Context(), migrationID)
+			raw, err := client.GetMigration(cmd.Context(), resolvedMigrationID)
 			if err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
@@ -296,10 +301,9 @@ func newStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (alternative to the positional argument).")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -314,32 +318,35 @@ func newLookupTargetIDCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "lookup-target-id",
+		Use:   "lookup-target-id [MIGRATION-ID]",
 		Short: "Look up the target (destination) migration ID for a migration",
 		Long: "Fetch a migration's status from the GHES REST API and report the target\n" +
 			"migration ID that ELM assigned on the destination (GitHub with Data Residency) side. Human-readable\n" +
 			"by default; add --json for a machine-readable object.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			detail, err := client.GetMigrationDetail(cmd.Context(), migrationID)
+			detail, err := client.GetMigrationDetail(cmd.Context(), resolvedMigrationID)
 			if err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
 			if detail.Migration == nil {
-				return fmt.Errorf("migration %s returned no migration record", migrationID)
+				return fmt.Errorf("migration %s returned no migration record", resolvedMigrationID)
 			}
-			return writeTargetID(cmd.OutOrStdout(), migrationID, detail.Migration.TargetMigrationID, asJSON)
+			return writeTargetID(cmd.OutOrStdout(), resolvedMigrationID, detail.Migration.TargetMigrationID, asJSON)
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to look up the target ID for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to look up the target ID for (alternative to the positional argument).")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output a machine-readable JSON object instead of human-readable text.")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -446,7 +453,7 @@ func newKillCmd() *cobra.Command {
 	return cmd
 }
 
-// newCutoverCmd builds `gh elm migration cutover-to-destination`.
+// newCutoverCmd builds `gh elm migration cutover`.
 func newCutoverCmd() *cobra.Command {
 	var (
 		migrationID string
@@ -455,33 +462,36 @@ func newCutoverCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "cutover-to-destination",
-		Short: "Initiate a cutover to the destination for a migration",
+		Use:     "cutover [MIGRATION-ID]",
+		Aliases: []string{"cutover-to-destination"},
+		Short:   "Initiate a cutover to the destination for a migration",
 		Long: "Initiate a cutover to the destination, archiving the source repository and\n" +
 			"draining remaining changes. Cutover is asynchronous; query status to observe\n" +
 			"progress. Use --force to bypass the readiness check.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			if err := client.Cutover(cmd.Context(), migrationID, force); err != nil {
+			if err := client.Cutover(cmd.Context(), resolvedMigrationID, force); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
 			if watch {
-				return runWatch(cmd, client, srcURL, migrationID)
+				return runWatch(cmd, client, srcURL, resolvedMigrationID)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Cutover initiated for migration %s.\n", migrationID)
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Cutover initiated for migration %s.", resolvedMigrationID)))
 		},
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass the cutover readiness check and proceed immediately.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After triggering cutover, enter live watch mode.")
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to initiate cutover for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to initiate cutover for (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -493,28 +503,31 @@ func newCutoverStatusCmd() *cobra.Command {
 	var migrationID string
 
 	cmd := &cobra.Command{
-		Use:   "cutover-status",
+		Use:   "cutover-status [MIGRATION-ID]",
 		Short: "Get the cutover status and progress for a migration",
 		Long: "Report cutover readiness for a migration, including whether it is ready for\n" +
 			"cutover and any outstanding blockers. Derived from the migration's combined\n" +
 			"state (there is no dedicated cutover-status REST endpoint).",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			detail, err := client.GetMigrationDetail(cmd.Context(), migrationID)
+			detail, err := client.GetMigrationDetail(cmd.Context(), resolvedMigrationID)
 			if err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			return writeCutoverStatus(cmd.OutOrStdout(), detail)
+			return render.Write(cmd.OutOrStdout(), render.CutoverStatus(*detail))
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get cutover status for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get cutover status for (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -527,18 +540,22 @@ func newRevertCutoverCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "revert-cutover",
+		Use:   "revert-cutover [MIGRATION-ID]",
 		Short: "Revert the effects of a cutover so the source repository can be migrated again",
 		Long: "Revert the effects of a cutover, unarchiving the source repository and\n" +
 			"terminating any cutover or migration still in progress so the source repository\n" +
 			"can be migrated again. Human-readable by default; add --json for the raw API response.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			resp, err := client.RevertCutover(cmd.Context(), migrationID)
+			resp, err := client.RevertCutover(cmd.Context(), resolvedMigrationID)
 			if err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
@@ -549,10 +566,9 @@ func newRevertCutoverCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to revert cutover for (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to revert cutover for (alternative to the positional argument).")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the API's raw JSON response instead of human-readable text.")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -562,28 +578,30 @@ func newPauseCmd() *cobra.Command {
 	var migrationID string
 
 	cmd := &cobra.Command{
-		Use:   "pause",
+		Use:   "pause [MIGRATION-ID]",
 		Short: "Pause a running migration",
 		Long: "Pause source-load work (backfill and Git synchronization) for an active\n" +
 			"migration while live event collection continues. Idempotent for an already\n" +
 			"paused migration.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			if err := client.PauseMigration(cmd.Context(), migrationID); err != nil {
+			if err := client.PauseMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s paused.\n", migrationID)
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s paused.", resolvedMigrationID)))
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to pause (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to pause (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }
@@ -593,26 +611,28 @@ func newResumeCmd() *cobra.Command {
 	var migrationID string
 
 	cmd := &cobra.Command{
-		Use:   "resume",
+		Use:   "resume [MIGRATION-ID]",
 		Short: "Resume a paused migration",
 		Long:  "Resume a paused migration; it is re-queued and resumes backfill and live updates.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
 			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
-			if err := client.ResumeMigration(cmd.Context(), migrationID); err != nil {
+			if err := client.ResumeMigration(cmd.Context(), resolvedMigrationID); err != nil {
 				return annotateSourceAPIError(cmd.Context(), client, err, srcURL)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Migration %s resumed.\n", migrationID)
-			return nil
+			return render.Write(cmd.OutOrStdout(), render.Success(fmt.Sprintf("Migration %s resumed.", resolvedMigrationID)))
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to resume (required).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to resume (alternative to the positional argument).")
 	sourceFlags(cmd)
-	_ = cmd.MarkFlagRequired("migration-id")
 
 	return cmd
 }

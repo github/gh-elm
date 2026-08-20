@@ -303,7 +303,7 @@ func (m Model) readyForCutoverDetail() string {
 		}
 	}
 
-	w(&b, fmt.Sprintf("Run: gh elm migration cutover-to-destination --migration-id %s", m.migrationID))
+	w(&b, fmt.Sprintf("Run: gh elm migration cutover %s", m.migrationID))
 	return b.String()
 }
 

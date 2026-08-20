@@ -44,8 +44,9 @@ gh elm configure --reset # remove stored config and credentials
 - `gh elm migration ...` — drive the migration lifecycle (create, start, status, list,
   cancel, cutover) against the GHES REST API, plus `lookup-target-id` to resolve a
   migration's destination (GitHub with Data Residency) migration ID for use with the
-  `gh elm target *` commands. Create, status, list, and revert-cutover output is
-  human-readable by default; add `--json` for the raw API response.
+  `gh elm target *` commands.
+  Create, status, list, and revert-cutover output is human-readable by default; add
+  `--json` for the raw API response.
 - `gh elm target report create|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
   raw API response.
@@ -63,21 +64,26 @@ Migration responses are rendered for people by default:
 # Create a migration using concise repository coordinates and show its ID and expiry
 gh elm migration create source-org/repo target-org/repo
 
-# Show formatted status details, or list migrations (falls back to created
-# migrations when no in-progress migrations are found)
-gh elm migration status --migration-id <uuid>
+# List in-progress migrations, falling back to created migrations when empty
 gh elm migration list
 
-# Preserve the raw API response for scripts and jq
-gh elm migration status --migration-id <uuid> --json | jq .combined_state.status
-gh elm migration list --status all --json | jq '.migrations[]'
-
-# Cancel a migration (the -m/--migration-id flag remains supported)
+# Migration commands accept the ID positionally (-m/--migration-id remains supported)
 gh elm migration cancel <uuid>
 
+# Show formatted status details or list migrations
+gh elm migration status <uuid>
+gh elm migration list --status all
+
+# Preserve the raw API response for scripts and jq
+gh elm migration status <uuid> --json | jq .combined_state.status
+gh elm migration list --status all --json | jq '.migrations[]'
+
+# Initiate cutover
+gh elm migration cutover <uuid>
+
 # Revert cutover with human-readable results, or inspect the raw response
-gh elm migration revert-cutover --migration-id <uuid>
-gh elm migration revert-cutover --migration-id <uuid> --json | jq .success
+gh elm migration revert-cutover <uuid>
+gh elm migration revert-cutover <uuid> --json | jq .success
 ```
 
 Look up a migration's destination (GitHub with Data Residency) migration ID —
@@ -89,30 +95,29 @@ target ID those commands need:
 
 ```sh
 # Human-readable
-gh elm migration lookup-target-id --migration-id <uuid>
+gh elm migration lookup-target-id <uuid>
 
 # Machine-readable, e.g. piped to jq
-gh elm migration lookup-target-id --migration-id <uuid> --json | jq .target_migration_id
+gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id
 
 # Resolve the target ID and feed it straight into a target command
-TARGET_ID=$(gh elm migration lookup-target-id --migration-id <uuid> --json | jq .target_migration_id)
-gh elm target resources --migration-id "$TARGET_ID"
+TARGET_ID=$(gh elm migration lookup-target-id <uuid> --json | jq .target_migration_id)
+gh elm target resources --migration-id "$TARGET_ID" --repository octo-org/octo-repo
 ```
 
 Migration resources — `gh elm target resources`:
 
 ```sh
-# All resources for a migration (both backfill and live_update origins)
-gh elm target resources --migration-id 42
-
-# Filter by repository, origin, and state
+# Resources for a repository (both backfill and live_update origins)
 gh elm target resources --migration-id 42 --repository octo-org/octo-repo
-gh elm target resources --migration-id 42 --origin backfill
-gh elm target resources --migration-id 42 --state failed
+
+# Filter further by origin and state
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --origin backfill
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --state failed
 
 # Cap results and emit newline-delimited JSON for scripting
-gh elm target resources --migration-id 42 --max-results 20
-gh elm target resources --migration-id 42 --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --max-results 20
+gh elm target resources --migration-id 42 --repository octo-org/octo-repo --json | jq -s 'group_by(.type) | map({type: .[0].type, count: length})'
 ```
 
 Node reports — `gh elm target report create|status|url` (human-readable by default; add

@@ -15,6 +15,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/render"
 )
 
 // newResourcesCmd builds `gh elm target resources`, which lists a migration's
@@ -36,7 +37,8 @@ func newResourcesCmd() *cobra.Command {
 		Use:   "resources",
 		Short: "List a migration's resources from the target",
 		Long: "List a migration's resources from the target (GitHub with Data Residency) REST API.\n" +
-			"Filter by repository, state, and origin. When --origin is omitted, resources\n" +
+			"A repository filter is currently required. Filter further by state and origin.\n" +
+			"When --origin is omitted, resources\n" +
 			"from both the backfill and live_update origins are listed.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -47,6 +49,14 @@ func newResourcesCmd() *cobra.Command {
 			state, err := resolveState(stateFlag)
 			if err != nil {
 				return err
+			}
+
+			// TEMPORARY API WORKAROUND: the target list-nodes endpoint currently
+			// rejects requests without repository_nwo. Remove this block once the
+			// API supports listing resources without a repository filter.
+			repository = strings.TrimSpace(repository)
+			if repository == "" {
+				return errors.New("--repository is required because the target API currently requires repository_nwo")
 			}
 
 			resolver, err := endpoints.NewResolver()
@@ -96,14 +106,14 @@ func newResourcesCmd() *cobra.Command {
 			}
 
 			if !asJSON {
-				fmt.Fprintln(out, resourceCountSummary(printed))
+				return render.Write(out, resourceCountSummary(printed))
 			}
 			return nil
 		},
 	}
 
 	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Migration ID to list resources for (required).")
-	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Filter resources by repository in owner/repo format.")
+	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Repository to list resources for in owner/repo format (currently required).")
 	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live_update (default: both).")
 	cmd.Flags().StringVar(&stateFlag, "state", "", "Filter by state: pending, processed, failed, or eligible (default: all).")
 	cmd.Flags().IntVar(&maxResults, "max-results", 0, "Maximum number of resources to return (0 = all).")

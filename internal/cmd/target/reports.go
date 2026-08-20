@@ -13,6 +13,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/render"
 )
 
 // newReportCmd builds the `gh elm target report` command group — `create`,
@@ -248,7 +249,7 @@ func writeRaw(w io.Writer, raw json.RawMessage) error {
 // rendering parsed from it. The raw path echoes the response verbatim so unknown
 // fields survive and no zero values are fabricated; the human path only reads
 // the fields it displays.
-func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, render func(io.Writer, T)) error {
+func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, renderView func(io.Writer, T)) error {
 	if asJSON {
 		return writeRaw(out, raw)
 	}
@@ -261,9 +262,8 @@ func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, render
 	// truncated success. Writes to a bytes.Buffer can't fail, so the render
 	// callbacks don't need to return errors.
 	var buf bytes.Buffer
-	render(&buf, v)
-	_, err := out.Write(buf.Bytes())
-	return err
+	renderView(&buf, v)
+	return render.Write(out, buf.String())
 }
 
 // reportCreateView is the human-facing subset of the create-report response.
@@ -274,9 +274,9 @@ type reportCreateView struct {
 
 func printReportCreate(w io.Writer, v reportCreateView) {
 	if v.AlreadyInProgress {
-		fmt.Fprintln(w, "A report for this stage was already in progress; reusing it.")
+		fmt.Fprintln(w, render.Success("A report for this stage was already in progress; reusing it."))
 	} else {
-		fmt.Fprintln(w, "Report requested.")
+		fmt.Fprintln(w, render.Success("Report requested."))
 	}
 	if !v.RequestedAt.IsZero() {
 		fmt.Fprintf(w, "Requested at: %s\n", v.RequestedAt.Format(time.RFC3339))

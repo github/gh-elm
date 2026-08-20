@@ -46,7 +46,7 @@ func TestInvalidCommand(t *testing.T) {
 
 	require.NotEqual(t, 0, result.ExitCode)
 	assert.Empty(t, result.Stdout)
-	assert.Contains(t, result.Stderr, "Error:")
+	assert.Contains(t, result.Stderr, "Error\n")
 	assert.Contains(t, result.Stderr, "unknown command")
 	assert.NotContains(t, result.Stderr, "Usage:")
 }
@@ -73,8 +73,6 @@ func TestMigrationStatus(t *testing.T) {
 			nil,
 			"migration",
 			"status",
-			"--json",
-			"--migration-id",
 			"mig-1",
 			"--source-url",
 			srv.URL,
@@ -83,7 +81,9 @@ func TestMigrationStatus(t *testing.T) {
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
-		assert.Equal(t, response+"\n", result.Stdout)
+		for _, want := range []string{"Migration", "mig-1", "In progress"} {
+			assert.Contains(t, result.Stdout, want)
+		}
 		assert.Empty(t, result.Stderr)
 		assert.Equal(t, int32(1), requestCount.Load())
 
@@ -112,7 +112,6 @@ func TestMigrationStatus(t *testing.T) {
 			nil,
 			"migration",
 			"status",
-			"--migration-id",
 			"mig-1",
 			"--source-url",
 			srv.URL,
@@ -124,7 +123,7 @@ func TestMigrationStatus(t *testing.T) {
 		assert.Empty(t, result.Stdout)
 		assert.Equal(t, int32(1), requestCount.Load())
 
-		assert.Contains(t, result.Stderr, "Error:")
+		assert.Contains(t, result.Stderr, "Error\n")
 		assert.Contains(t, result.Stderr, "authentication failed")
 		assert.Contains(t, result.Stderr, "HTTP 401")
 		assert.Contains(t, result.Stderr, "GH_SOURCE_HOST")
@@ -158,6 +157,7 @@ func TestTargetResourcesJSON(t *testing.T) {
 		assert.Equal(t, "/enterprise/migration/42/nodes", r.URL.Path)
 		assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
 		assert.Equal(t, "NODE_ORIGIN_BACKFILL", r.URL.Query().Get("origin"))
+		assert.Equal(t, "octo/repo", r.URL.Query().Get("repository_nwo"))
 		assert.Equal(t, "100", r.URL.Query().Get("page_size"))
 
 		w.Header().Set("Content-Type", "application/json")
@@ -172,6 +172,8 @@ func TestTargetResourcesJSON(t *testing.T) {
 		"resources",
 		"--migration-id",
 		"42",
+		"--repository",
+		"octo/repo",
 		"--origin",
 		"backfill",
 		"--json",
@@ -241,9 +243,8 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			baseEnv,
 			"migration",
 			"status",
-			"--json",
-			"--migration-id",
 			"mig-1",
+			"--json",
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
@@ -261,9 +262,8 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			},
 			"migration",
 			"status",
-			"--json",
-			"--migration-id",
 			"mig-1",
+			"--json",
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
@@ -281,9 +281,8 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 			},
 			"migration",
 			"status",
-			"--json",
-			"--migration-id",
 			"mig-1",
+			"--json",
 			"--source-url",
 			flagServer.URL,
 			"--source-token",

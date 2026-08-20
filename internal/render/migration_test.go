@@ -24,7 +24,7 @@ func TestMigrationCreate(t *testing.T) {
 	t.Run("renders a successful creation", func(t *testing.T) {
 		expiresAt := "2026-09-01T16:34:20Z"
 
-		assert.Equal(t, `Migration successfully created
+		assert.Equal(t, `✓ Migration successfully created
   Migration ID        897930cf-51cb-4e2d-9806-6357a6e66b55
   Expires             2026-09-01T16:34:20Z
 
@@ -48,7 +48,7 @@ func TestMigrationCreate(t *testing.T) {
 			ExpiresAt:   &expiresAt,
 		})
 
-		assert.Contains(t, output, styles.Success.Bold(true).Render("Migration successfully created"))
+		assert.Contains(t, output, styles.Success.Render("✓")+" Migration successfully created")
 		assert.Contains(t, output, styles.Bold.Render("mig-1"))
 		assert.Contains(t, output, styles.Muted.Render("  Expires             "+expiresAt))
 	})
@@ -118,6 +118,69 @@ func TestMigrationStatus(t *testing.T) {
 	t.Run("renders empty response explicitly", func(t *testing.T) {
 		assert.Equal(t, "No migration status data returned.\n", MigrationStatus(elmapi.MigrationDetail{}))
 	})
+
+	t.Run("deduplicates ready-for-cutover state", func(t *testing.T) {
+		status := "ready_for_cutover"
+		phase := "ready_for_cutover"
+
+		output := MigrationStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:          &status,
+				DisplayMessage:  "Ready for cutover",
+				ReadyForCutover: true,
+				Repositories: []elmapi.CombinedRepositoryState{{
+					RepositoryNWO: "elm-test/the-hook2",
+					Phase:         &phase,
+					DisplayStatus: "Ready for cutover",
+				}},
+			},
+		})
+
+		assert.Equal(t, `Cutover
+  ✓ Ready for cutover
+
+Repository states
+  • elm-test/the-hook2 · Ready for cutover
+`, output)
+	})
+
+	t.Run("suppresses completed-state readiness and stale blockers", func(t *testing.T) {
+		status := "completed"
+
+		output := MigrationStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:          &status,
+				DisplayMessage:  "Migration completed successfully",
+				ReadyForCutover: false,
+				CutoverBlockers: []string{"Migration already completed"},
+			},
+		})
+
+		assert.Equal(t, `Cutover
+  ✓ Completed
+  Migration completed successfully
+`, output)
+	})
+
+	t.Run("preserves distinct repository phase and status", func(t *testing.T) {
+		status := "backfilling"
+		phase := "backfill"
+
+		output := CutoverStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:          &status,
+				ReadyForCutover: false,
+				Repositories: []elmapi.CombinedRepositoryState{{
+					RepositoryNWO: "acme/web",
+					Phase:         &phase,
+					DisplayStatus: "In progress",
+				}},
+			},
+		})
+
+		assert.Contains(t, output, "acme/web · Backfill · In progress")
+		assert.Contains(t, output, "○ Not ready for cutover")
+	})
 }
 
 func TestMigrationList(t *testing.T) {
@@ -154,8 +217,9 @@ func TestMigrationList(t *testing.T) {
 			TotalCount: 0,
 		})
 
-		assert.NotContains(t, output, "No migrations available.")
+		assert.Contains(t, output, "Migrations (1)")
 		assert.Contains(t, output, "mig-1")
+		assert.NotContains(t, output, "No migrations available.")
 	})
 
 	t.Run("renders a page-empty state when a cursor page has no migrations but a positive total", func(t *testing.T) {
@@ -215,6 +279,31 @@ func TestStatusPresentation(t *testing.T) {
 }
 
 func TestOutputWriters(t *testing.T) {
+	t.Run("human output removes leading blank lines and adds one trailing blank line", func(t *testing.T) {
+		var output bytes.Buffer
+
+		require.NoError(t, Write(&output, "\n\nContent\n"))
+
+		assert.Equal(t, "Content\n\n", output.String())
+	})
+
+	t.Run("success confirmation uses the semantic success glyph", func(t *testing.T) {
+		assert.Equal(t, "✓ Operation completed.", Success("Operation completed."))
+	})
+
+	t.Run("success confirmation colors only the checkmark", func(t *testing.T) {
+		previousProfile := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		t.Cleanup(func() {
+			lipgloss.SetColorProfile(previousProfile)
+		})
+
+		output := Success("Operation completed.")
+
+		assert.Equal(t, theme.New().Success.Render("✓")+" Operation completed.", output)
+		assert.NotContains(t, output, theme.New().Success.Render("Operation completed."))
+	})
+
 	t.Run("human output surfaces writer errors", func(t *testing.T) {
 		assert.Error(t, Write(failWriter{}, "output"))
 	})

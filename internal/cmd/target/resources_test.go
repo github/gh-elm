@@ -16,11 +16,12 @@ func TestResources(t *testing.T) {
 		var origins []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origins = append(origins, r.URL.Query().Get("origin"))
+			assert.Equal(t, "octo/repo", r.URL.Query().Get("repository_nwo"))
 			_, _ = w.Write([]byte(`{"nodes":[{"id":"n1","type":"issue","origin":"NODE_ORIGIN_BACKFILL","state":"NODE_STATE_PENDING"}],"after":""}`))
 		}))
 		defer srv.Close()
 
-		out := runResources(t, "--migration-id", "42",
+		out := runResources(t, "--migration-id", "42", "--repository", "octo/repo",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Contains(t, out, "Resource ID: n1", "missing resource line")
@@ -34,7 +35,7 @@ func TestResources(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runResources(t, "--migration-id", "1", "--origin", "backfill", "--json",
+		out := runResources(t, "--migration-id", "1", "--repository", "octo/repo", "--origin", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Contains(t, out, `"id":"n1"`, "expected JSON resource")
@@ -50,7 +51,7 @@ func TestResources(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := strings.TrimSpace(runResources(t, "--migration-id", "1", "--origin", "backfill", "--json",
+		out := strings.TrimSpace(runResources(t, "--migration-id", "1", "--repository", "octo/repo", "--origin", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok"))
 
 		assert.Contains(t, out, `"correlationId":"abc-123"`, "expected unknown field preserved")
@@ -65,7 +66,7 @@ func TestResources(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		out := runResources(t, "--migration-id", "1", "--origin", "backfill", "--max-results", "2",
+		out := runResources(t, "--migration-id", "1", "--repository", "octo/repo", "--origin", "backfill", "--max-results", "2",
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, 2, strings.Count(out, "Resource ID:"), "expected 2 resources")
@@ -84,7 +85,7 @@ func TestResources(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		err := runResourcesErr(t, "--migration-id", "1", "--origin", "backfill",
+		err := runResourcesErr(t, "--migration-id", "1", "--repository", "octo/repo", "--origin", "backfill",
 			"--target-url", srv.URL, "--target-token", "bad")
 		require.Error(t, err, "expected an error on 401")
 		msg := err.Error()
@@ -97,6 +98,29 @@ func TestResources(t *testing.T) {
 		err := runResourcesErr(t, "--target-url", "https://x", "--target-token", "tok")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "migration-id")
+	})
+
+	t.Run("requires --repository before making a request", func(t *testing.T) {
+		requests := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			requests++
+		}))
+		defer srv.Close()
+
+		err := runResourcesErr(t, "--migration-id", "1",
+			"--target-url", srv.URL, "--target-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--repository is required")
+		assert.Zero(t, requests)
+	})
+
+	t.Run("rejects an empty --repository value", func(t *testing.T) {
+		err := runResourcesErr(t, "--migration-id", "1", "--repository", "   ",
+			"--target-url", "https://x", "--target-token", "tok")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--repository is required")
 	})
 }
 

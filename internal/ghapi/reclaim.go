@@ -21,6 +21,7 @@ type reclaimClient interface {
 // Logger receives human-readable progress and warnings from the service.
 type Logger interface {
 	Infof(format string, args ...any)
+	Successf(format string, args ...any)
 	Warnf(format string, args ...any)
 }
 
@@ -154,7 +155,7 @@ func (s *ReclaimService) handleInvitation(m Mannequin, targetUser, targetUserID 
 		s.log.Warnf("Failed to send reclaim invitation email to %s for mannequin %s (%s)", targetUser, m.Login, m.ID)
 		return false
 	}
-	s.log.Infof("Mannequin reclaim invitation email successfully sent to %s for %s (%s)", targetUser, m.Login, m.ID)
+	s.log.Successf("Mannequin reclaim invitation email successfully sent to %s for %s (%s)", targetUser, m.Login, m.ID)
 	return true
 }
 
@@ -172,7 +173,7 @@ func (s *ReclaimService) handleReattribution(m Mannequin, targetUser, targetUser
 		s.log.Warnf("Failed to reattribute content belonging to mannequin %s (%s) to %s", m.Login, m.ID, targetUser)
 		return true
 	}
-	s.log.Infof("Successfully reclaimed content belonging to mannequin %s (%s) to %s", m.Login, m.ID, targetUser)
+	s.log.Successf("Successfully reclaimed content belonging to mannequin %s (%s) to %s", m.Login, m.ID, targetUser)
 	return true
 }
 
