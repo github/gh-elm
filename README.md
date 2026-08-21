@@ -46,10 +46,10 @@ gh elm config reset # remove stored config and credentials
   migration's destination (GitHub with Data Residency) migration ID for use with the
   `gh elm target *` commands.
   Create, status, list, and cutover-revert output is human-readable by default; add
-  `--json` for the raw API response.
+  `--json` for the formatted API response.
 - `gh elm target report request|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
-  raw API response.
+  formatted API response.
 - `gh elm target mannequin list|reclaim` — manage mannequins for a target organization.
   Use `--output` on `list` to save a CSV, then edit and pass it to `reclaim --csv`.
 
@@ -79,7 +79,7 @@ gh elm migration cancel <uuid>
 gh elm migration status <uuid>
 gh elm migration list --status all
 
-# Preserve the raw API response for scripts and jq
+# Preserve the complete API response as formatted JSON for scripts and jq
 gh elm migration status <uuid> --json | jq .combined_state.status
 gh elm migration list --status all --json | jq '.migrations[]'
 
@@ -128,7 +128,7 @@ gh elm target resources 42 octo-org/octo-repo --json | jq -s 'group_by(.type) | 
 ```
 
 Node reports — `gh elm target report request|status|url` (human-readable by default; add
-`--json` for the raw API response):
+`--json` for the formatted API response):
 
 ```sh
 # Request a backfill report over all nodes (default --state all)
@@ -137,7 +137,7 @@ gh elm target report request 42 --stage backfill
 # Request a live-updates report over only unmigrated nodes
 gh elm target report request 42 --stage live-update --state unmigrated
 
-# Poll status (human-readable), or as raw JSON piped to jq
+# Poll status (human-readable), or as formatted JSON piped to jq
 gh elm target report status 42 --stage backfill
 gh elm target report status 42 --stage backfill --json | jq -r .status
 

@@ -320,13 +320,17 @@ func TestOutputWriters(t *testing.T) {
 		assert.Error(t, Write(failWriter{}, "output"))
 	})
 
-	t.Run("raw JSON surfaces writer errors", func(t *testing.T) {
+	t.Run("JSON surfaces writer errors", func(t *testing.T) {
 		assert.Error(t, WriteRawJSON(failWriter{}, []byte(`{"ok":true}`)))
 	})
 
-	t.Run("raw JSON appends a newline", func(t *testing.T) {
+	t.Run("JSON is indented and ends with one newline", func(t *testing.T) {
 		var output bytes.Buffer
-		require.NoError(t, WriteRawJSON(&output, []byte(`{"ok":true}`)))
-		assert.Equal(t, "{\"ok\":true}\n", output.String())
+		require.NoError(t, WriteRawJSON(&output, []byte(` { "ok": true, "nested": {"value": 1} } `)))
+		assert.Equal(t, "{\n  \"ok\": true,\n  \"nested\": {\n    \"value\": 1\n  }\n}\n", output.String()) //nolint:testifylint // Exact whitespace is the behavior under test.
+	})
+
+	t.Run("invalid JSON is rejected", func(t *testing.T) {
+		assert.ErrorContains(t, WriteRawJSON(&bytes.Buffer{}, []byte(`{"ok":`)), "formatting JSON response")
 	})
 }

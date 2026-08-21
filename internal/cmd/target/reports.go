@@ -95,7 +95,7 @@ func newReportRequestCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage the report should cover: backfill or live-update (required).")
 	cmd.Flags().StringVar(&stateFlag, "state", "all", "Node states the report should cover: migrated, unmigrated, or all.")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	addSourceFlags(cmd, &source)
@@ -160,7 +160,7 @@ func newReportStatusCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live-update (required).")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	addSourceFlags(cmd, &source)
@@ -220,7 +220,7 @@ func newReportURLCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live-update (required).")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	addSourceFlags(cmd, &source)
@@ -277,10 +277,10 @@ func resolveReportState(s string) (string, error) {
 	}
 }
 
-// renderReport writes either the API's raw JSON (asJSON) or a human-readable
-// rendering parsed from it. The raw path echoes the response verbatim so unknown
-// fields survive and no zero values are fabricated; the human path only reads
-// the fields it displays.
+// renderReport writes either the API's formatted JSON (asJSON) or a
+// human-readable rendering parsed from it. The JSON path preserves unknown
+// fields and does not fabricate zero values; the human path only reads the
+// fields it displays.
 func renderReport[T any](out io.Writer, raw json.RawMessage, asJSON bool, renderView func(io.Writer, T)) error {
 	if asJSON {
 		return render.WriteRawJSON(out, raw)

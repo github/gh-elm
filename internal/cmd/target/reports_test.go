@@ -97,7 +97,8 @@ func TestReportRequest(t *testing.T) {
 		out := runReports(t, "report", "request", "42", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"requestedAt\":")
 	})
 
 	t.Run("defaults --state to all", func(t *testing.T) {
@@ -192,7 +193,8 @@ func TestReportStatus(t *testing.T) {
 		out := runReports(t, "report", "status", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"status\":")
 	})
 
 	t.Run("requires a target migration ID", func(t *testing.T) {
@@ -235,7 +237,8 @@ func TestReportURL(t *testing.T) {
 		out := runReports(t, "report", "url", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"url\":")
 	})
 }
 
