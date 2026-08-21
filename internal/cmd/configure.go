@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/creds"
+	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
 	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
@@ -63,9 +65,125 @@ func newConfigCmd() *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("show", "reset")
 	_ = cmd.Flags().MarkHidden("show")
 	_ = cmd.Flags().MarkHidden("reset")
-	cmd.AddCommand(newConfigShowCmd(), newConfigResetCmd())
+	cmd.AddCommand(
+		newConfigShowCmd(),
+		newConfigResetCmd(),
+		newSetMigratorPATCmd("set-source-pat", "SOURCE_PAT"),
+		newSetMigratorPATCmd("set-target-pat", "TARGET_PAT"),
+	)
 
 	return cmd
+}
+
+func newSetMigratorPATCmd(commandName, secretName string) *cobra.Command {
+	var org, sourceURL, sourceToken, body string
+
+	cmd := &cobra.Command{
+		Use:   commandName + " ORG",
+		Short: "Set the " + secretName + " used by the migrator",
+		Long: "Set the " + secretName + " secret used by the migrator for an organization on the configured\n" +
+			"source GHES appliance. Provide the PAT through --body, the " + secretName + " environment\n" +
+			"variable, or standard input. When no value is available, the command prompts securely.\n" +
+			"The configured source API URL and admin token authenticate this operation.",
+		Example: "  " + secretName + "=ghp_example gh elm config " + commandName + " octo-org\n" +
+			"  gh elm config " + commandName + " octo-org --body \"$" + secretName + "\"\n" +
+			"  gh elm config " + commandName + " --org octo-org < pat.txt",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedOrg, err := resolveOrganization(args, org, cmd.Flags().Changed("org"))
+			if err != nil {
+				return err
+			}
+
+			pat, err := migratorPATInput(cmd, body, secretName)
+			if err != nil {
+				return err
+			}
+
+			resolver, err := endpoints.NewResolver()
+			if err != nil {
+				return err
+			}
+			ep, err := resolver.Source(sourceURL, sourceToken)
+			if err != nil {
+				return err
+			}
+			if ep.URL == "" {
+				return fmt.Errorf("no source URL configured; run `gh elm config`, set %s, or pass --source-url", config.EnvSourceURL)
+			}
+			if ep.Token == "" {
+				return fmt.Errorf("no source admin token configured; run `gh elm config`, set %s, or pass --source-token", config.EnvSourceToken)
+			}
+
+			if err := elmapi.NewClient(ep.URL, ep.Token).SetMigratorSecret(cmd.Context(), resolvedOrg, secretName, pat); err != nil {
+				return err
+			}
+			return render.Write(cmd.OutOrStdout(), render.Success("Set "+secretName+" migrator secret."))
+		},
+	}
+
+	cmd.Flags().StringVarP(&body, "body", "b", "", "The PAT value (reads from standard input if not specified).")
+	cmd.Flags().StringVarP(&org, "org", "o", "", "Organization that can access the secret.")
+	cmd.Flags().StringVar(&sourceURL, "source-url", "", "Override the source (GHES) API base URL.")
+	cmd.Flags().StringVar(&sourceToken, "source-token", "", "Override the source (GHES) admin token.")
+	return cmd
+}
+
+func resolveOrganization(args []string, flagValue string, flagSpecified bool) (string, error) {
+	if len(args) > 0 && flagSpecified {
+		return "", errors.New("ORG cannot be combined with --org")
+	}
+	if len(args) == 1 {
+		org := strings.TrimSpace(args[0])
+		if org == "" {
+			return "", errors.New("ORG cannot be empty")
+		}
+		return org, nil
+	}
+	if flagSpecified {
+		org := strings.TrimSpace(flagValue)
+		if org != "" {
+			return org, nil
+		}
+	}
+	return "", errors.New("organization required: pass ORG or use --org")
+}
+
+func migratorPATInput(cmd *cobra.Command, body, envName string) (string, error) {
+	if body != "" {
+		return body, nil
+	}
+	if value := os.Getenv(envName); value != "" {
+		return value, nil
+	}
+
+	input := cmd.InOrStdin()
+	if file, ok := input.(*os.File); ok {
+		//nolint:gosec // stdin descriptors fit in int on supported platforms
+		fd := int(file.Fd())
+		if term.IsTerminal(fd) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Paste %s: ", envName)
+			value, err := term.ReadPassword(fd)
+			fmt.Fprintln(cmd.ErrOrStderr())
+			if err != nil {
+				return "", fmt.Errorf("reading PAT: %w", err)
+			}
+			if len(value) == 0 {
+				return "", errors.New("interactive input did not contain a PAT")
+			}
+			return string(value), nil
+		}
+	}
+
+	value, err := io.ReadAll(input)
+	if err != nil {
+		return "", fmt.Errorf("reading PAT from standard input: %w", err)
+	}
+	value = bytes.TrimRight(value, "\r\n")
+	if len(value) == 0 {
+		return "", errors.New("standard input did not contain a PAT")
+	}
+	return string(value), nil
 }
 
 func newConfigureAliasCmd() *cobra.Command {

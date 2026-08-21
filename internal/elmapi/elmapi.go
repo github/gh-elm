@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -120,13 +121,18 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	if len(query) > 0 {
 		endpoint += "?" + query.Encode()
 	}
-	return c.do(ctx, http.MethodGet, endpoint, nil, http.StatusOK, out)
+	return c.do(ctx, http.MethodGet, endpoint, nil, out, http.StatusOK)
 }
 
 // post issues a POST request with a JSON body and decodes a JSON response into
 // out. wantStatus is the success status to accept (the reports endpoint returns
 // 202 Accepted rather than 200 OK).
 func (c *Client) post(ctx context.Context, path string, body, out any, wantStatus int) error {
+	return c.sendJSON(ctx, http.MethodPost, path, body, out, wantStatus)
+}
+
+// sendJSON issues a request with a JSON body and accepts any listed status.
+func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any, wantStatus ...int) error {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -135,12 +141,12 @@ func (c *Client) post(ctx context.Context, path string, body, out any, wantStatu
 			return fmt.Errorf("encoding request body: %w", err)
 		}
 	}
-	return c.do(ctx, http.MethodPost, c.baseURL+path, payload, wantStatus, out)
+	return c.do(ctx, method, c.baseURL+path, payload, out, wantStatus...)
 }
 
 // do performs an HTTP request and decodes a JSON response into out, treating any
-// status other than wantStatus as an error.
-func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, wantStatus int, out any) error {
+// status not present in wantStatus as an error.
+func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, out any, wantStatus ...int) error {
 	var reqBody io.Reader = http.NoBody
 	if body != nil {
 		reqBody = bytes.NewReader(body)
@@ -169,7 +175,7 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte, w
 		return fmt.Errorf("reading response: %w", err)
 	}
 
-	if resp.StatusCode != wantStatus {
+	if !slices.Contains(wantStatus, resp.StatusCode) {
 		apiErr := decodeErrorResponse(respBody)
 		return &HTTPError{
 			StatusCode:        resp.StatusCode,
