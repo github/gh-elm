@@ -35,12 +35,16 @@ func New() *Service {
 
 // Configuration is the redacted configuration state shown by interactive UIs.
 type Configuration struct {
-	SourceURL       string
-	SourceTokenSet  bool
-	TargetURL       string
-	TargetTokenSet  bool
-	ConfigPath      string
-	CredentialStore string
+	SourceURL              string
+	SourceTokenSet         bool
+	TargetURL              string
+	TargetTokenSet         bool
+	ResolvedSourceURL      string
+	ResolvedSourceTokenSet bool
+	ResolvedTargetURL      string
+	ResolvedTargetTokenSet bool
+	ConfigPath             string
+	CredentialStore        string
 }
 
 // ConfigurationInput updates stored endpoint URLs and optional tokens. Empty
@@ -470,14 +474,48 @@ func (s *Service) GetConfiguration(context.Context) (*Configuration, error) {
 	if err != nil {
 		return nil, err
 	}
+	resolver, err := endpoints.NewResolver()
+	if err != nil {
+		return nil, err
+	}
+	source, err := resolver.Source("", "")
+	if err != nil {
+		return nil, err
+	}
+	target, err := resolver.Target("", "")
+	if err != nil {
+		return nil, err
+	}
 	return &Configuration{
-		SourceURL:       cfg.SourceURL,
-		SourceTokenSet:  sourceToken != "",
-		TargetURL:       cfg.TargetURL,
-		TargetTokenSet:  targetToken != "",
-		ConfigPath:      path,
-		CredentialStore: store.Location(),
+		SourceURL:              cfg.SourceURL,
+		SourceTokenSet:         sourceToken != "",
+		TargetURL:              cfg.TargetURL,
+		TargetTokenSet:         targetToken != "",
+		ResolvedSourceURL:      source.URL,
+		ResolvedSourceTokenSet: source.Token != "",
+		ResolvedTargetURL:      target.URL,
+		ResolvedTargetTokenSet: target.Token != "",
+		ConfigPath:             path,
+		CredentialStore:        store.Location(),
 	}, nil
+}
+
+// CheckSourceAuthentication verifies the effective source configuration.
+func (s *Service) CheckSourceAuthentication(ctx context.Context) error {
+	client, err := s.sourceClient()
+	if err != nil {
+		return err
+	}
+	return client.CheckAuthentication(ctx)
+}
+
+// CheckTargetAuthentication verifies the effective target configuration.
+func (s *Service) CheckTargetAuthentication(ctx context.Context) error {
+	client, err := s.targetClient()
+	if err != nil {
+		return err
+	}
+	return client.CheckAuthentication(ctx)
 }
 
 // SaveConfiguration saves URLs and non-empty tokens.

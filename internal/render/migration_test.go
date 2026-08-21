@@ -183,6 +183,21 @@ Repository states
 	})
 }
 
+func TestProgressBar(t *testing.T) {
+	t.Run("renders proportional progress", func(t *testing.T) {
+		assert.Equal(t, "████████░░", ProgressBar(8, 10, 10))
+	})
+
+	t.Run("clamps values to the bar bounds", func(t *testing.T) {
+		assert.Equal(t, "░░░░", ProgressBar(-1, 10, 4))
+		assert.Equal(t, "████", ProgressBar(12, 10, 4))
+	})
+
+	t.Run("renders an empty bar without a total", func(t *testing.T) {
+		assert.Equal(t, "░░░░", ProgressBar(4, 0, 4))
+	})
+}
+
 func TestMigrationList(t *testing.T) {
 	t.Run("renders rows and pagination", func(t *testing.T) {
 		status := "completed"

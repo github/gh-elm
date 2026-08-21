@@ -2,11 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/render"
+	"github.com/github/gh-elm/internal/workflow"
 )
 
 // View implements tea.Model.
@@ -27,31 +31,38 @@ func (m *Model) View() string {
 			"Advanced destination operations",
 			"Quit",
 		})
-		help = "↑/↓ move • enter select • q quit"
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Help, keys.Quit)
 	case screenSourceList:
 		title = "Migrations"
+		if m.sourceSearch {
+			title += " · search: " + m.searchInput.View()
+		}
 		body = m.sourceListView()
-		help = "↑/↓ move • enter open • n new • m manual ID • r refresh • esc back"
+		if m.sourceSearch {
+			help = "type to filter • " + helpLine(keys.Up, keys.Down, keys.Open, keys.Back)
+		} else {
+			help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Search, keys.Density, keys.Refresh, keys.Back)
+		}
 	case screenSourceDetail:
 		title = fmt.Sprintf("Migration %s", m.sourceID)
 		body = m.sourceDetailView()
-		help = "↑/↓ move • enter action • r refresh • esc back"
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenTargetList:
 		title = "Advanced destination migrations"
 		body = m.targetListView()
-		help = "↑/↓ move • enter open • n advanced create • m manual ID • r refresh • esc back"
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Manual, keys.Refresh, keys.Back)
 	case screenTargetDetail:
 		title = fmt.Sprintf("Destination migration %d (advanced)", m.targetID)
 		body = m.targetDetailView()
-		help = "↑/↓ move • enter action • r refresh • esc back"
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
 		title = "Target mannequins"
 		body = m.menu(mannequinActions)
-		help = "↑/↓ move • enter select • esc back"
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Back)
 	case screenConfiguration:
 		title = "Configuration"
 		body = m.configurationView()
-		help = "↑/↓ move • enter select • r refresh • esc back"
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenForm:
 		title = m.form.title
 		body = m.formView()
@@ -62,10 +73,15 @@ func (m *Model) View() string {
 		help = "y/enter confirm • n/esc cancel"
 	case screenResult:
 		title = m.result.title
-		body = clipWindow(m.result.body, m.result.offset, max(3, displayHeight(m.height)-7))
-		help = "↑/↓ scroll • enter/esc return"
+		body = m.result.body
+		help = helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown, keys.Back)
 	}
 
+	if m.showHelp {
+		title = "Keyboard help"
+		body = m.fullHelpView()
+		help = "? close • q quit"
+	}
 	if m.loading {
 		body = m.styles.Active.Render("Loading…")
 	}
@@ -73,7 +89,13 @@ func (m *Model) View() string {
 		body += "\n\n" + m.styles.Failure.Render("Error: "+m.err.Error())
 	}
 	height := displayHeight(m.height)
-	return m.frame(title, clip(body, max(3, height-7))+"\n\n"+m.styles.Muted.Render(help))
+	bodyHeight := max(3, height-7)
+	if m.scrollableScreen() || m.showHelp {
+		body = m.viewportView(body, bodyHeight)
+	} else {
+		body = clip(body, bodyHeight)
+	}
+	return m.frame(title, body+"\n\n"+m.styles.Muted.Render(help))
 }
 
 func (m *Model) frame(title, body string) string {
@@ -84,7 +106,7 @@ func (m *Model) frame(title, body string) string {
 	contentWidth := max(20, width-4)
 	header := m.styles.Info.Bold(true).Render(title)
 	if warning := m.configurationWarning(); warning != "" {
-		header = m.styles.Warning.Bold(true).Render("⚠ Configuration incomplete") + "\n" +
+		header = m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
 			m.styles.Warning.Render(warning) + "\n\n" + header
 	}
 	content := lipgloss.NewStyle().Width(contentWidth).Render(body)
@@ -99,23 +121,45 @@ func (m *Model) configurationWarning() string {
 		return ""
 	}
 
-	var missing []string
-	if m.configuration.SourceURL == "" {
+	var missing, invalid, unavailable []string
+	sourceURL, sourceTokenSet := effectiveSourceConfiguration(m.configuration)
+	targetURL, targetTokenSet := effectiveTargetConfiguration(m.configuration)
+	if sourceURL == "" {
 		missing = append(missing, "source URL")
+	} else if !validHTTPURL(sourceURL) {
+		invalid = append(invalid, "source URL")
 	}
-	if !m.configuration.SourceTokenSet {
+	if !sourceTokenSet {
 		missing = append(missing, "source token")
 	}
-	if m.configuration.TargetURL == "" {
+	if targetURL == "" {
 		missing = append(missing, "destination URL")
+	} else if !validHTTPURL(targetURL) {
+		invalid = append(invalid, "destination URL")
 	}
-	if !m.configuration.TargetTokenSet {
+	if !targetTokenSet {
 		missing = append(missing, "destination token")
 	}
-	if len(missing) == 0 {
+	if sourceURL != "" && sourceTokenSet && m.sourceAuthChecked && m.sourceAuthErr != nil {
+		unavailable = append(unavailable, "source authentication")
+	}
+	if targetURL != "" && targetTokenSet && m.targetAuthChecked && m.targetAuthErr != nil {
+		unavailable = append(unavailable, "destination authentication")
+	}
+	if len(missing) == 0 && len(invalid) == 0 && len(unavailable) == 0 {
 		return ""
 	}
-	return "Missing " + strings.Join(missing, ", ") + ". Open Configuration to finish setup."
+	var issues []string
+	if len(missing) > 0 {
+		issues = append(issues, "Missing "+strings.Join(missing, ", "))
+	}
+	if len(invalid) > 0 {
+		issues = append(issues, "Invalid "+strings.Join(invalid, ", "))
+	}
+	if len(unavailable) > 0 {
+		issues = append(issues, "Failed "+strings.Join(unavailable, ", "))
+	}
+	return strings.Join(issues, ". ") + ". Open Configuration to finish setup."
 }
 
 func (m *Model) menu(items []string) string {
@@ -127,28 +171,59 @@ func (m *Model) menu(items []string) string {
 }
 
 func (m *Model) sourceListView() string {
-	if len(m.sourceMigrations) == 0 {
+	migrations := m.visibleSourceMigrations()
+	if len(migrations) == 0 {
+		if m.sourceSearch && strings.TrimSpace(m.searchInput.Value()) != "" {
+			return fmt.Sprintf("No migrations match %q.", strings.TrimSpace(m.searchInput.Value()))
+		}
 		return "No migrations found.\n\nPress n to create one or m to open a migration by UUID."
 	}
 	var builder strings.Builder
-	for index, migration := range m.sourceMigrations {
-		status := ""
-		if migration.Status != nil {
-			status = *migration.Status
+	start, end := m.sourceListBounds(len(migrations))
+	for index := start; index < end; index++ {
+		if index > start && !m.compactSourceList() {
+			builder.WriteString("\n")
 		}
-		fmt.Fprintf(
-			&builder,
-			"%s %-12s  %s/%s → %s/%s\n  %s\n",
-			m.marker(index),
-			status,
-			migration.SourceOrganizationLogin,
-			migration.SourceRepositoryName,
-			migration.TargetOrganizationLogin,
-			migration.TargetRepositoryName,
-			m.styles.Muted.Render(migration.MigrationID),
-		)
+		builder.WriteString(m.sourceMigrationCard(migrations[index], index == m.cursor))
+		builder.WriteString("\n")
+	}
+	if end < len(migrations) {
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(migrations)-end)))
+	}
+	if start > 0 {
+		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
 	}
 	return builder.String()
+}
+
+func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected bool) string {
+	status := ""
+	if migration.Status != nil {
+		status = *migration.Status
+	}
+	glyph, statusText := m.statusDisplay(status)
+	source := migration.SourceOrganizationLogin + "/" + migration.SourceRepositoryName
+	target := migration.TargetOrganizationLogin + "/" + migration.TargetRepositoryName
+
+	var card strings.Builder
+	fmt.Fprintf(&card, "%s %s  %s\n", glyph, statusText, m.styles.Bold.Render(source+" → "+target))
+	if m.compactSourceList() {
+		fmt.Fprintf(&card, "  %s", m.styles.Muted.Render(migration.MigrationID))
+	} else {
+		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("ID"), m.styles.Muted.Render(migration.MigrationID))
+		if migration.TargetMigrationID > 0 {
+			fmt.Fprintf(&card, "%s%s", m.styles.Muted.Render(" · destination "), m.styles.Bold.Render(fmt.Sprintf("%d", migration.TargetMigrationID)))
+		}
+		if migration.CreatedAt != nil && *migration.CreatedAt != "" {
+			fmt.Fprintf(&card, "%s%s", m.styles.Muted.Render(" · created "), m.styles.Muted.Render(*migration.CreatedAt))
+		}
+	}
+
+	style := lipgloss.NewStyle().Border(lipgloss.HiddenBorder(), false, false, false, true).PaddingLeft(1)
+	if selected {
+		style = style.Border(lipgloss.ThickBorder(), false, false, false, true).BorderForeground(lipgloss.Color("4"))
+	}
+	return style.Render(card.String())
 }
 
 func (m *Model) sourceDetailView() string {
@@ -163,8 +238,8 @@ func (m *Model) sourceDetailView() string {
 	}
 	var actions strings.Builder
 	actions.WriteString("Actions\n")
-	for index, action := range sourceActions {
-		fmt.Fprintf(&actions, "%s %s\n", m.marker(index), action)
+	for index, action := range m.sourceActionItems() {
+		fmt.Fprintf(&actions, "%s %s\n", m.marker(index), action.label)
 	}
 	return m.detailLayout(status.String(), actions.String())
 }
@@ -199,24 +274,43 @@ func (m *Model) targetDetailView() string {
 		if !migration.ExpiresAt.IsZero() {
 			fmt.Fprintf(&detail, "Expires:      %s\n", migration.ExpiresAt.Format("2006-01-02 15:04:05Z07:00"))
 		}
-		for _, progress := range migration.RepositoryProgress {
+		if len(migration.RepositoryProgress) > 0 {
+			detail.WriteString("\nRepository progress\n")
+		}
+		for index, progress := range migration.RepositoryProgress {
 			fmt.Fprintf(
 				&detail,
-				"\n%s\n  resources %d/%d • events %d/%d\n",
+				"%s\n  Resources %s %d/%d\n  Events    %s %d/%d\n  Acknowledged: %d backfill · %d live updates\n  Sent: %s resources · %s live updates\n",
 				progress.RepositoryNWO,
+				render.ProgressBar(progress.ResourcesProcessed, progress.ResourcesAdded, 12),
 				progress.ResourcesProcessed,
 				progress.ResourcesAdded,
+				render.ProgressBar(progress.EventsProcessed, progress.EventsAdded, 12),
 				progress.EventsProcessed,
 				progress.EventsAdded,
+				progress.BackfillResourcesAcknowledged,
+				progress.LiveUpdateResourcesAcknowledged,
+				yesNo(progress.AllResourcesSent),
+				yesNo(progress.AllLiveUpdatesSent),
 			)
+			if index < len(migration.RepositoryProgress)-1 {
+				detail.WriteString("\n")
+			}
 		}
 	}
 	var actions strings.Builder
 	actions.WriteString("Actions\n")
-	for index, action := range targetActions {
-		fmt.Fprintf(&actions, "%s %s\n", m.marker(index), action)
+	for index, action := range m.targetActionItems() {
+		fmt.Fprintf(&actions, "%s %s\n", m.marker(index), action.label)
 	}
 	return m.detailLayout(detail.String(), actions.String())
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func (m *Model) detailLayout(detail, actions string) string {
@@ -228,15 +322,23 @@ func (m *Model) detailLayout(detail, actions string) string {
 			lipgloss.NewStyle().Width(columnWidth).Render(actions),
 		)
 	}
-	available := max(3, displayHeight(m.height)-7)
-	actionLines := len(strings.Split(strings.TrimSuffix(actions, "\n"), "\n"))
-	detailLines := max(2, available-actionLines-2)
-	return clip(detail, detailLines) + "\n\n" + actions
+	return actions + "\n" + detail
 }
 
 func (m *Model) configurationView() string {
 	var builder strings.Builder
 	if configuration := m.configuration; configuration != nil {
+		sourceURL, sourceTokenSet := effectiveSourceConfiguration(configuration)
+		targetURL, targetTokenSet := effectiveTargetConfiguration(configuration)
+		builder.WriteString("Preflight\n")
+		fmt.Fprintf(&builder, "  %s Source URL\n", checkMark(sourceURL != "" && validHTTPURL(sourceURL)))
+		fmt.Fprintf(&builder, "  %s Source token\n", checkMark(sourceTokenSet))
+		fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
+		fmt.Fprintf(&builder, "  %s Destination URL\n", checkMark(targetURL != "" && validHTTPURL(targetURL)))
+		fmt.Fprintf(&builder, "  %s Destination token\n", checkMark(targetTokenSet))
+		fmt.Fprintf(&builder, "  %s Destination authentication%s\n\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
+
+		builder.WriteString("Stored configuration\n")
 		fmt.Fprintf(&builder, "Source URL:   %s\n", orUnset(configuration.SourceURL))
 		fmt.Fprintf(&builder, "Source token: %s\n", setStatus(configuration.SourceTokenSet))
 		fmt.Fprintf(&builder, "Target URL:   %s\n", orUnset(configuration.TargetURL))
@@ -249,6 +351,49 @@ func (m *Model) configurationView() string {
 		fmt.Fprintf(&builder, "%s %s\n", m.marker(index), action)
 	}
 	return builder.String()
+}
+
+func effectiveSourceConfiguration(configuration *workflow.Configuration) (string, bool) {
+	if configuration.ResolvedSourceURL != "" || configuration.ResolvedSourceTokenSet {
+		return configuration.ResolvedSourceURL, configuration.ResolvedSourceTokenSet
+	}
+	return configuration.SourceURL, configuration.SourceTokenSet
+}
+
+func effectiveTargetConfiguration(configuration *workflow.Configuration) (string, bool) {
+	if configuration.ResolvedTargetURL != "" || configuration.ResolvedTargetTokenSet {
+		return configuration.ResolvedTargetURL, configuration.ResolvedTargetTokenSet
+	}
+	return configuration.TargetURL, configuration.TargetTokenSet
+}
+
+func validHTTPURL(value string) bool {
+	parsed, err := url.ParseRequestURI(value)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+func checkMark(ok bool) string {
+	if ok {
+		return "✓"
+	}
+	return "✗"
+}
+
+func (m *Model) authenticationMark(checked bool, err error) string {
+	if !checked {
+		return m.styles.Muted.Render("…")
+	}
+	return checkMark(err == nil)
+}
+
+func authenticationDetail(checked bool, err error) string {
+	if !checked {
+		return " (checking)"
+	}
+	if err != nil {
+		return " (" + err.Error() + ")"
+	}
+	return ""
 }
 
 func (m *Model) formView() string {
@@ -296,6 +441,79 @@ func (m *Model) marker(index int) string {
 	return " "
 }
 
+func (m *Model) statusDisplay(status string) (glyph, label string) {
+	normalized := normalizedStatus(status)
+	switch normalized {
+	case "completed", "complete":
+		return m.styles.Success.Render("✓"), m.styles.Success.Bold(true).Render("Completed")
+	case "in progress", "processing":
+		return m.styles.Active.Render("●"), m.styles.Active.Bold(true).Render("In progress")
+	case "created":
+		return m.styles.Info.Render("●"), m.styles.Bold.Render("Created")
+	case "queued":
+		return m.styles.Muted.Render("○"), m.styles.Muted.Render("Queued")
+	case "paused":
+		return m.styles.Warning.Render("●"), m.styles.Warning.Render("Paused")
+	case "failed":
+		return m.styles.Failure.Render("✗"), m.styles.Failure.Render("Failed")
+	case "terminated":
+		return m.styles.Failure.Render("⊘"), m.styles.Failure.Render("Terminated")
+	case "cancelled":
+		return m.styles.Failure.Render("⊘"), m.styles.Failure.Render("Cancelled")
+	default:
+		return m.styles.Muted.Render("●"), m.styles.Muted.Render(friendly(status))
+	}
+}
+
+func (m *Model) compactSourceList() bool {
+	if m.densityUserSet {
+		return m.compact
+	}
+	return len(m.visibleSourceMigrations()) > 10
+}
+
+func (m *Model) sourceListBounds(total int) (start, end int) {
+	if total == 0 {
+		return 0, 0
+	}
+	linesPerCard := 4
+	if m.compactSourceList() {
+		linesPerCard = 2
+	}
+	capacity := max(1, (displayHeight(m.height)-8)/linesPerCard)
+	start = max(0, m.cursor-capacity+1)
+	end = min(total, start+capacity)
+	if end-start < capacity {
+		start = max(0, end-capacity)
+	}
+	return start, end
+}
+
+func (m *Model) viewportView(body string, height int) string {
+	width := max(20, m.width-4)
+	view := m.viewport
+	if !m.viewportReady {
+		view = viewport.New(width, height)
+	}
+	view.Width = width
+	view.Height = height
+	view.SetContent(body)
+	return view.View()
+}
+
+func (m *Model) fullHelpView() string {
+	return strings.Join([]string{
+		"Global",
+		"  " + helpLine(keys.Up, keys.Down, keys.Open, keys.Back, keys.Help, keys.Quit),
+		"",
+		"Migrations",
+		"  " + helpLine(keys.New, keys.Manual, keys.Search, keys.Density, keys.Refresh),
+		"",
+		"Scrollable views",
+		"  " + helpLine(keys.PageUp, keys.PageDown),
+	}, "\n")
+}
+
 func orUnset(value string) string {
 	if value == "" {
 		return "(not set)"
@@ -319,19 +537,6 @@ func clip(value string, lines int) string {
 		return value
 	}
 	return strings.Join(parts[:lines-1], "\n") + "\n…"
-}
-
-func clipWindow(value string, offset, lines int) string {
-	parts := strings.Split(value, "\n")
-	if offset > max(0, len(parts)-1) {
-		offset = max(0, len(parts)-1)
-	}
-	end := min(len(parts), offset+lines)
-	window := strings.Join(parts[offset:end], "\n")
-	if end < len(parts) {
-		window += "\n…"
-	}
-	return window
 }
 
 func displayHeight(height int) int {

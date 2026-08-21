@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/github/gh-elm/internal/elmapi"
@@ -53,6 +56,8 @@ type mannequinService interface {
 
 type configurationService interface {
 	GetConfiguration(context.Context) (*workflow.Configuration, error)
+	CheckSourceAuthentication(context.Context) error
+	CheckTargetAuthentication(context.Context) error
 	SaveConfiguration(context.Context, workflow.ConfigurationInput) error
 	ResetConfiguration(context.Context) error
 }
@@ -118,7 +123,6 @@ type resultState struct {
 	body    string
 	parent  screen
 	refresh bool
-	offset  int
 }
 
 // Model is the Bubble Tea application model.
@@ -127,17 +131,27 @@ type Model struct {
 	service service
 	styles  theme.Styles
 
-	screen  screen
-	width   int
-	height  int
-	cursor  int
-	loading bool
-	err     error
+	screen        screen
+	width         int
+	height        int
+	cursor        int
+	loading       bool
+	err           error
+	viewport      viewport.Model
+	viewportReady bool
+	showHelp      bool
 
-	sourceMigrations []elmapi.MigrationSummary
-	sourceID         workflow.SourceMigrationID
-	sourceDetail     *elmapi.MigrationDetail
-	sourceWatching   bool
+	sourceMigrations  []elmapi.MigrationSummary
+	sourceListLoaded  bool
+	sourceListLoading bool
+	sourceListErr     error
+	sourceID          workflow.SourceMigrationID
+	sourceDetail      *elmapi.MigrationDetail
+	sourceWatching    bool
+	sourceSearch      bool
+	searchInput       textinput.Model
+	compact           bool
+	densityUserSet    bool
 
 	targetMigrations []elmapi.TargetMigration
 	targetID         workflow.TargetMigrationID
@@ -145,27 +159,39 @@ type Model struct {
 	targetParent     screen
 	repository       string
 
-	configuration    *workflow.Configuration
-	configurationErr error
-	form             formState
-	confirm          confirmState
-	result           resultState
+	configuration     *workflow.Configuration
+	configurationErr  error
+	configGeneration  uint64
+	sourceAuthChecked bool
+	sourceAuthErr     error
+	targetAuthChecked bool
+	targetAuthErr     error
+	form              formState
+	confirm           confirmState
+	result            resultState
 }
 
 // New creates the main TUI model.
 func New(ctx context.Context, svc service) *Model {
+	searchInput := textinput.New()
+	searchInput.Prompt = ""
+	searchInput.Placeholder = "migration ID or repository"
+	searchInput.CharLimit = 160
+
 	return &Model{
 		ctx:          ctx,
 		service:      svc,
 		styles:       theme.New(),
 		screen:       screenHome,
 		targetParent: screenTargetList,
+		searchInput:  searchInput,
 	}
 }
 
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	return m.loadConfigurationCmd()
+	m.sourceListLoading = true
+	return tea.Batch(m.startConfigurationLoad(), m.loadSourceListCmd())
 }
 
 // Update implements tea.Model.
@@ -174,6 +200,15 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		viewportWidth := max(20, msg.Width-4)
+		viewportHeight := max(3, msg.Height-7)
+		if !m.viewportReady {
+			m.viewport = viewport.New(viewportWidth, viewportHeight)
+			m.viewportReady = true
+		} else {
+			m.viewport.Width = viewportWidth
+			m.viewport.Height = viewportHeight
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -184,11 +219,18 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateKey(msg)
 	case sourceListMsg:
-		m.loading = false
-		m.err = msg.err
+		m.sourceListLoading = false
+		m.sourceListLoaded = true
+		m.sourceListErr = msg.err
+		if m.screen == screenSourceList {
+			m.loading = false
+			m.err = msg.err
+		}
 		if msg.err == nil {
 			m.sourceMigrations = msg.migrations
-			m.cursor = 0
+			if m.screen == screenSourceList {
+				m.cursor = 0
+			}
 		}
 	case sourceDetailMsg:
 		m.loading = false
@@ -220,14 +262,37 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case configMsg:
-		m.loading = false
+		if msg.generation != m.configGeneration {
+			return m, nil
+		}
 		m.configurationErr = msg.err
 		if m.screen == screenConfiguration {
+			m.loading = false
 			m.err = msg.err
 		}
 		if msg.err == nil {
 			m.configuration = msg.configuration
+			m.sourceAuthChecked = false
+			m.sourceAuthErr = nil
+			m.targetAuthChecked = false
+			m.targetAuthErr = nil
+			return m, tea.Batch(
+				m.checkSourceAuthenticationCmd(msg.generation),
+				m.checkTargetAuthenticationCmd(msg.generation),
+			)
 		}
+	case sourceAuthenticationMsg:
+		if msg.generation != m.configGeneration {
+			return m, nil
+		}
+		m.sourceAuthChecked = true
+		m.sourceAuthErr = msg.err
+	case targetAuthenticationMsg:
+		if msg.generation != m.configGeneration {
+			return m, nil
+		}
+		m.targetAuthChecked = true
+		m.targetAuthErr = msg.err
 	case actionMsg:
 		m.loading = false
 		m.err = nil
@@ -238,6 +303,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = screenResult
 		m.cursor = 0
+		m.resetViewport()
 	case confirmRequestMsg:
 		m.loading = false
 		m.confirm = confirmState(msg)
@@ -261,45 +327,118 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case screenResult:
 		return m.updateResult(msg)
 	}
+	if m.showHelp {
+		switch {
+		case key.Matches(msg, keys.Help), key.Matches(msg, keys.Back):
+			m.showHelp = false
+			return m, nil
+		case key.Matches(msg, keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, keys.Up), key.Matches(msg, keys.Down),
+			key.Matches(msg, keys.PageUp), key.Matches(msg, keys.PageDown):
+			return m.updateViewport(msg)
+		default:
+			return m, nil
+		}
+	}
+	if m.sourceSearch && m.screen == screenSourceList {
+		return m.updateSourceSearch(msg)
+	}
 
-	switch msg.String() {
-	case "q":
+	switch {
+	case key.Matches(msg, keys.Help):
+		m.showHelp = !m.showHelp
+		return m, nil
+	case key.Matches(msg, keys.Quit):
 		if m.screen == screenHome {
 			return m, tea.Quit
 		}
 		return m.back()
-	case "esc", "backspace":
+	case key.Matches(msg, keys.Back):
 		if m.screen != screenHome {
 			return m.back()
 		}
-	case "up", "k":
+	case key.Matches(msg, keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
+	case key.Matches(msg, keys.Down):
 		if m.cursor < m.itemCount()-1 {
 			m.cursor++
 		}
-	case "r":
+	case key.Matches(msg, keys.Refresh):
 		return m.refresh()
-	case "enter":
+	case key.Matches(msg, keys.Open):
 		return m.activate()
-	case "n":
+	case key.Matches(msg, keys.New):
 		if m.screen == screenSourceList {
 			return m.openSourceCreateForm(screenSourceList)
 		}
 		if m.screen == screenTargetList {
 			return m.openTargetCreateForm()
 		}
-	case "m":
+	case key.Matches(msg, keys.Manual):
 		if m.screen == screenSourceList {
 			return m.openSourceIDForm()
 		}
 		if m.screen == screenTargetList {
 			return m.openTargetIDForm()
 		}
+	case key.Matches(msg, keys.Search):
+		if m.screen == screenSourceList {
+			m.sourceSearch = true
+			m.searchInput.Focus()
+			m.cursor = 0
+			return m, textinput.Blink
+		}
+	case key.Matches(msg, keys.Density):
+		if m.screen == screenSourceList {
+			m.densityUserSet = true
+			m.compact = !m.compact
+		}
+	case key.Matches(msg, keys.PageUp), key.Matches(msg, keys.PageDown):
+		if m.scrollableScreen() {
+			return m.updateViewport(msg)
+		}
 	}
 	return m, nil
+}
+
+func (m *Model) updateSourceSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		if m.searchInput.Value() != "" {
+			m.searchInput.SetValue("")
+			m.cursor = 0
+			return m, nil
+		}
+		m.sourceSearch = false
+		m.searchInput.Blur()
+		return m, nil
+	case "enter":
+		if len(m.visibleSourceMigrations()) > 0 {
+			m.sourceSearch = false
+			m.searchInput.Blur()
+			return m.activate()
+		}
+		return m, nil
+	case "up":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	case "down":
+		if m.cursor < len(m.visibleSourceMigrations())-1 {
+			m.cursor++
+		}
+		return m, nil
+	}
+	var command tea.Cmd
+	m.searchInput, command = m.searchInput.Update(msg)
+	if m.cursor >= len(m.visibleSourceMigrations()) {
+		m.cursor = max(0, len(m.visibleSourceMigrations())-1)
+	}
+	return m, command
 }
 
 func (m *Model) activate() (tea.Model, tea.Cmd) {
@@ -307,16 +446,28 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 	case screenHome:
 		switch m.cursor {
 		case 0:
-			m.screen, m.loading, m.err = screenSourceList, true, nil
-			command := m.loadSourceListCmd()
-			return m, command
+			m.screen, m.err = screenSourceList, m.sourceListErr
+			switch {
+			case m.sourceListLoading:
+				m.loading = true
+				return m, nil
+			case m.sourceListLoaded:
+				m.loading = false
+				return m, nil
+			default:
+				m.loading = true
+				m.sourceListLoading = true
+				command := m.loadSourceListCmd()
+				return m, command
+			}
 		case 1:
 			return m.openSourceCreateForm(screenHome)
 		case 2:
 			m.screen, m.cursor = screenMannequins, 0
 		case 3:
 			m.screen, m.loading, m.err = screenConfiguration, true, nil
-			command := m.loadConfigurationCmd()
+			m.resetViewport()
+			command := m.startConfigurationLoad()
 			return m, command
 		case 4:
 			m.screen, m.loading, m.err = screenTargetList, true, nil
@@ -326,13 +477,15 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case screenSourceList:
-		if len(m.sourceMigrations) == 0 {
+		migrations := m.visibleSourceMigrations()
+		if len(migrations) == 0 {
 			return m.openSourceCreateForm(screenSourceList)
 		}
-		m.sourceID = workflow.SourceMigrationID(m.sourceMigrations[m.cursor].MigrationID)
+		m.sourceID = workflow.SourceMigrationID(migrations[m.cursor].MigrationID)
 		m.targetID = 0
 		m.screen, m.loading, m.err = screenSourceDetail, true, nil
 		m.cursor = 0
+		m.resetViewport()
 		command := m.loadSourceDetailCmd()
 		return m, command
 	case screenSourceDetail:
@@ -350,6 +503,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		m.targetParent = screenTargetList
 		m.screen, m.loading, m.err = screenTargetDetail, true, nil
 		m.cursor = 0
+		m.resetViewport()
 		command := m.loadTargetDetailCmd()
 		return m, command
 	case screenTargetDetail:
@@ -366,7 +520,12 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.cursor = 0
 	switch m.screen {
-	case screenSourceList, screenTargetList, screenMannequins, screenConfiguration, screenHome:
+	case screenSourceList:
+		m.sourceSearch = false
+		m.searchInput.Blur()
+		m.searchInput.SetValue("")
+		m.screen = screenHome
+	case screenTargetList, screenMannequins, screenConfiguration, screenHome:
 		m.screen = screenHome
 	case screenSourceDetail:
 		m.sourceWatching = false
@@ -382,6 +541,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenSourceList:
 		m.loading = true
+		m.sourceListLoading = true
 		command := m.loadSourceListCmd()
 		return m, command
 	case screenSourceDetail:
@@ -398,7 +558,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 		return m, command
 	case screenConfiguration:
 		m.loading = true
-		command := m.loadConfigurationCmd()
+		command := m.startConfigurationLoad()
 		return m, command
 	}
 	return m, nil
@@ -409,13 +569,13 @@ func (m *Model) itemCount() int {
 	case screenHome:
 		return 6
 	case screenSourceList:
-		return len(m.sourceMigrations)
+		return len(m.visibleSourceMigrations())
 	case screenSourceDetail:
-		return len(sourceActions)
+		return len(m.sourceActionItems())
 	case screenTargetList:
 		return len(m.targetMigrations)
 	case screenTargetDetail:
-		return len(targetActions)
+		return len(m.targetActionItems())
 	case screenMannequins:
 		return len(mannequinActions)
 	case screenConfiguration:
@@ -425,60 +585,56 @@ func (m *Model) itemCount() int {
 	}
 }
 
-var sourceActions = []string{
-	"Refresh status",
-	"Toggle live watch",
-	"Start migration",
-	"Pause migration",
-	"Resume migration",
-	"Cancel migration",
-	"Initiate cutover",
-	"Force cutover",
-	"Show cutover status",
-	"Revert cutover",
-	"Open destination details",
+type actionItem struct {
+	id    string
+	label string
 }
 
 func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
-	switch m.cursor {
-	case 0:
+	actions := m.sourceActionItems()
+	if m.cursor < 0 || m.cursor >= len(actions) {
+		return m, nil
+	}
+	switch actions[m.cursor].id {
+	case "refresh":
 		return m.refresh()
-	case 1:
+	case "watch":
 		m.sourceWatching = !m.sourceWatching
 		if m.sourceWatching {
 			m.loading = true
 			command := m.loadSourceDetailCmd()
 			return m, command
 		}
-	case 2:
+	case "start":
 		return m.confirmAction("Start migration", "Start this migration?", screenSourceDetail,
 			m.sourceMutationCmd("Migration started", m.service.StartSourceMigration))
-	case 3:
+	case "pause":
 		return m.confirmAction("Pause migration", "Pause this migration?", screenSourceDetail,
 			m.sourceMutationCmd("Migration paused", m.service.PauseSourceMigration))
-	case 4:
+	case "resume":
 		return m.confirmAction("Resume migration", "Resume this migration?", screenSourceDetail,
 			m.sourceMutationCmd("Migration resumed", m.service.ResumeSourceMigration))
-	case 5:
+	case "cancel":
 		return m.confirmAction("Cancel migration", "This permanently terminates the source migration and cannot be undone.", screenSourceDetail,
 			m.sourceMutationCmd("Migration cancelled", m.service.CancelSourceMigration))
-	case 6:
+	case "cutover":
 		return m.confirmAction("Initiate cutover", "Archive the source repository and initiate cutover?", screenSourceDetail,
 			m.cutoverCmd(false))
-	case 7:
+	case "force-cutover":
 		return m.confirmAction("Force cutover", "Bypass readiness checks and force cutover?", screenSourceDetail,
 			m.cutoverCmd(true))
-	case 8:
+	case "cutover-status":
 		body := "No combined cutover state is available."
 		if m.sourceDetail != nil {
 			body = render.CutoverStatus(*m.sourceDetail)
 		}
 		m.result = resultState{title: "Cutover status", body: body, parent: screenSourceDetail}
 		m.screen = screenResult
-	case 9:
+		m.resetViewport()
+	case "revert":
 		return m.confirmAction("Revert cutover", "Revert cutover effects and terminate work still in progress?", screenSourceDetail,
 			m.revertCutoverCmd())
-	case 10:
+	case "destination":
 		if m.targetID <= 0 {
 			m.err = errors.New("this source migration does not expose a target migration ID yet")
 			return m, nil
@@ -486,46 +642,125 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 		m.screen, m.loading, m.err = screenTargetDetail, true, nil
 		m.targetParent = screenSourceDetail
 		m.cursor = 0
+		m.resetViewport()
 		command := m.loadTargetDetailCmd()
 		return m, command
 	}
 	return m, nil
 }
 
-var targetActions = []string{
-	"Refresh status",
-	"List repository resources",
-	"Request node report",
-	"Check report status",
-	"Get report download URL",
-	"Pause target migration",
-	"Resume target migration",
-	"Abort target migration",
+func (m *Model) sourceActionItems() []actionItem {
+	actions := []actionItem{
+		{id: "refresh", label: "Refresh status"},
+		{id: "watch", label: watchLabel(m.sourceWatching)},
+	}
+
+	status := ""
+	if m.sourceDetail != nil && m.sourceDetail.Migration != nil && m.sourceDetail.Migration.Status != nil {
+		status = normalizedStatus(*m.sourceDetail.Migration.Status)
+	}
+	readyForCutover := m.sourceDetail != nil &&
+		m.sourceDetail.CombinedState != nil &&
+		m.sourceDetail.CombinedState.ReadyForCutover
+
+	switch status {
+	case "created":
+		actions = append(actions,
+			actionItem{id: "start", label: "Start migration"},
+			actionItem{id: "cancel", label: "Cancel migration"},
+		)
+	case "queued", "in progress":
+		actions = append(actions, actionItem{id: "pause", label: "Pause migration"})
+		if readyForCutover {
+			actions = append(actions, actionItem{id: "cutover", label: "Initiate cutover"})
+		} else {
+			actions = append(actions, actionItem{id: "force-cutover", label: "Force cutover"})
+		}
+		actions = append(actions, actionItem{id: "cancel", label: "Cancel migration"})
+	case "paused":
+		actions = append(actions,
+			actionItem{id: "resume", label: "Resume migration"},
+			actionItem{id: "cancel", label: "Cancel migration"},
+		)
+	case "completed":
+		actions = append(actions, actionItem{id: "revert", label: "Revert cutover"})
+	}
+	if m.sourceDetail != nil && m.sourceDetail.CombinedState != nil {
+		actions = append(actions, actionItem{id: "cutover-status", label: "Show cutover status"})
+	}
+	if m.targetID > 0 {
+		actions = append(actions, actionItem{id: "destination", label: "Open destination details"})
+	}
+	return actions
 }
 
 func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
-	switch m.cursor {
-	case 0:
+	actions := m.targetActionItems()
+	if m.cursor < 0 || m.cursor >= len(actions) {
+		return m, nil
+	}
+	switch actions[m.cursor].id {
+	case "refresh":
 		return m.refresh()
-	case 1:
+	case "resources":
 		return m.openResourcesForm()
-	case 2:
+	case "report-request":
 		return m.openReportForm("Request report", "request")
-	case 3:
+	case "report-status":
 		return m.openReportForm("Report status", "status")
-	case 4:
+	case "report-url":
 		return m.openReportForm("Report URL", "url")
-	case 5:
+	case "pause":
 		return m.confirmAction("Pause target migration", "Pause the target migration?", screenTargetDetail,
 			m.targetMutationCmd("Target migration paused", m.service.PauseTargetMigration))
-	case 6:
+	case "resume":
 		return m.confirmAction("Resume target migration", "Resume the target migration?", screenTargetDetail,
 			m.targetMutationCmd("Target migration resumed", m.service.ResumeTargetMigration))
-	case 7:
+	case "abort":
 		return m.confirmAction("Abort target migration", "This permanently aborts the target migration and cannot be undone.", screenTargetDetail,
 			m.targetMutationCmd("Target migration aborted", m.service.AbortTargetMigration))
 	}
 	return m, nil
+}
+
+func (m *Model) targetActionItems() []actionItem {
+	actions := []actionItem{
+		{id: "refresh", label: "Refresh status"},
+		{id: "resources", label: "List repository resources"},
+		{id: "report-request", label: "Request node report"},
+		{id: "report-status", label: "Check report status"},
+		{id: "report-url", label: "Get report download URL"},
+	}
+	status := ""
+	if m.targetDetail != nil {
+		status = normalizedStatus(m.targetDetail.Status)
+	}
+	switch status {
+	case "in progress":
+		actions = append(actions,
+			actionItem{id: "pause", label: "Pause destination migration"},
+			actionItem{id: "abort", label: "Abort destination migration"},
+		)
+	case "paused":
+		actions = append(actions,
+			actionItem{id: "resume", label: "Resume destination migration"},
+			actionItem{id: "abort", label: "Abort destination migration"},
+		)
+	}
+	return actions
+}
+
+func watchLabel(watching bool) string {
+	if watching {
+		return "Stop live watch"
+	}
+	return "Start live watch"
+}
+
+func normalizedStatus(status string) string {
+	status = strings.TrimPrefix(status, "STATUS_TYPE_")
+	status = strings.ReplaceAll(status, "_", " ")
+	return strings.ToLower(strings.TrimSpace(status))
 }
 
 var mannequinActions = []string{
@@ -590,20 +825,11 @@ func (m *Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		if m.result.offset > 0 {
-			m.result.offset--
-		}
-	case "down", "j":
-		if m.result.offset < max(0, len(strings.Split(m.result.body, "\n"))-1) {
-			m.result.offset++
-		}
-	case "pgup":
-		m.result.offset = max(0, m.result.offset-10)
-	case "pgdown":
-		m.result.offset += 10
-	case "enter", "esc", "q":
+	switch {
+	case key.Matches(msg, keys.Up), key.Matches(msg, keys.Down),
+		key.Matches(msg, keys.PageUp), key.Matches(msg, keys.PageDown):
+		return m.updateViewport(msg)
+	case key.Matches(msg, keys.Open), key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		parent := m.result.parent
 		refresh := m.result.refresh
 		m.screen, m.cursor, m.err = parent, 0, nil
@@ -612,6 +838,72 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) visibleSourceMigrations() []elmapi.MigrationSummary {
+	query := strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
+	if query == "" {
+		return m.sourceMigrations
+	}
+	migrations := make([]elmapi.MigrationSummary, 0, len(m.sourceMigrations))
+	for _, migration := range m.sourceMigrations {
+		haystack := strings.ToLower(strings.Join([]string{
+			migration.MigrationID,
+			migration.SourceOrganizationLogin,
+			migration.SourceRepositoryName,
+			migration.TargetOrganizationLogin,
+			migration.TargetRepositoryName,
+			fmt.Sprintf("%d", migration.TargetMigrationID),
+		}, " "))
+		if strings.Contains(haystack, query) {
+			migrations = append(migrations, migration)
+		}
+	}
+	return migrations
+}
+
+func (m *Model) scrollableScreen() bool {
+	switch m.screen {
+	case screenSourceDetail, screenTargetDetail, screenConfiguration, screenResult:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) updateViewport(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.viewportReady {
+		m.viewport = viewport.New(max(20, m.width-4), max(3, displayHeight(m.height)-7))
+		m.viewportReady = true
+	}
+	m.viewport.SetContent(m.scrollableContent())
+	var command tea.Cmd
+	m.viewport, command = m.viewport.Update(msg)
+	return m, command
+}
+
+func (m *Model) resetViewport() {
+	if m.viewportReady {
+		m.viewport.GotoTop()
+	}
+}
+
+func (m *Model) scrollableContent() string {
+	if m.showHelp {
+		return m.fullHelpView()
+	}
+	switch m.screen {
+	case screenSourceDetail:
+		return m.sourceDetailView()
+	case screenTargetDetail:
+		return m.targetDetailView()
+	case screenConfiguration:
+		return m.configurationView()
+	case screenResult:
+		return m.result.body
+	default:
+		return ""
+	}
 }
 
 func (m *Model) openForm(form formState) (tea.Model, tea.Cmd) {
@@ -705,6 +997,7 @@ func (m *Model) openSourceIDForm() (tea.Model, tea.Cmd) {
 			}
 			m.sourceID = workflow.SourceMigrationID(id)
 			m.form.parent = screenSourceDetail
+			m.resetViewport()
 			return m.loadSourceDetailCmd(), nil
 		},
 	})
@@ -760,6 +1053,7 @@ func (m *Model) openTargetIDForm() (tea.Model, tea.Cmd) {
 			m.targetID = id
 			m.targetParent = screenTargetList
 			m.form.parent = screenTargetDetail
+			m.resetViewport()
 			return m.loadTargetDetailCmd(), nil
 		},
 	})
@@ -1045,7 +1339,18 @@ type targetDetailMsg struct {
 
 type configMsg struct {
 	configuration *workflow.Configuration
+	generation    uint64
 	err           error
+}
+
+type sourceAuthenticationMsg struct {
+	generation uint64
+	err        error
+}
+
+type targetAuthenticationMsg struct {
+	generation uint64
+	err        error
 }
 
 type actionMsg struct {
@@ -1095,10 +1400,30 @@ func (m *Model) loadTargetDetailCmd() tea.Cmd {
 	}
 }
 
-func (m *Model) loadConfigurationCmd() tea.Cmd {
+func (m *Model) startConfigurationLoad() tea.Cmd {
+	m.configGeneration++
+	generation := m.configGeneration
 	return func() tea.Msg {
 		configuration, err := m.service.GetConfiguration(m.ctx)
-		return configMsg{configuration: configuration, err: err}
+		return configMsg{configuration: configuration, generation: generation, err: err}
+	}
+}
+
+func (m *Model) checkSourceAuthenticationCmd(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		return sourceAuthenticationMsg{
+			generation: generation,
+			err:        m.service.CheckSourceAuthentication(m.ctx),
+		}
+	}
+}
+
+func (m *Model) checkTargetAuthenticationCmd(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		return targetAuthenticationMsg{
+			generation: generation,
+			err:        m.service.CheckTargetAuthentication(m.ctx),
+		}
 	}
 }
 

@@ -24,6 +24,100 @@ func TestModel(t *testing.T) {
 		require.NotNil(t, command)
 	})
 
+	t.Run("background prefetch errors stay off the home screen", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.Update(sourceListMsg{err: assert.AnError})
+		model = updated.(*Model)
+
+		assert.Equal(t, screenHome, model.screen)
+		assert.NotContains(t, model.View(), assert.AnError.Error())
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		assert.Contains(t, model.View(), assert.AnError.Error())
+	})
+
+	t.Run("uses prefetched migrations without another request", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.Update(sourceListMsg{migrations: []elmapi.MigrationSummary{{MigrationID: "source-1"}}})
+		model = updated.(*Model)
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+
+		assert.Equal(t, screenSourceList, model.screen)
+		assert.Nil(t, command)
+	})
+
+	t.Run("configuration response does not unlock a pending migration list", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.sourceListLoading = true
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.True(t, model.loading)
+
+		updated, _ = model.Update(configMsg{configuration: &workflow.Configuration{}})
+		model = updated.(*Model)
+
+		assert.True(t, model.loading)
+	})
+
+	t.Run("ignores stale configuration and authentication responses", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenConfiguration
+		model.loading = true
+		model.configGeneration = 2
+		model.configuration = &workflow.Configuration{SourceURL: "https://current.example"}
+
+		updated, _ := model.Update(configMsg{
+			configuration: &workflow.Configuration{SourceURL: "https://stale.example"},
+			generation:    1,
+		})
+		model = updated.(*Model)
+		assert.True(t, model.loading)
+		assert.Equal(t, "https://current.example", model.configuration.SourceURL)
+
+		updated, _ = model.Update(sourceAuthenticationMsg{generation: 1, err: assert.AnError})
+		model = updated.(*Model)
+		assert.False(t, model.sourceAuthChecked)
+		assert.NoError(t, model.sourceAuthErr)
+	})
+
+	t.Run("filters migrations with search input", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceList
+		model.sourceMigrations = []elmapi.MigrationSummary{
+			{MigrationID: "source-1", SourceOrganizationLogin: "octo", SourceRepositoryName: "api"},
+			{MigrationID: "source-2", SourceOrganizationLogin: "acme", SourceRepositoryName: "web"},
+		}
+
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		model = updated.(*Model)
+		for _, character := range "acme" {
+			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{character}})
+			model = updated.(*Model)
+		}
+
+		require.Len(t, model.visibleSourceMigrations(), 1)
+		assert.Equal(t, "source-2", model.visibleSourceMigrations()[0].MigrationID)
+	})
+
+	t.Run("search accepts navigation aliases as query text", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceList
+		model.sourceSearch = true
+		model.searchInput.Focus()
+
+		for _, character := range "hjkl" {
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{character}})
+			model = updated.(*Model)
+		}
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model = updated.(*Model)
+
+		assert.Equal(t, "hjk", model.searchInput.Value())
+	})
+
 	t.Run("shows incomplete configuration warning above the title", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		updated, _ := model.Update(configMsg{configuration: &workflow.Configuration{
@@ -33,7 +127,7 @@ func TestModel(t *testing.T) {
 		model = updated.(*Model)
 
 		view := model.View()
-		warningIndex := strings.Index(view, "Configuration incomplete")
+		warningIndex := strings.Index(view, "Configuration not ready")
 		titleIndex := strings.Index(view, "Enterprise Live Migrations")
 		require.NotEqual(t, -1, warningIndex)
 		require.NotEqual(t, -1, titleIndex)
@@ -51,7 +145,22 @@ func TestModel(t *testing.T) {
 		}})
 		model = updated.(*Model)
 
-		assert.NotContains(t, model.View(), "Configuration incomplete")
+		assert.NotContains(t, model.View(), "Configuration not ready")
+	})
+
+	t.Run("shows warning when authentication fails", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.Update(configMsg{configuration: &workflow.Configuration{
+			SourceURL:      "https://source.example",
+			SourceTokenSet: true,
+			TargetURL:      "https://target.example",
+			TargetTokenSet: true,
+		}})
+		model = updated.(*Model)
+		updated, _ = model.Update(sourceAuthenticationMsg{err: assert.AnError})
+		model = updated.(*Model)
+
+		assert.Contains(t, model.View(), "Failed source authentication")
 	})
 
 	t.Run("opens source migration from list", func(t *testing.T) {
@@ -95,7 +204,7 @@ func TestModel(t *testing.T) {
 		assert.Equal(t, workflow.TargetMigrationID(42), model.targetID)
 		assert.Contains(t, model.View(), "Open destination details")
 
-		model.cursor = len(sourceActions) - 1
+		model.cursor = len(model.sourceActionItems()) - 1
 		updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
 		require.Equal(t, screenTargetDetail, model.screen)
@@ -147,11 +256,30 @@ func TestModel(t *testing.T) {
 		model.sourceDetail = &elmapi.MigrationDetail{
 			Migration: &elmapi.MigrationSummary{MigrationID: "source-1"},
 		}
+		model.targetID = 42
 		model.width = 80
 		model.height = 24
-		model.cursor = len(sourceActions) - 1
+		model.cursor = len(model.sourceActionItems()) - 1
 
 		assert.Contains(t, model.View(), "Open destination details")
+	})
+
+	t.Run("narrow detail preserves all scrollable content", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 80
+		model.height = 24
+		model.screen = screenSourceDetail
+		status := elmapi.StatusInProgress
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &status},
+			Messages: []elmapi.MigrationMessage{
+				{Message: strings.Repeat("detail ", 30) + "tail marker"},
+			},
+		}
+
+		content := model.sourceDetailView()
+		assert.Contains(t, content, "tail marker")
+		assert.Less(t, strings.Index(content, "Actions"), strings.Index(content, "Migration ID"))
 	})
 
 	t.Run("home exposes migration creation", func(t *testing.T) {
@@ -170,7 +298,16 @@ func TestModel(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenSourceDetail
 		model.sourceID = "source-1"
-		model.cursor = 5
+		status := elmapi.StatusCreated
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &status},
+		}
+		for index, action := range model.sourceActionItems() {
+			if action.id == "cancel" {
+				model.cursor = index
+				break
+			}
+		}
 
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
@@ -178,6 +315,65 @@ func TestModel(t *testing.T) {
 		assert.Nil(t, cmd)
 		assert.Equal(t, screenConfirm, model.screen)
 		assert.Contains(t, model.View(), "cannot be undone")
+	})
+
+	t.Run("source actions follow migration state", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		t.Run("created can start or cancel", func(t *testing.T) {
+			setSourceStatus(model, elmapi.StatusCreated)
+			assert.ElementsMatch(t, []string{"refresh", "watch", "start", "cancel"}, actionIDs(model.sourceActionItems()))
+		})
+
+		t.Run("in progress can pause force cutover or cancel", func(t *testing.T) {
+			setSourceStatus(model, elmapi.StatusInProgress)
+			assert.ElementsMatch(t, []string{"refresh", "watch", "pause", "force-cutover", "cancel"}, actionIDs(model.sourceActionItems()))
+		})
+
+		t.Run("ready migration offers normal cutover", func(t *testing.T) {
+			setSourceStatus(model, elmapi.StatusInProgress)
+			model.sourceDetail.CombinedState = &elmapi.CombinedState{ReadyForCutover: true}
+			assert.Contains(t, actionIDs(model.sourceActionItems()), "cutover")
+			assert.NotContains(t, actionIDs(model.sourceActionItems()), "force-cutover")
+		})
+
+		t.Run("paused can resume or cancel", func(t *testing.T) {
+			setSourceStatus(model, elmapi.StatusPaused)
+			assert.ElementsMatch(t, []string{"refresh", "watch", "resume", "cancel"}, actionIDs(model.sourceActionItems()))
+		})
+
+		t.Run("completed can revert", func(t *testing.T) {
+			setSourceStatus(model, elmapi.StatusCompleted)
+			assert.ElementsMatch(t, []string{"refresh", "watch", "revert"}, actionIDs(model.sourceActionItems()))
+		})
+	})
+
+	t.Run("destination actions follow migration state", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		t.Run("in progress can pause or abort", func(t *testing.T) {
+			model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusInProgress}
+			assert.ElementsMatch(t,
+				[]string{"refresh", "resources", "report-request", "report-status", "report-url", "pause", "abort"},
+				actionIDs(model.targetActionItems()),
+			)
+		})
+
+		t.Run("paused can resume or abort", func(t *testing.T) {
+			model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusPaused}
+			assert.ElementsMatch(t,
+				[]string{"refresh", "resources", "report-request", "report-status", "report-url", "resume", "abort"},
+				actionIDs(model.targetActionItems()),
+			)
+		})
+
+		t.Run("completed has no lifecycle mutation", func(t *testing.T) {
+			model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusComplete}
+			assert.ElementsMatch(t,
+				[]string{"refresh", "resources", "report-request", "report-status", "report-url"},
+				actionIDs(model.targetActionItems()),
+			)
+		})
 	})
 
 	t.Run("immediate mannequin reclaim requires confirmation", func(t *testing.T) {
@@ -210,10 +406,26 @@ func TestModel(t *testing.T) {
 	})
 }
 
+func setSourceStatus(model *Model, status string) {
+	model.sourceDetail = &elmapi.MigrationDetail{
+		Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &status},
+	}
+}
+
+func actionIDs(actions []actionItem) []string {
+	ids := make([]string, len(actions))
+	for index, action := range actions {
+		ids[index] = action.id
+	}
+	return ids
+}
+
 type fakeService struct {
 	sourceMigrations []elmapi.MigrationSummary
 	sourceDetail     *elmapi.MigrationDetail
 	reclaimCalls     int
+	sourceAuthErr    error
+	targetAuthErr    error
 }
 
 func (f *fakeService) ListSourceMigrations(context.Context, string) ([]elmapi.MigrationSummary, error) {
@@ -307,6 +519,14 @@ func (f *fakeService) ReclaimMannequins(context.Context, workflow.MannequinRecla
 
 func (f *fakeService) GetConfiguration(context.Context) (*workflow.Configuration, error) {
 	return &workflow.Configuration{}, nil
+}
+
+func (f *fakeService) CheckSourceAuthentication(context.Context) error {
+	return f.sourceAuthErr
+}
+
+func (f *fakeService) CheckTargetAuthentication(context.Context) error {
+	return f.targetAuthErr
 }
 
 func (f *fakeService) SaveConfiguration(context.Context, workflow.ConfigurationInput) error {

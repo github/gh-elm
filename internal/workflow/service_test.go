@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/github/gh-elm/internal/config"
 )
 
 func TestParseTargetMigrationID(t *testing.T) {
@@ -51,6 +53,21 @@ func TestConfiguration(t *testing.T) {
 	assert.True(t, configuration.SourceTokenSet)
 	assert.Equal(t, "https://target.example", configuration.TargetURL)
 	assert.True(t, configuration.TargetTokenSet)
+	assert.Equal(t, "https://source.example/api/v3", configuration.ResolvedSourceURL)
+	assert.True(t, configuration.ResolvedSourceTokenSet)
+	assert.Equal(t, "https://target.example", configuration.ResolvedTargetURL)
+	assert.True(t, configuration.ResolvedTargetTokenSet)
+
+	t.Setenv(config.EnvSourceURL, "source-env.example")
+	t.Setenv(config.EnvSourceToken, "source-env-token")
+	t.Setenv(config.EnvTargetURL, "target-env.example")
+	t.Setenv(config.EnvTargetToken, "target-env-token")
+	configuration, err = service.GetConfiguration(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "https://source-env.example/api/v3", configuration.ResolvedSourceURL)
+	assert.True(t, configuration.ResolvedSourceTokenSet)
+	assert.Equal(t, "https://target-env.example", configuration.ResolvedTargetURL)
+	assert.True(t, configuration.ResolvedTargetTokenSet)
 
 	require.NoError(t, service.ResetConfiguration(t.Context()))
 	configuration, err = service.GetConfiguration(t.Context())
@@ -59,6 +76,33 @@ func TestConfiguration(t *testing.T) {
 	assert.False(t, configuration.SourceTokenSet)
 	assert.Empty(t, configuration.TargetURL)
 	assert.False(t, configuration.TargetTokenSet)
+}
+
+func TestCheckAuthentication(t *testing.T) {
+	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v3/user", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(source.Close)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/user", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(target.Close)
+
+	service := New()
+	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
+		SourceURL:   source.URL,
+		SourceToken: "source-token",
+		TargetURL:   target.URL,
+		TargetToken: "target-token",
+	}))
+
+	assert.NoError(t, service.CheckSourceAuthentication(t.Context()))
+	assert.NoError(t, service.CheckTargetAuthentication(t.Context()))
 }
 
 func TestListSourceMigrations(t *testing.T) {
