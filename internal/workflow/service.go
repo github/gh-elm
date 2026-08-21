@@ -66,6 +66,20 @@ type SourceCreateInput struct {
 	Start       bool
 }
 
+// ParseRepositoryCoordinate parses a repository in owner/repository format.
+func ParseRepositoryCoordinate(value string) (owner, repository string, err error) {
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("%q must contain exactly one slash with a non-empty owner and repository", value)
+	}
+	owner = strings.TrimSpace(parts[0])
+	repository = strings.TrimSpace(parts[1])
+	if owner == "" || repository == "" {
+		return "", "", fmt.Errorf("%q must contain exactly one slash with a non-empty owner and repository", value)
+	}
+	return owner, repository, nil
+}
+
 // SourceCreateResult is returned after source migration creation.
 type SourceCreateResult struct {
 	Migration elmapi.CreateMigrationResponse

@@ -302,6 +302,53 @@ func TestModel(t *testing.T) {
 		assert.Equal(t, "Create migration", model.form.title)
 	})
 
+	t.Run("migration creation uses source and target coordinates", func(t *testing.T) {
+		svc := &fakeService{}
+		model := New(t.Context(), svc)
+		updated, _ := model.openSourceCreateForm(screenHome)
+		model = updated.(*Model)
+
+		require.Len(t, model.form.fields, 4)
+		assert.Equal(t, "Source repository", model.form.fields[0].label)
+		assert.Equal(t, "Target repository", model.form.fields[1].label)
+		assert.Contains(t, model.formView(), "source-org/source-repo")
+		assert.Contains(t, model.formView(), "target-org/target-repo")
+
+		command, err := model.form.submit(map[string]string{
+			"source":     "source-org/source-repo",
+			"target":     "target-org/target-repo",
+			"visibility": "internal",
+			"start":      "true",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, command)
+		_ = command()
+
+		assert.Equal(t, workflow.SourceCreateInput{
+			SourceOwner: "source-org",
+			SourceRepo:  "source-repo",
+			TargetOwner: "target-org",
+			TargetRepo:  "target-repo",
+			Visibility:  "internal",
+			Start:       true,
+		}, svc.sourceCreateInput)
+	})
+
+	t.Run("migration creation rejects malformed coordinates", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.openSourceCreateForm(screenHome)
+		model = updated.(*Model)
+
+		command, err := model.form.submit(map[string]string{
+			"source": "source-org/source-repo/extra",
+			"target": "target-org/target-repo",
+		})
+
+		assert.Nil(t, command)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid source repository")
+	})
+
 	t.Run("destructive source action requires confirmation", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenSourceDetail
@@ -429,11 +476,12 @@ func actionIDs(actions []actionItem) []string {
 }
 
 type fakeService struct {
-	sourceMigrations []elmapi.MigrationSummary
-	sourceDetail     *elmapi.MigrationDetail
-	reclaimCalls     int
-	sourceAuthErr    error
-	targetAuthErr    error
+	sourceMigrations  []elmapi.MigrationSummary
+	sourceDetail      *elmapi.MigrationDetail
+	sourceCreateInput workflow.SourceCreateInput
+	reclaimCalls      int
+	sourceAuthErr     error
+	targetAuthErr     error
 }
 
 func (f *fakeService) ListSourceMigrations(context.Context, string) ([]elmapi.MigrationSummary, error) {
@@ -444,7 +492,8 @@ func (f *fakeService) GetSourceMigration(context.Context, workflow.SourceMigrati
 	return f.sourceDetail, nil
 }
 
-func (f *fakeService) CreateSourceMigration(context.Context, workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
+func (f *fakeService) CreateSourceMigration(_ context.Context, input workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
+	f.sourceCreateInput = input
 	return &workflow.SourceCreateResult{}, nil
 }
 

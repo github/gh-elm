@@ -35,6 +35,37 @@ func TestParseTargetMigrationID(t *testing.T) {
 	})
 }
 
+func TestParseRepositoryCoordinate(t *testing.T) {
+	t.Run("parses owner and repository", func(t *testing.T) {
+		owner, repository, err := ParseRepositoryCoordinate(" octo-org / octo-repo ")
+
+		require.NoError(t, err)
+		assert.Equal(t, "octo-org", owner)
+		assert.Equal(t, "octo-repo", repository)
+	})
+
+	t.Run("rejects a missing slash", func(t *testing.T) {
+		_, _, err := ParseRepositoryCoordinate("octo-repo")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exactly one slash")
+	})
+
+	t.Run("rejects additional path segments", func(t *testing.T) {
+		_, _, err := ParseRepositoryCoordinate("octo-org/team/octo-repo")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exactly one slash")
+	})
+
+	t.Run("rejects an empty component", func(t *testing.T) {
+		_, _, err := ParseRepositoryCoordinate("octo-org/")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-empty owner and repository")
+	})
+}
+
 func TestConfiguration(t *testing.T) {
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")

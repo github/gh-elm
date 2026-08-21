@@ -19,6 +19,7 @@ import (
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
 	"github.com/github/gh-elm/internal/render"
+	"github.com/github/gh-elm/internal/workflow"
 )
 
 // NewCommand builds the `gh elm migration` command group. Subcommands mirror the
@@ -713,15 +714,18 @@ func resolveCreateRepositories(args []string, flags createRepositoryFlags) (crea
 		if len(args) != 2 {
 			return createRepositories{}, errors.New("create requires both source and target repositories in owner/repo format")
 		}
-		source, err := parseRepositoryCoordinate(args[0])
+		sourceOwner, sourceRepository, err := workflow.ParseRepositoryCoordinate(args[0])
 		if err != nil {
 			return createRepositories{}, fmt.Errorf("invalid source repository: %w", err)
 		}
-		target, err := parseRepositoryCoordinate(args[1])
+		targetOwner, targetRepository, err := workflow.ParseRepositoryCoordinate(args[1])
 		if err != nil {
 			return createRepositories{}, fmt.Errorf("invalid target repository: %w", err)
 		}
-		return createRepositories{source: source, target: target}, nil
+		return createRepositories{
+			source: repositoryCoordinate{organization: sourceOwner, repository: sourceRepository},
+			target: repositoryCoordinate{organization: targetOwner, repository: targetRepository},
+		}, nil
 	}
 
 	sourceOrg := strings.TrimSpace(flags.sourceOrg)
@@ -735,17 +739,6 @@ func resolveCreateRepositories(args []string, flags createRepositoryFlags) (crea
 	return createRepositories{
 		source: repositoryCoordinate{organization: sourceOrg, repository: sourceRepo},
 		target: repositoryCoordinate{organization: targetOrg, repository: targetRepo},
-	}, nil
-}
-
-func parseRepositoryCoordinate(value string) (repositoryCoordinate, error) {
-	parts := strings.Split(value, "/")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return repositoryCoordinate{}, fmt.Errorf("%q must contain exactly one slash with a non-empty owner and repository", value)
-	}
-	return repositoryCoordinate{
-		organization: strings.TrimSpace(parts[0]),
-		repository:   strings.TrimSpace(parts[1]),
 	}, nil
 }
 

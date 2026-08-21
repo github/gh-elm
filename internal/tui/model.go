@@ -1008,19 +1008,35 @@ func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
 		title:  "Create migration",
 		parent: parent,
 		fields: []formField{
-			{key: "sourceOwner", label: "Source owner", kind: fieldText},
-			{key: "sourceRepo", label: "Source repository", kind: fieldText},
-			{key: "targetOwner", label: "Target owner", kind: fieldText},
-			{key: "targetRepo", label: "Target repository", kind: fieldText},
+			{
+				key:         "source",
+				label:       "Source repository",
+				description: "Format: org/repo (for example, source-org/source-repo)",
+				kind:        fieldText,
+			},
+			{
+				key:         "target",
+				label:       "Target repository",
+				description: "Format: org/repo (for example, target-org/target-repo)",
+				kind:        fieldText,
+			},
 			{key: "visibility", label: "Target visibility", kind: fieldSelect, value: "internal", options: []string{"internal", "private"}},
 			{key: "start", label: "Start after creation", kind: fieldBool, value: "false"},
 		},
 		submit: func(values map[string]string) (tea.Cmd, error) {
+			sourceOwner, sourceRepository, err := workflow.ParseRepositoryCoordinate(values["source"])
+			if err != nil {
+				return nil, fmt.Errorf("invalid source repository: %w", err)
+			}
+			targetOwner, targetRepository, err := workflow.ParseRepositoryCoordinate(values["target"])
+			if err != nil {
+				return nil, fmt.Errorf("invalid target repository: %w", err)
+			}
 			input := workflow.SourceCreateInput{
-				SourceOwner: values["sourceOwner"],
-				SourceRepo:  values["sourceRepo"],
-				TargetOwner: values["targetOwner"],
-				TargetRepo:  values["targetRepo"],
+				SourceOwner: sourceOwner,
+				SourceRepo:  sourceRepository,
+				TargetOwner: targetOwner,
+				TargetRepo:  targetRepository,
 				Visibility:  values["visibility"],
 				Start:       values["start"] == "true",
 			}
