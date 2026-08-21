@@ -61,7 +61,7 @@ Resolve the target endpoint via `gh elm config` (or `GH_TARGET_HOST` /
 web hostname (for example, `https://staffship.example.com`); the saved
 configuration uses and displays its corresponding `api.` hostname
 (`https://api.staffship.example.com`). Environment variables and command-line
-overrides should specify the API hostname directly.
+overrides accept either hostname form as well.
 
 Migration responses are rendered for people by default:
 

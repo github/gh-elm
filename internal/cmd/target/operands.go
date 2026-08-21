@@ -1,7 +1,6 @@
 package target
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,28 +17,26 @@ import (
 
 var canonicalUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-type sourceOptions struct {
-	url   string
-	token string
+type targetMigrationIDOptions struct {
+	value       string
+	sourceURL   string
+	sourceToken string
 }
 
-func addSourceFlags(cmd *cobra.Command, source *sourceOptions) {
-	cmd.Flags().StringVar(&source.url, "source-url", "", "Override the source (GHES) API base URL when resolving a source migration UUID.")
-	cmd.Flags().StringVar(&source.token, "source-token", "", "Override the source (GHES) API token when resolving a source migration UUID.")
+func (o *targetMigrationIDOptions) addFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&o.value, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
+	cmd.Flags().StringVar(&o.sourceURL, "source-url", "", "Override the source (GHES) API base URL when resolving a source migration UUID.")
+	cmd.Flags().StringVar(&o.sourceToken, "source-token", "", "Override the source (GHES) API token when resolving a source migration UUID.")
 }
 
-func resolveTargetMigrationID(
-	ctx context.Context,
-	positional, flagValue string,
-	flagChanged bool,
-	source sourceOptions,
-) (int64, error) {
+func (o *targetMigrationIDOptions) resolve(cmd *cobra.Command, positional string) (int64, error) {
+	flagChanged := cmd.Flags().Changed("migration-id")
 	if positional != "" && flagChanged {
 		return 0, errors.New("TARGET-MIGRATION-ID cannot be provided both positionally and with --migration-id")
 	}
 	value := strings.TrimSpace(positional)
 	if flagChanged {
-		value = strings.TrimSpace(flagValue)
+		value = strings.TrimSpace(o.value)
 	}
 	if value == "" {
 		return 0, errors.New("TARGET-MIGRATION-ID is required")
@@ -59,7 +56,7 @@ func resolveTargetMigrationID(
 	if err != nil {
 		return 0, err
 	}
-	ep, err := resolver.Source(source.url, source.token)
+	ep, err := resolver.Source(o.sourceURL, o.sourceToken)
 	if err != nil {
 		return 0, err
 	}
@@ -71,7 +68,7 @@ func resolveTargetMigrationID(
 	}
 
 	client := elmapi.NewClient(ep.URL, ep.Token)
-	detail, err := client.GetMigrationDetail(ctx, value)
+	detail, err := client.GetMigrationDetail(cmd.Context(), value)
 	if err != nil {
 		return 0, annotateSourceLookupError(err, ep.URL)
 	}

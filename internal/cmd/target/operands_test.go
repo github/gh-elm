@@ -5,18 +5,32 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const testSourceMigrationUUID = "897930cf-51cb-4e2d-9806-6357a6e66b55"
 
+func resolveTargetMigrationIDForTest(
+	t *testing.T,
+	positional string,
+	flags ...string,
+) (int64, error) {
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	var options targetMigrationIDOptions
+	options.addFlags(cmd)
+	require.NoError(t, cmd.ParseFlags(flags))
+	return options.resolve(cmd, positional)
+}
+
 func TestResolveTargetMigrationID(t *testing.T) {
 	t.Run("returns a numeric target ID without source configuration", func(t *testing.T) {
 		t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 		t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 
-		got, err := resolveTargetMigrationID(t.Context(), "42", "", false, sourceOptions{})
+		got, err := resolveTargetMigrationIDForTest(t, "42")
 
 		require.NoError(t, err)
 		assert.Equal(t, int64(42), got)
@@ -30,10 +44,12 @@ func TestResolveTargetMigrationID(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		got, err := resolveTargetMigrationID(t.Context(), testSourceMigrationUUID, "", false, sourceOptions{
-			url:   srv.URL,
-			token: "tok",
-		})
+		got, err := resolveTargetMigrationIDForTest(
+			t,
+			testSourceMigrationUUID,
+			"--source-url", srv.URL,
+			"--source-token", "tok",
+		)
 
 		require.NoError(t, err)
 		assert.Equal(t, int64(84), got)
@@ -45,10 +61,13 @@ func TestResolveTargetMigrationID(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		got, err := resolveTargetMigrationID(t.Context(), "", testSourceMigrationUUID, true, sourceOptions{
-			url:   srv.URL,
-			token: "tok",
-		})
+		got, err := resolveTargetMigrationIDForTest(
+			t,
+			"",
+			"--migration-id", testSourceMigrationUUID,
+			"--source-url", srv.URL,
+			"--source-token", "tok",
+		)
 
 		require.NoError(t, err)
 		assert.Equal(t, int64(85), got)
@@ -58,7 +77,7 @@ func TestResolveTargetMigrationID(t *testing.T) {
 		t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 		t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 
-		_, err := resolveTargetMigrationID(t.Context(), testSourceMigrationUUID, "", false, sourceOptions{})
+		_, err := resolveTargetMigrationIDForTest(t, testSourceMigrationUUID)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "requires a source URL")
@@ -70,10 +89,12 @@ func TestResolveTargetMigrationID(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		_, err := resolveTargetMigrationID(t.Context(), testSourceMigrationUUID, "", false, sourceOptions{
-			url:   srv.URL,
-			token: "tok",
-		})
+		_, err := resolveTargetMigrationIDForTest(
+			t,
+			testSourceMigrationUUID,
+			"--source-url", srv.URL,
+			"--source-token", "tok",
+		)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "does not have a target migration ID yet")
@@ -81,7 +102,7 @@ func TestResolveTargetMigrationID(t *testing.T) {
 
 	t.Run("rejects malformed identifiers", func(t *testing.T) {
 		for _, value := range []string{"0", "-1", "not-a-uuid", "897930cf-51cb-4e2d-9806"} {
-			_, err := resolveTargetMigrationID(t.Context(), value, "", false, sourceOptions{})
+			_, err := resolveTargetMigrationIDForTest(t, value)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "positive integer or canonical UUID")
 		}

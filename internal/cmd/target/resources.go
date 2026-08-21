@@ -22,7 +22,7 @@ import (
 // migration nodes — GET /enterprise/migration/:id/nodes.
 func newResourcesCmd() *cobra.Command {
 	var (
-		migrationID string
+		migration   targetMigrationIDOptions
 		repository  string
 		originFlag  string
 		stateFlag   string
@@ -30,7 +30,6 @@ func newResourcesCmd() *cobra.Command {
 		asJSON      bool
 		targetURL   string
 		targetToken string
-		source      sourceOptions
 	)
 
 	cmd := &cobra.Command{
@@ -59,9 +58,7 @@ func newResourcesCmd() *cobra.Command {
 				return errors.New("positional target migration ID or repository duplicates a value already supplied by flag")
 			}
 
-			resolvedMigrationID, err := resolveTargetMigrationID(
-				cmd.Context(), positionalID, migrationID, cmd.Flags().Changed("migration-id"), source,
-			)
+			resolvedMigrationID, err := migration.resolve(cmd, positionalID)
 			if err != nil {
 				return err
 			}
@@ -143,7 +140,7 @@ func newResourcesCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
+	migration.addFlags(cmd)
 	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Repository in owner/repo format (alternative to the positional argument; currently required).")
 	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live-update (default: both).")
 	cmd.Flags().StringVar(&stateFlag, "state", "", "Filter by state: pending, processed, failed, or eligible (default: all).")
@@ -151,7 +148,6 @@ func newResourcesCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output resources as newline-delimited JSON.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
-	addSourceFlags(cmd, &source)
 	return cmd
 }
 
