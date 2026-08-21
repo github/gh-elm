@@ -152,6 +152,47 @@ func (s *Service) GetSourceMigration(ctx context.Context, id SourceMigrationID) 
 	return client.GetMigrationDetail(ctx, string(id))
 }
 
+// ListSourceRepositories lists repositories visible through the source credentials.
+func (s *Service) ListSourceRepositories(ctx context.Context) ([]string, error) {
+	client, err := s.sourceClient()
+	if err != nil {
+		return nil, err
+	}
+	repositories, err := client.ListRepositories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		if !strings.EqualFold(repository.Owner.Type, "Organization") {
+			continue
+		}
+		if name := strings.TrimSpace(repository.FullName); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// ListTargetOrganizations lists organizations visible through the target credentials.
+func (s *Service) ListTargetOrganizations(ctx context.Context) ([]string, error) {
+	client, err := s.targetClient()
+	if err != nil {
+		return nil, err
+	}
+	organizations, err := client.ListOrganizations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	logins := make([]string, 0, len(organizations))
+	for _, organization := range organizations {
+		if login := strings.TrimSpace(organization.Login); login != "" {
+			logins = append(logins, login)
+		}
+	}
+	return logins, nil
+}
+
 // CreateSourceMigration creates and optionally starts a source migration.
 func (s *Service) CreateSourceMigration(ctx context.Context, in SourceCreateInput) (*SourceCreateResult, error) {
 	in.SourceOwner = strings.TrimSpace(in.SourceOwner)

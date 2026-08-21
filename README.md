@@ -49,6 +49,11 @@ to move, Enter to select, Escape to go back, `/` to search migrations, `Ctrl+V` 
 toggle list density, `?` for contextual help, and `q` to quit. Long detail and result
 views support Page Up and Page Down.
 
+Migration creation lazily loads searchable source repositories and destination
+organizations from the configured APIs. The destination repository name defaults to
+the selected source name and remains editable. Press `Ctrl+E` from either picker to
+fall back to manual `org/repo` entry.
+
 In scripts, redirected output, and other non-interactive environments, bare `gh elm`
 continues to print help and exit successfully. Explicit commands and machine-readable
 formats remain the supported automation interface.

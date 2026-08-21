@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/github/gh-elm/internal/config"
+	"github.com/github/gh-elm/internal/elmapi"
 )
 
 func TestParseTargetMigrationID(t *testing.T) {
@@ -134,6 +135,43 @@ func TestCheckAuthentication(t *testing.T) {
 
 	assert.NoError(t, service.CheckSourceAuthentication(t.Context()))
 	assert.NoError(t, service.CheckTargetAuthentication(t.Context()))
+}
+
+func TestRepositoryCatalog(t *testing.T) {
+	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v3/user/repos", r.URL.Path)
+		_, _ = w.Write([]byte(`[
+			{"full_name":"octo/source","owner":{"type":"Organization"}},
+			{"full_name":"personal/source","owner":{"type":"User"}}
+		]`))
+	}))
+	t.Cleanup(source.Close)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/user/orgs", r.URL.Path)
+		assert.NoError(t, json.NewEncoder(w).Encode([]elmapi.Organization{
+			{Login: "octo-target"},
+		}))
+	}))
+	t.Cleanup(target.Close)
+
+	service := New()
+	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
+		SourceURL:   source.URL,
+		SourceToken: "source-token",
+		TargetURL:   target.URL,
+		TargetToken: "target-token",
+	}))
+
+	repositories, err := service.ListSourceRepositories(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"octo/source"}, repositories)
+
+	organizations, err := service.ListTargetOrganizations(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"octo-target"}, organizations)
 }
 
 func TestListSourceMigrations(t *testing.T) {

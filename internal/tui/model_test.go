@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -298,14 +299,136 @@ func TestModel(t *testing.T) {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
 
-		assert.Equal(t, screenForm, model.screen)
-		assert.Equal(t, "Create migration", model.form.title)
+		assert.Equal(t, screenPicker, model.screen)
+		assert.Equal(t, "Select source repository", model.picker.title)
 	})
 
-	t.Run("migration creation uses source and target coordinates", func(t *testing.T) {
+	t.Run("migration creation discovers repositories and organizations", func(t *testing.T) {
+		svc := &fakeService{
+			sourceRepositories:  []string{"acme/api", "octo/web"},
+			targetOrganizations: []string{"acme-cloud", "octo-cloud"},
+		}
+		model := New(t.Context(), svc)
+		updated, command := model.openSourceCreateForm(screenHome)
+		model = updated.(*Model)
+		require.NotNil(t, command)
+
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+		assert.Contains(t, model.pickerView(), "acme/api")
+
+		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+		assert.Equal(t, "Select destination organization", model.picker.title)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.Equal(t, screenForm, model.screen)
+		assert.Contains(t, model.form.description, "Source: acme/api")
+		assert.Contains(t, model.form.description, "Destination organization: acme-cloud")
+		assert.Equal(t, "api", model.form.fields[0].value)
+
+		command, err := model.form.submit(map[string]string{
+			"targetRepo": "renamed-api",
+			"visibility": "private",
+			"start":      "true",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, command)
+		_ = command()
+		assert.Equal(t, workflow.SourceCreateInput{
+			SourceOwner: "acme",
+			SourceRepo:  "api",
+			TargetOwner: "acme-cloud",
+			TargetRepo:  "renamed-api",
+			Visibility:  "private",
+			Start:       true,
+		}, svc.sourceCreateInput)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		model = updated.(*Model)
+		assert.Equal(t, screenPicker, model.screen)
+		assert.Equal(t, "Select destination organization", model.picker.title)
+
+		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		assert.Equal(t, "Select source repository", model.picker.title)
+	})
+
+	t.Run("repository picker filters options", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenPicker
+		model.picker = pickerState{
+			items: []string{"acme/api", "octo/web"},
+			input: textinput.New(),
+		}
+		model.picker.input.Focus()
+
+		for _, character := range "octo" {
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{character}})
+			model = updated.(*Model)
+		}
+
+		assert.Equal(t, []string{"octo/web"}, model.visiblePickerItems())
+	})
+
+	t.Run("repository picker offers manual fallback", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.openSourceCreateForm(screenHome)
+		model = updated.(*Model)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+		model = updated.(*Model)
+
+		assert.Equal(t, screenForm, model.screen)
+		assert.Equal(t, "Create migration manually", model.form.title)
+	})
+
+	t.Run("destination picker fallback preserves the source", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenPicker
+		model.picker = pickerState{
+			kind:   pickerTargetOrganization,
+			parent: screenHome,
+			source: "acme/api",
+			input:  textinput.New(),
+		}
+
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+		model = updated.(*Model)
+
+		require.Equal(t, screenForm, model.screen)
+		assert.Equal(t, "acme/api", model.form.fields[0].value)
+	})
+
+	t.Run("repository picker ignores stale catalog responses", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenPicker
+		model.pickerGeneration = 2
+		model.picker = pickerState{
+			generation: 2,
+			loading:    true,
+			input:      textinput.New(),
+		}
+
+		updated, _ := model.Update(pickerCatalogMsg{
+			generation: 1,
+			items:      []string{"stale/repo"},
+		})
+		model = updated.(*Model)
+
+		assert.True(t, model.picker.loading)
+		assert.Empty(t, model.picker.items)
+	})
+
+	t.Run("manual migration creation uses source and target coordinates", func(t *testing.T) {
 		svc := &fakeService{}
 		model := New(t.Context(), svc)
-		updated, _ := model.openSourceCreateForm(screenHome)
+		updated, _ := model.openManualSourceCreateForm(screenHome, "")
 		model = updated.(*Model)
 
 		require.Len(t, model.form.fields, 4)
@@ -334,9 +457,9 @@ func TestModel(t *testing.T) {
 		}, svc.sourceCreateInput)
 	})
 
-	t.Run("migration creation rejects malformed coordinates", func(t *testing.T) {
+	t.Run("manual migration creation rejects malformed coordinates", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
-		updated, _ := model.openSourceCreateForm(screenHome)
+		updated, _ := model.openManualSourceCreateForm(screenHome, "")
 		model = updated.(*Model)
 
 		command, err := model.form.submit(map[string]string{
@@ -476,16 +599,22 @@ func actionIDs(actions []actionItem) []string {
 }
 
 type fakeService struct {
-	sourceMigrations  []elmapi.MigrationSummary
-	sourceDetail      *elmapi.MigrationDetail
-	sourceCreateInput workflow.SourceCreateInput
-	reclaimCalls      int
-	sourceAuthErr     error
-	targetAuthErr     error
+	sourceMigrations    []elmapi.MigrationSummary
+	sourceRepositories  []string
+	sourceDetail        *elmapi.MigrationDetail
+	sourceCreateInput   workflow.SourceCreateInput
+	targetOrganizations []string
+	reclaimCalls        int
+	sourceAuthErr       error
+	targetAuthErr       error
 }
 
 func (f *fakeService) ListSourceMigrations(context.Context, string) ([]elmapi.MigrationSummary, error) {
 	return f.sourceMigrations, nil
+}
+
+func (f *fakeService) ListSourceRepositories(context.Context) ([]string, error) {
+	return f.sourceRepositories, nil
 }
 
 func (f *fakeService) GetSourceMigration(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
@@ -523,6 +652,10 @@ func (f *fakeService) RevertSourceCutover(context.Context, workflow.SourceMigrat
 
 func (f *fakeService) ListTargetMigrations(context.Context, string, int) ([]elmapi.TargetMigration, error) {
 	return nil, nil
+}
+
+func (f *fakeService) ListTargetOrganizations(context.Context) ([]string, error) {
+	return f.targetOrganizations, nil
 }
 
 func (f *fakeService) CreateTargetMigration(context.Context, workflow.TargetCreateInput) (json.RawMessage, error) {

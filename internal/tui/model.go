@@ -48,6 +48,11 @@ type targetService interface {
 	ReportURL(context.Context, workflow.ReportInput) (json.RawMessage, error)
 }
 
+type catalogService interface {
+	ListSourceRepositories(context.Context) ([]string, error)
+	ListTargetOrganizations(context.Context) ([]string, error)
+}
+
 type mannequinService interface {
 	ListMannequins(context.Context, string, bool) ([]ghapi.MannequinRecord, error)
 	ExportMannequins(context.Context, string, string, bool) error
@@ -65,6 +70,7 @@ type configurationService interface {
 type service interface {
 	sourceService
 	targetService
+	catalogService
 	mannequinService
 	configurationService
 }
@@ -79,6 +85,7 @@ const (
 	screenTargetDetail
 	screenMannequins
 	screenConfiguration
+	screenPicker
 	screenForm
 	screenConfirm
 	screenResult
@@ -103,12 +110,33 @@ type formField struct {
 }
 
 type formState struct {
-	title  string
-	fields []formField
-	cursor int
-	parent screen
-	submit func(map[string]string) (tea.Cmd, error)
-	err    error
+	title       string
+	description string
+	fields      []formField
+	cursor      int
+	parent      screen
+	submit      func(map[string]string) (tea.Cmd, error)
+	err         error
+}
+
+type pickerKind int
+
+const (
+	pickerSourceRepository pickerKind = iota
+	pickerTargetOrganization
+)
+
+type pickerState struct {
+	kind       pickerKind
+	title      string
+	parent     screen
+	items      []string
+	cursor     int
+	input      textinput.Model
+	loading    bool
+	err        error
+	source     string
+	generation uint64
 }
 
 type confirmState struct {
@@ -166,6 +194,8 @@ type Model struct {
 	sourceAuthErr     error
 	targetAuthChecked bool
 	targetAuthErr     error
+	picker            pickerState
+	pickerGeneration  uint64
 	form              formState
 	confirm           confirmState
 	result            resultState
@@ -293,6 +323,16 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.targetAuthChecked = true
 		m.targetAuthErr = msg.err
+	case pickerCatalogMsg:
+		if msg.generation != m.pickerGeneration {
+			return m, nil
+		}
+		m.picker.loading = false
+		m.picker.err = msg.err
+		if msg.err == nil {
+			m.picker.items = msg.items
+			m.picker.cursor = 0
+		}
 	case actionMsg:
 		m.loading = false
 		m.err = nil
@@ -320,6 +360,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.screen {
+	case screenPicker:
+		return m.updatePicker(msg)
 	case screenForm:
 		return m.updateForm(msg)
 	case screenConfirm:
@@ -439,6 +481,77 @@ func (m *Model) updateSourceSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = max(0, len(m.visibleSourceMigrations())-1)
 	}
 	return m, command
+}
+
+func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+e":
+		source := ""
+		if m.picker.kind == pickerTargetOrganization {
+			source = m.picker.source
+		}
+		return m.openManualSourceCreateForm(m.picker.parent, source)
+	case "ctrl+r":
+		return m.reloadPicker()
+	case "esc":
+		if m.picker.input.Value() != "" {
+			m.picker.input.SetValue("")
+			m.picker.cursor = 0
+			return m, nil
+		}
+		if m.picker.kind == pickerTargetOrganization {
+			return m.openSourceCreateForm(m.picker.parent)
+		}
+		m.picker.input.Blur()
+		m.screen = m.picker.parent
+		return m, nil
+	case "enter":
+		if m.picker.loading || m.picker.err != nil {
+			return m, nil
+		}
+		items := m.visiblePickerItems()
+		if len(items) == 0 {
+			return m, nil
+		}
+		selected := items[m.picker.cursor]
+		if m.picker.kind == pickerSourceRepository {
+			return m.openTargetOrganizationPicker(m.picker.parent, selected)
+		}
+		return m.openDiscoveredSourceCreateForm(m.picker.source, selected)
+	case "up":
+		if m.picker.cursor > 0 {
+			m.picker.cursor--
+		}
+		return m, nil
+	case "down":
+		if m.picker.cursor < len(m.visiblePickerItems())-1 {
+			m.picker.cursor++
+		}
+		return m, nil
+	}
+	if m.picker.loading || m.picker.err != nil {
+		return m, nil
+	}
+	var command tea.Cmd
+	m.picker.input, command = m.picker.input.Update(msg)
+	if m.picker.cursor >= len(m.visiblePickerItems()) {
+		m.picker.cursor = max(0, len(m.visiblePickerItems())-1)
+	}
+	return m, command
+}
+
+func (m *Model) visiblePickerItems() []string {
+	query := strings.ToLower(strings.TrimSpace(m.picker.input.Value()))
+	if query == "" {
+		return m.picker.items
+	}
+	items := make([]string, 0, len(m.picker.items))
+	for _, item := range m.picker.items {
+		if strings.Contains(strings.ToLower(item), query) {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func (m *Model) activate() (tea.Model, tea.Cmd) {
@@ -1004,15 +1117,113 @@ func (m *Model) openSourceIDForm() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
+	input := textinput.New()
+	input.Prompt = ""
+	input.Placeholder = "filter source repositories"
+	input.CharLimit = 160
+	input.Focus()
+
+	m.pickerGeneration++
+	m.picker = pickerState{
+		kind:       pickerSourceRepository,
+		title:      "Select source repository",
+		parent:     parent,
+		input:      input,
+		loading:    true,
+		generation: m.pickerGeneration,
+	}
+	m.screen = screenPicker
+	command := m.loadPickerCatalogCmd(pickerSourceRepository, m.pickerGeneration)
+	return m, command
+}
+
+func (m *Model) openTargetOrganizationPicker(parent screen, source string) (tea.Model, tea.Cmd) {
+	input := textinput.New()
+	input.Prompt = ""
+	input.Placeholder = "filter destination organizations"
+	input.CharLimit = 160
+	input.Focus()
+
+	m.pickerGeneration++
+	m.picker = pickerState{
+		kind:       pickerTargetOrganization,
+		title:      "Select destination organization",
+		parent:     parent,
+		input:      input,
+		loading:    true,
+		source:     source,
+		generation: m.pickerGeneration,
+	}
+	m.screen = screenPicker
+	command := m.loadPickerCatalogCmd(pickerTargetOrganization, m.pickerGeneration)
+	return m, command
+}
+
+func (m *Model) reloadPicker() (tea.Model, tea.Cmd) {
+	m.pickerGeneration++
+	m.picker.generation = m.pickerGeneration
+	m.picker.loading = true
+	m.picker.err = nil
+	m.picker.items = nil
+	m.picker.cursor = 0
+	command := m.loadPickerCatalogCmd(m.picker.kind, m.pickerGeneration)
+	return m, command
+}
+
+func (m *Model) openDiscoveredSourceCreateForm(source, targetOrganization string) (tea.Model, tea.Cmd) {
+	_, sourceRepository, err := workflow.ParseRepositoryCoordinate(source)
+	if err != nil {
+		m.picker.err = err
+		return m, nil
+	}
 	return m.openForm(formState{
-		title:  "Create migration",
-		parent: parent,
+		title:       "Create migration",
+		description: fmt.Sprintf("Source: %s\nDestination organization: %s", source, targetOrganization),
+		parent:      screenPicker,
+		fields: []formField{
+			{
+				key:         "targetRepo",
+				label:       "Destination repository name",
+				description: "Defaults to the source repository name; edit it if the destination should differ.",
+				kind:        fieldText,
+				value:       sourceRepository,
+			},
+			{key: "visibility", label: "Target visibility", kind: fieldSelect, value: "internal", options: []string{"internal", "private"}},
+			{key: "start", label: "Start after creation", kind: fieldBool, value: "false"},
+		},
+		submit: func(values map[string]string) (tea.Cmd, error) {
+			sourceOwner, sourceRepo, err := workflow.ParseRepositoryCoordinate(source)
+			if err != nil {
+				return nil, fmt.Errorf("invalid source repository: %w", err)
+			}
+			targetRepo := strings.TrimSpace(values["targetRepo"])
+			if targetRepo == "" || strings.Contains(targetRepo, "/") {
+				return nil, errors.New("destination repository name must be non-empty and must not contain a slash")
+			}
+			return m.createSourceMigrationCmd(workflow.SourceCreateInput{
+				SourceOwner: sourceOwner,
+				SourceRepo:  sourceRepo,
+				TargetOwner: targetOrganization,
+				TargetRepo:  targetRepo,
+				Visibility:  values["visibility"],
+				Start:       values["start"] == "true",
+			}), nil
+		},
+	})
+}
+
+func (m *Model) openManualSourceCreateForm(parent screen, source string) (tea.Model, tea.Cmd) {
+	return m.openForm(formState{
+		title:       "Create migration manually",
+		description: "Enter repositories directly when API discovery is unavailable.",
+		parent:      parent,
 		fields: []formField{
 			{
 				key:         "source",
 				label:       "Source repository",
 				description: "Format: org/repo (for example, source-org/source-repo)",
 				kind:        fieldText,
+				value:       source,
 			},
 			{
 				key:         "target",
@@ -1040,20 +1251,24 @@ func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
 				Visibility:  values["visibility"],
 				Start:       values["start"] == "true",
 			}
-			return func() tea.Msg {
-				result, err := m.service.CreateSourceMigration(m.ctx, input)
-				if err != nil {
-					return actionMsg{parent: screenSourceList, err: err}
-				}
-				m.sourceID = workflow.SourceMigrationID(result.Migration.MigrationID)
-				body := render.MigrationCreate(result.Migration)
-				if result.Started {
-					body = fmt.Sprintf("Migration %s created and started.", result.Migration.MigrationID)
-				}
-				return actionMsg{title: "Migration created", body: body, parent: screenSourceDetail, refresh: true}
-			}, nil
+			return m.createSourceMigrationCmd(input), nil
 		},
 	})
+}
+
+func (m *Model) createSourceMigrationCmd(input workflow.SourceCreateInput) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.service.CreateSourceMigration(m.ctx, input)
+		if err != nil {
+			return actionMsg{parent: screenSourceList, err: err}
+		}
+		m.sourceID = workflow.SourceMigrationID(result.Migration.MigrationID)
+		body := render.MigrationCreate(result.Migration)
+		if result.Started {
+			body = fmt.Sprintf("Migration %s created and started.", result.Migration.MigrationID)
+		}
+		return actionMsg{title: "Migration created", body: body, parent: screenSourceDetail, refresh: true}
+	}
 }
 
 func (m *Model) openTargetIDForm() (tea.Model, tea.Cmd) {
@@ -1369,6 +1584,12 @@ type targetAuthenticationMsg struct {
 	err        error
 }
 
+type pickerCatalogMsg struct {
+	generation uint64
+	items      []string
+	err        error
+}
+
 type actionMsg struct {
 	title   string
 	body    string
@@ -1440,6 +1661,20 @@ func (m *Model) checkTargetAuthenticationCmd(generation uint64) tea.Cmd {
 			generation: generation,
 			err:        m.service.CheckTargetAuthentication(m.ctx),
 		}
+	}
+}
+
+func (m *Model) loadPickerCatalogCmd(kind pickerKind, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		var items []string
+		var err error
+		switch kind {
+		case pickerSourceRepository:
+			items, err = m.service.ListSourceRepositories(m.ctx)
+		case pickerTargetOrganization:
+			items, err = m.service.ListTargetOrganizations(m.ctx)
+		}
+		return pickerCatalogMsg{generation: generation, items: items, err: err}
 	}
 }
 

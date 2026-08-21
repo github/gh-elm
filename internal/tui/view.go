@@ -63,6 +63,10 @@ func (m *Model) View() string {
 		title = "Configuration"
 		body = m.configurationView()
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+	case screenPicker:
+		title = m.picker.title
+		body = m.pickerView()
+		help = "type to search • ↑/↓ select • enter continue • ctrl+e manual entry • esc cancel"
 	case screenForm:
 		title = m.form.title
 		body = m.formView()
@@ -398,6 +402,10 @@ func (m *Model) authenticationDetail(checked bool, err error) string {
 
 func (m *Model) formView() string {
 	var builder strings.Builder
+	if m.form.description != "" {
+		builder.WriteString(m.styles.Muted.Render(m.form.description))
+		builder.WriteString("\n\n")
+	}
 	for index, field := range m.form.fields {
 		value := field.value
 		switch field.kind {
@@ -432,6 +440,56 @@ func (m *Model) formView() string {
 		fmt.Fprintf(&builder, "\n%s\n", m.styles.Failure.Render("Error: "+m.form.err.Error()))
 	}
 	return builder.String()
+}
+
+func (m *Model) pickerView() string {
+	if m.picker.loading {
+		return m.styles.Active.Render("Loading options…") + "\n\n" +
+			m.styles.Muted.Render("Press Ctrl+E to enter repositories manually.")
+	}
+	if m.picker.err != nil {
+		return m.styles.Failure.Render("Unable to load options: "+m.picker.err.Error()) + "\n\n" +
+			m.styles.Muted.Render("Press Ctrl+E to enter repositories manually.")
+	}
+
+	items := m.visiblePickerItems()
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Search: %s\n\n", m.picker.input.View())
+	if len(items) == 0 {
+		fmt.Fprintf(&builder, "%s\n", m.styles.Muted.Render("No matching options."))
+		return builder.String()
+	}
+	start, end := pickerBounds(m.picker.cursor, len(items), max(3, displayHeight(m.height)-11))
+	for index := start; index < end; index++ {
+		fmt.Fprintf(&builder, "%s %s\n", m.markerFor(index, m.picker.cursor), items[index])
+	}
+	if end < len(items) {
+		fmt.Fprintf(&builder, "%s", m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(items)-end)))
+	}
+	if start > 0 {
+		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
+	}
+	return builder.String()
+}
+
+func (m *Model) markerFor(index, cursor int) string {
+	if index == cursor {
+		return m.styles.Info.Render("›")
+	}
+	return " "
+}
+
+func pickerBounds(cursor, total, capacity int) (start, end int) {
+	if total == 0 {
+		return 0, 0
+	}
+	capacity = max(1, capacity)
+	start = max(0, cursor-capacity+1)
+	end = min(total, start+capacity)
+	if end-start < capacity {
+		start = max(0, end-capacity)
+	}
+	return start, end
 }
 
 func (m *Model) marker(index int) string {
