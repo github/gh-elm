@@ -165,3 +165,25 @@ func TestValidateURL(t *testing.T) {
 		}
 	})
 }
+
+func TestNormalizeTargetAPIURL(t *testing.T) {
+	t.Run("prefixes the hostname and preserves URL components", func(t *testing.T) {
+		got := normalizeTargetAPIURL(" https://user@staffship.blabla.com:8443/base?mode=test#fragment ")
+
+		assert.Equal(t, "https://user@api.staffship.blabla.com:8443/base?mode=test#fragment", got)
+	})
+
+	t.Run("preserves an existing API label case insensitively", func(t *testing.T) {
+		assert.Equal(t, "https://API.staffship.blabla.com", normalizeTargetAPIURL("https://API.staffship.blabla.com"))
+	})
+
+	t.Run("prefixes a hostname that only contains api elsewhere", func(t *testing.T) {
+		assert.Equal(t, "https://api.staffship-api.blabla.com", normalizeTargetAPIURL("https://staffship-api.blabla.com"))
+	})
+
+	t.Run("preserves local development endpoints", func(t *testing.T) {
+		for _, raw := range []string{"http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+			assert.Equal(t, raw, normalizeTargetAPIURL(raw))
+		}
+	})
+}

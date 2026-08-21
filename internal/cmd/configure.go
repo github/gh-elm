@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -156,7 +157,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 					Description("The destination the repositories are migrating to."),
 				huh.NewInput().
 					Title("Target URL").
-					Placeholder("https://api.tenant.ghe.com").
+					Placeholder("https://tenant.ghe.com").
 					Value(&targetURL).
 					Validate(validateURL),
 				huh.NewInput().
@@ -175,7 +176,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 
 	cfg.SourceURL = strings.TrimSpace(sourceURL)
 	if configureTarget {
-		cfg.TargetURL = strings.TrimSpace(targetURL)
+		cfg.TargetURL = normalizeTargetAPIURL(targetURL)
 	}
 	if err := cfg.Save(); err != nil {
 		return err
@@ -284,6 +285,28 @@ func validateURL(s string) error {
 		return errors.New("URL must include a host")
 	}
 	return nil
+}
+
+// normalizeTargetAPIURL turns the configured target web hostname into its API
+// hostname before it is persisted and shown by `gh elm config show`.
+func normalizeTargetAPIURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+
+	hostname := u.Hostname()
+	if hostname == "" || strings.EqualFold(hostname, "localhost") || net.ParseIP(hostname) != nil {
+		return raw
+	}
+	firstLabel, _, _ := strings.Cut(hostname, ".")
+	if strings.EqualFold(firstLabel, "api") {
+		return raw
+	}
+
+	u.Host = "api." + u.Host
+	return u.String()
 }
 
 func orUnset(s string) string {

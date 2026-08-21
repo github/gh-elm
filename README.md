@@ -57,7 +57,11 @@ gh elm config reset # remove stored config and credentials
 
 Resolve the target endpoint via `gh elm config` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
-`--target-token` overrides.
+`--target-token` overrides. During `gh elm config`, the target URL may use the
+web hostname (for example, `https://staffship.example.com`); the saved
+configuration uses and displays its corresponding `api.` hostname
+(`https://api.staffship.example.com`). Environment variables and command-line
+overrides should specify the API hostname directly.
 
 Migration responses are rendered for people by default:
 
