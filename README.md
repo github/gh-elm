@@ -34,9 +34,11 @@ gh extension upgrade elm
 gh elm --help            # list available commands
 gh elm --version         # print the extension version
 
-gh elm config       # interactively set up credentials
-gh elm config show  # print current config (tokens redacted)
-gh elm config reset # remove stored config and credentials
+gh elm config                # interactively set up credentials
+gh elm config show           # print current config (tokens redacted)
+gh elm config reset          # remove stored config and credentials
+gh elm config set-source-pat ORG # set an organization's SOURCE_PAT secret
+gh elm config set-target-pat ORG # set an organization's TARGET_PAT secret
 ```
 
 ### Command groups
@@ -200,6 +202,27 @@ The environment variables use a unified `GH_SOURCE_*` / `GH_TARGET_*` scheme:
 | Source token | `GH_SOURCE_TOKEN` |
 | Target host | `GH_TARGET_HOST` |
 | Target token | `GH_TARGET_TOKEN` |
+
+### Migrator PATs
+
+Set the organization-scoped PATs used by the migrator through the source GHES API:
+
+```sh
+# Secure interactive input
+gh elm config set-source-pat octo-org
+gh elm config set-target-pat octo-org
+
+# Environment, --body, or standard input also work
+SOURCE_PAT=ghp_example gh elm config set-source-pat octo-org
+gh elm config set-target-pat octo-org --body "$TARGET_PAT"
+printf %s "$TARGET_PAT" | gh elm config set-target-pat --org octo-org
+```
+
+The required `ORG` operand identifies the organization that owns the secret; `--org`
+provides an equivalent flag form. The commands use the configured source URL and source
+admin token. Per-command
+`--source-url` and `--source-token` flags override those values. Values passed with
+`--body` can appear in shell history, so prefer the prompt, environment, or standard input.
 
 Other overrides:
 

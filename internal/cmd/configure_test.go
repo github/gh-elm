@@ -71,6 +71,98 @@ func TestConfigureShow(t *testing.T) {
 	assert.Contains(t, out, "not set", "unset target token should read as not set")
 }
 
+func TestMigratorPATInput(t *testing.T) {
+	t.Run("body flag", func(t *testing.T) {
+		t.Setenv("SOURCE_PAT", "env-pat")
+		cmd := &cobra.Command{}
+		cmd.SetIn(strings.NewReader("stdin-pat"))
+
+		pat, err := migratorPATInput(cmd, "body-pat", "SOURCE_PAT")
+		require.NoError(t, err)
+		assert.Equal(t, "body-pat", pat)
+	})
+
+	t.Run("environment", func(t *testing.T) {
+		t.Setenv("SOURCE_PAT", "env-pat")
+		cmd := &cobra.Command{}
+		cmd.SetIn(strings.NewReader("stdin-pat"))
+
+		pat, err := migratorPATInput(cmd, "", "SOURCE_PAT")
+		require.NoError(t, err)
+		assert.Equal(t, "env-pat", pat)
+	})
+
+	t.Run("standard input trims line endings only", func(t *testing.T) {
+		t.Setenv("SOURCE_PAT", "")
+		cmd := &cobra.Command{}
+		cmd.SetIn(strings.NewReader("  stdin-pat  \r\n"))
+
+		pat, err := migratorPATInput(cmd, "", "SOURCE_PAT")
+		require.NoError(t, err)
+		assert.Equal(t, "  stdin-pat  ", pat)
+	})
+
+	t.Run("empty standard input", func(t *testing.T) {
+		t.Setenv("SOURCE_PAT", "")
+		cmd := &cobra.Command{}
+		cmd.SetIn(strings.NewReader("\n"))
+
+		_, err := migratorPATInput(cmd, "", "SOURCE_PAT")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "standard input did not contain a PAT")
+	})
+}
+
+func TestSetMigratorPATCommands(t *testing.T) {
+	cmd := newConfigCmd()
+	sourceCmd := findSubcommand(cmd, "set-source-pat")
+	targetCmd := findSubcommand(cmd, "set-target-pat")
+	require.NotNil(t, sourceCmd)
+	require.NotNil(t, targetCmd)
+	assert.NotNil(t, sourceCmd.Flags().Lookup("org"))
+	assert.NotNil(t, targetCmd.Flags().Lookup("org"))
+
+	sourceCmd.SetIn(strings.NewReader(""))
+	err := sourceCmd.RunE(sourceCmd, nil)
+	require.Error(t, err)
+	assert.EqualError(t, err, "organization required: pass ORG or use --org")
+}
+
+func TestResolveOrganization(t *testing.T) {
+	t.Run("positional", func(t *testing.T) {
+		org, err := resolveOrganization([]string{" octo-org "}, "", false)
+		require.NoError(t, err)
+		assert.Equal(t, "octo-org", org)
+	})
+
+	t.Run("flag", func(t *testing.T) {
+		org, err := resolveOrganization(nil, " octo-org ", true)
+		require.NoError(t, err)
+		assert.Equal(t, "octo-org", org)
+	})
+
+	t.Run("both", func(t *testing.T) {
+		_, err := resolveOrganization([]string{"octo-org"}, "other-org", true)
+		require.Error(t, err)
+		assert.EqualError(t, err, "ORG cannot be combined with --org")
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		_, err := resolveOrganization(nil, "", false)
+		require.Error(t, err)
+		assert.EqualError(t, err, "organization required: pass ORG or use --org")
+	})
+}
+
+func findSubcommand(cmd *cobra.Command, name string) *cobra.Command {
+	for _, child := range cmd.Commands() {
+		if child.Name() == name {
+			return child
+		}
+	}
+	return nil
+}
+
 func TestConfigureCompatibility(t *testing.T) {
 	t.Run("legacy configure --show still works", func(t *testing.T) {
 		seedFileStore(t)
