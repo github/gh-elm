@@ -127,9 +127,9 @@ func TestCheckAuthentication(t *testing.T) {
 
 	service := New()
 	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
-		SourceURL:   source.URL,
+		SourceURL:   source.URL + `\`,
 		SourceToken: "source-token",
-		TargetURL:   target.URL,
+		TargetURL:   target.URL + `\/`,
 		TargetToken: "target-token",
 	}))
 
@@ -159,9 +159,9 @@ func TestRepositoryCatalog(t *testing.T) {
 
 	service := New()
 	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
-		SourceURL:   source.URL,
+		SourceURL:   source.URL + `\`,
 		SourceToken: "source-token",
-		TargetURL:   target.URL,
+		TargetURL:   target.URL + `\/`,
 		TargetToken: "target-token",
 	}))
 

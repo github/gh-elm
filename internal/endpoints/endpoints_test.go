@@ -52,14 +52,33 @@ func TestSourcePrecedence(t *testing.T) {
 func TestSourceNormalizesBareHost(t *testing.T) {
 	r := newTestResolver(t)
 
-	// A scheme-less bare host gains https:// and the /api/v3 REST prefix.
-	ep, err := r.Source("ghes.example.com", "tok")
-	require.NoError(t, err)
-	assert.Equal(t, "https://ghes.example.com/api/v3", ep.URL, "bare host normalization")
+	t.Run("adds scheme and REST path to a bare host", func(t *testing.T) {
+		ep, err := r.Source("ghes.example.com", "tok")
 
-	// A URL that already carries the REST path is left untouched.
-	ep, _ = r.Source("https://ghes.example.com/api/v3", "tok")
-	assert.Equal(t, "https://ghes.example.com/api/v3", ep.URL, "explicit /api/v3 should be preserved")
+		require.NoError(t, err)
+		assert.Equal(t, "https://ghes.example.com/api/v3", ep.URL)
+	})
+
+	t.Run("preserves an explicit REST path", func(t *testing.T) {
+		ep, err := r.Source("https://ghes.example.com/api/v3", "tok")
+
+		require.NoError(t, err)
+		assert.Equal(t, "https://ghes.example.com/api/v3", ep.URL)
+	})
+
+	t.Run("removes a trailing backslash", func(t *testing.T) {
+		ep, err := r.Source("https://ghes.example.com\\", "tok")
+
+		require.NoError(t, err)
+		assert.Equal(t, "https://ghes.example.com/api/v3", ep.URL)
+	})
+
+	t.Run("removes an escaped trailing slash", func(t *testing.T) {
+		ep, err := r.Source("https://ghes.example.com\\/", "tok")
+
+		require.NoError(t, err)
+		assert.Equal(t, "https://ghes.example.com/api/v3", ep.URL)
+	})
 }
 
 func TestTargetResolvesIndependently(t *testing.T) {
@@ -71,4 +90,13 @@ func TestTargetResolvesIndependently(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://target-env", ep.URL)
 	assert.Equal(t, "target-env-token", ep.Token)
+}
+
+func TestTargetNormalizesTrailingBackslash(t *testing.T) {
+	r := newTestResolver(t)
+
+	ep, err := r.Target("https://target.example.com\\", "tok")
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://target.example.com", ep.URL)
 }

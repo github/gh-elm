@@ -80,10 +80,15 @@ func (r *Resolver) resolve(flagURL, flagToken, envURL, envToken, storedURL, toke
 // normalizeBaseURL makes a resolved base URL usable by the HTTP client. The
 // GH_SOURCE_HOST/GH_TARGET_HOST variables (and their configure equivalents) may
 // be given as a bare host with no scheme; default those to https so the client
-// does not fail with an "unsupported protocol scheme" error. A URL that already
-// carries a scheme is returned unchanged.
+// does not fail with an "unsupported protocol scheme" error. Trailing forward
+// or backward slashes are removed so shell-escaped and accidentally Windows-
+// styled suffixes cannot become part of the host name.
 func normalizeBaseURL(s string) string {
 	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimRight(s, `/\`)
 	if s == "" {
 		return ""
 	}
