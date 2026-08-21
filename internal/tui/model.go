@@ -145,10 +145,11 @@ type Model struct {
 	targetParent     screen
 	repository       string
 
-	configuration *workflow.Configuration
-	form          formState
-	confirm       confirmState
-	result        resultState
+	configuration    *workflow.Configuration
+	configurationErr error
+	form             formState
+	confirm          confirmState
+	result           resultState
 }
 
 // New creates the main TUI model.
@@ -164,7 +165,7 @@ func New(ctx context.Context, svc service) *Model {
 
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	return nil
+	return m.loadConfigurationCmd()
 }
 
 // Update implements tea.Model.
@@ -220,7 +221,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case configMsg:
 		m.loading = false
-		m.err = msg.err
+		m.configurationErr = msg.err
+		if m.screen == screenConfiguration {
+			m.err = msg.err
+		}
 		if msg.err == nil {
 			m.configuration = msg.configuration
 		}

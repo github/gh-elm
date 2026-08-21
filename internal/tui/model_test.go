@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,44 @@ import (
 )
 
 func TestModel(t *testing.T) {
+	t.Run("loads configuration readiness on startup", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		command := model.Init()
+
+		require.NotNil(t, command)
+	})
+
+	t.Run("shows incomplete configuration warning above the title", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.Update(configMsg{configuration: &workflow.Configuration{
+			SourceURL:      "https://source.example",
+			SourceTokenSet: true,
+		}})
+		model = updated.(*Model)
+
+		view := model.View()
+		warningIndex := strings.Index(view, "Configuration incomplete")
+		titleIndex := strings.Index(view, "Enterprise Live Migrations")
+		require.NotEqual(t, -1, warningIndex)
+		require.NotEqual(t, -1, titleIndex)
+		assert.Less(t, warningIndex, titleIndex)
+		assert.Contains(t, view, "destination URL, destination token")
+	})
+
+	t.Run("hides warning when configuration is ready", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.Update(configMsg{configuration: &workflow.Configuration{
+			SourceURL:      "https://source.example",
+			SourceTokenSet: true,
+			TargetURL:      "https://target.example",
+			TargetTokenSet: true,
+		}})
+		model = updated.(*Model)
+
+		assert.NotContains(t, model.View(), "Configuration incomplete")
+	})
+
 	t.Run("opens source migration from list", func(t *testing.T) {
 		status := "in_progress"
 		svc := &fakeService{

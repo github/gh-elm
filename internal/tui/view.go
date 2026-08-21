@@ -83,8 +83,39 @@ func (m *Model) frame(title, body string) string {
 	}
 	contentWidth := max(20, width-4)
 	header := m.styles.Info.Bold(true).Render(title)
+	if warning := m.configurationWarning(); warning != "" {
+		header = m.styles.Warning.Bold(true).Render("⚠ Configuration incomplete") + "\n" +
+			m.styles.Warning.Render(warning) + "\n\n" + header
+	}
 	content := lipgloss.NewStyle().Width(contentWidth).Render(body)
 	return lipgloss.NewStyle().Padding(1, 2).Width(width).Render(header + "\n\n" + content)
+}
+
+func (m *Model) configurationWarning() string {
+	if m.configurationErr != nil {
+		return "Unable to load configuration: " + m.configurationErr.Error()
+	}
+	if m.configuration == nil {
+		return ""
+	}
+
+	var missing []string
+	if m.configuration.SourceURL == "" {
+		missing = append(missing, "source URL")
+	}
+	if !m.configuration.SourceTokenSet {
+		missing = append(missing, "source token")
+	}
+	if m.configuration.TargetURL == "" {
+		missing = append(missing, "destination URL")
+	}
+	if !m.configuration.TargetTokenSet {
+		missing = append(missing, "destination token")
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return "Missing " + strings.Join(missing, ", ") + ". Open Configuration to finish setup."
 }
 
 func (m *Model) menu(items []string) string {
