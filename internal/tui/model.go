@@ -306,10 +306,16 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.sourceAuthErr = nil
 			m.targetAuthChecked = false
 			m.targetAuthErr = nil
-			return m, tea.Batch(
-				m.checkSourceAuthenticationCmd(msg.generation),
-				m.checkTargetAuthenticationCmd(msg.generation),
-			)
+			sourceURL, sourceTokenSet := effectiveSourceConfiguration(msg.configuration)
+			targetURL, targetTokenSet := effectiveTargetConfiguration(msg.configuration)
+			var commands []tea.Cmd
+			if validHTTPURL(sourceURL) && sourceTokenSet {
+				commands = append(commands, m.checkSourceAuthenticationCmd(msg.generation))
+			}
+			if validHTTPURL(targetURL) && targetTokenSet {
+				commands = append(commands, m.checkTargetAuthenticationCmd(msg.generation))
+			}
+			return m, tea.Batch(commands...)
 		}
 	case sourceAuthenticationMsg:
 		if msg.generation != m.configGeneration {

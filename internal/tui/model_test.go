@@ -136,6 +136,36 @@ func TestModel(t *testing.T) {
 		assert.Contains(t, view, "destination URL, destination token")
 	})
 
+	t.Run("hides authentication rows until prerequisites are configured", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.configuration = &workflow.Configuration{
+			SourceURL: "https://source.example",
+			TargetURL: "https://target.example",
+		}
+
+		view := model.configurationView()
+
+		assert.NotContains(t, view, "Source authentication")
+		assert.NotContains(t, view, "Destination authentication")
+		assert.Contains(t, view, "Source token")
+		assert.Contains(t, view, "Destination token")
+	})
+
+	t.Run("shows authentication rows when prerequisites are configured", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.configuration = &workflow.Configuration{
+			SourceURL:      "https://source.example",
+			SourceTokenSet: true,
+			TargetURL:      "https://target.example",
+			TargetTokenSet: true,
+		}
+
+		view := model.configurationView()
+
+		assert.Contains(t, view, "Source authentication")
+		assert.Contains(t, view, "Destination authentication")
+	})
+
 	t.Run("hides warning when configuration is ready", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		updated, _ := model.Update(configMsg{configuration: &workflow.Configuration{

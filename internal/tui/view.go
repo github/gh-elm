@@ -337,10 +337,15 @@ func (m *Model) configurationView() string {
 		builder.WriteString(m.styles.Bold.Render("Preflight") + "\n")
 		fmt.Fprintf(&builder, "  %s Source URL\n", m.checkMark(sourceURL != "" && validHTTPURL(sourceURL)))
 		fmt.Fprintf(&builder, "  %s Source token\n", m.checkMark(sourceTokenSet))
-		fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
+		if validHTTPURL(sourceURL) && sourceTokenSet {
+			fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
+		}
 		fmt.Fprintf(&builder, "  %s Destination URL\n", m.checkMark(targetURL != "" && validHTTPURL(targetURL)))
 		fmt.Fprintf(&builder, "  %s Destination token\n", m.checkMark(targetTokenSet))
-		fmt.Fprintf(&builder, "  %s Destination authentication%s\n\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
+		if validHTTPURL(targetURL) && targetTokenSet {
+			fmt.Fprintf(&builder, "  %s Destination authentication%s\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
+		}
+		builder.WriteString("\n")
 
 		builder.WriteString("Stored configuration\n")
 		fmt.Fprintf(&builder, "Source URL:   %s\n", orUnset(configuration.SourceURL))
