@@ -22,7 +22,7 @@ import (
 // migration nodes — GET /enterprise/migration/:id/nodes.
 func newResourcesCmd() *cobra.Command {
 	var (
-		migrationID int64
+		migrationID string
 		repository  string
 		originFlag  string
 		stateFlag   string
@@ -30,12 +30,14 @@ func newResourcesCmd() *cobra.Command {
 		asJSON      bool
 		targetURL   string
 		targetToken string
+		source      sourceOptions
 	)
 
 	cmd := &cobra.Command{
 		Use:   "resources [TARGET-MIGRATION-ID] [REPOSITORY]",
 		Short: "List a migration's resources from the target",
 		Long: "List a migration's resources from the target (GitHub with Data Residency) REST API.\n" +
+			"The migration identifier may be a numeric target ID or a source migration UUID.\n" +
 			"A repository filter is currently required. Filter further by state and origin.\n" +
 			"When --origin is omitted, resources\n" +
 			"from both the backfill and live-update origins are listed.",
@@ -57,7 +59,9 @@ func newResourcesCmd() *cobra.Command {
 				return errors.New("positional target migration ID or repository duplicates a value already supplied by flag")
 			}
 
-			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			resolvedMigrationID, err := resolveTargetMigrationID(
+				cmd.Context(), positionalID, migrationID, cmd.Flags().Changed("migration-id"), source,
+			)
 			if err != nil {
 				return err
 			}
@@ -139,7 +143,7 @@ func newResourcesCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVarP(&repository, "repository", "R", "", "Repository in owner/repo format (alternative to the positional argument; currently required).")
 	cmd.Flags().StringVar(&originFlag, "origin", "", "Filter by origin: backfill or live-update (default: both).")
 	cmd.Flags().StringVar(&stateFlag, "state", "", "Filter by state: pending, processed, failed, or eligible (default: all).")
@@ -147,6 +151,7 @@ func newResourcesCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output resources as newline-delimited JSON.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
+	addSourceFlags(cmd, &source)
 	return cmd
 }
 

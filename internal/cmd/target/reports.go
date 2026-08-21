@@ -23,7 +23,8 @@ func newReportCmd() *cobra.Command {
 		Use:   "report",
 		Short: "Request, check, and download a migration's node reports",
 		Long: "Work with a migration's node reports on the target (GitHub with Data Residency) side:\n" +
-			"`request` starts one, `status` polls it, and `url` returns a signed download URL.",
+			"`request` starts one, `status` polls it, and `url` returns a signed download URL.\n" +
+			"Report commands accept either a numeric target ID or a source migration UUID.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -40,12 +41,13 @@ func newReportCmd() *cobra.Command {
 // report for a migration. POST /enterprise/migration/:id/reports.
 func newReportRequestCmd() *cobra.Command {
 	var (
-		migrationID int64
+		migrationID string
 		stageFlag   string
 		stateFlag   string
 		asJSON      bool
 		targetURL   string
 		targetToken string
+		source      sourceOptions
 	)
 
 	cmd := &cobra.Command{
@@ -62,7 +64,9 @@ func newReportRequestCmd() *cobra.Command {
 			if len(args) == 1 {
 				positionalID = args[0]
 			}
-			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			resolvedMigrationID, err := resolveTargetMigrationID(
+				cmd.Context(), positionalID, migrationID, cmd.Flags().Changed("migration-id"), source,
+			)
 			if err != nil {
 				return err
 			}
@@ -88,12 +92,13 @@ func newReportRequestCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage the report should cover: backfill or live-update (required).")
 	cmd.Flags().StringVar(&stateFlag, "state", "all", "Node states the report should cover: migrated, unmigrated, or all.")
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
+	addSourceFlags(cmd, &source)
 	_ = cmd.MarkFlagRequired("stage")
 
 	return cmd
@@ -110,11 +115,12 @@ func newReportCreateCmd() *cobra.Command {
 // status of a node report. GET /enterprise/migration/:id/reports/status.
 func newReportStatusCmd() *cobra.Command {
 	var (
-		migrationID int64
+		migrationID string
 		stageFlag   string
 		asJSON      bool
 		targetURL   string
 		targetToken string
+		source      sourceOptions
 	)
 
 	cmd := &cobra.Command{
@@ -128,7 +134,9 @@ func newReportStatusCmd() *cobra.Command {
 			if len(args) == 1 {
 				positionalID = args[0]
 			}
-			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			resolvedMigrationID, err := resolveTargetMigrationID(
+				cmd.Context(), positionalID, migrationID, cmd.Flags().Changed("migration-id"), source,
+			)
 			if err != nil {
 				return err
 			}
@@ -150,11 +158,12 @@ func newReportStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live-update (required).")
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
+	addSourceFlags(cmd, &source)
 	_ = cmd.MarkFlagRequired("stage")
 
 	return cmd
@@ -164,11 +173,12 @@ func newReportStatusCmd() *cobra.Command {
 // signed download URL for a finished report. GET /enterprise/migration/:id/reports/url.
 func newReportURLCmd() *cobra.Command {
 	var (
-		migrationID int64
+		migrationID string
 		stageFlag   string
 		asJSON      bool
 		targetURL   string
 		targetToken string
+		source      sourceOptions
 	)
 
 	cmd := &cobra.Command{
@@ -184,7 +194,9 @@ func newReportURLCmd() *cobra.Command {
 			if len(args) == 1 {
 				positionalID = args[0]
 			}
-			resolvedMigrationID, err := resolveTargetMigrationID(positionalID, migrationID, cmd.Flags().Changed("migration-id"))
+			resolvedMigrationID, err := resolveTargetMigrationID(
+				cmd.Context(), positionalID, migrationID, cmd.Flags().Changed("migration-id"), source,
+			)
 			if err != nil {
 				return err
 			}
@@ -206,11 +218,12 @@ func newReportURLCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Int64VarP(&migrationID, "migration-id", "m", 0, "Target migration ID (alternative to the positional argument).")
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
 	cmd.Flags().StringVar(&stageFlag, "stage", "", "Migration stage of the report: backfill or live-update (required).")
 	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
+	addSourceFlags(cmd, &source)
 	_ = cmd.MarkFlagRequired("stage")
 
 	return cmd

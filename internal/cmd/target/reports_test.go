@@ -33,6 +33,24 @@ func TestRenderReportSurfacesWriterError(t *testing.T) {
 }
 
 func TestReportRequest(t *testing.T) {
+	t.Run("resolves a source UUID before requesting a target report", func(t *testing.T) {
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"migration":{"target_migration_id":74}}`))
+		}))
+		defer source.Close()
+
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/enterprise/migration/74/reports", r.URL.Path)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer target.Close()
+
+		runReports(t, "report", "request", testSourceMigrationUUID, "--stage", "backfill",
+			"--source-url", source.URL, "--source-token", "source-tok",
+			"--target-url", target.URL, "--target-token", "target-tok")
+	})
+
 	t.Run("requests a report and prints human-readable confirmation", func(t *testing.T) {
 		var gotStage, gotState string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -113,8 +113,10 @@ gh elm target resources "$TARGET_ID" octo-org/octo-repo
 Migration resources — `gh elm target resources`:
 
 ```sh
-# Resources for a repository (both backfill and live-update origins)
+# Resources for a repository (both backfill and live-update origins).
+# Target commands accept either the numeric target ID or the source UUID.
 gh elm target resources 42 octo-org/octo-repo
+gh elm target resources 897930cf-51cb-4e2d-9806-6357a6e66b55 octo-org/octo-repo
 
 # Filter further by origin and state
 gh elm target resources 42 octo-org/octo-repo --origin backfill
