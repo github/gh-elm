@@ -39,7 +39,7 @@ func TestRun(t *testing.T) {
 		assert.Contains(t, output.String(), "\x1b[")
 	})
 
-	t.Run("renders every raw JSON response", func(t *testing.T) {
+	t.Run("renders every formatted JSON response", func(t *testing.T) {
 		var output bytes.Buffer
 		require.NoError(t, run(&output, true))
 

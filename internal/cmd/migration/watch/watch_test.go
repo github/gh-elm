@@ -120,16 +120,18 @@ func TestView(t *testing.T) {
 
 		out := m.View()
 		for _, want := range []string{
-			"acme/web → acme-cloud/web", // header
-			"Backfill",                  // active phase name
-			"50 processed / 100 sent",   // progress bar line
-			"Preflight",                 // preflight section
-			"disk space: ok",            // parsed preflight message
-			"hello world",               // generic message
-			"Refreshing every 2s",       // footer
+			"11112222-3333-4444-5555-666677778888", // full migration ID
+			"acme/web → acme-cloud/web",            // header
+			"Backfill",                             // active phase name
+			"50 processed / 100 sent",              // progress bar line
+			"Preflight",                            // preflight section
+			"disk space: ok",                       // parsed preflight message
+			"hello world",                          // generic message
+			"Refreshing every 2s",                  // footer
 		} {
 			assert.Contains(t, out, want)
 		}
+		assert.NotContains(t, out, "11112222-3333...")
 	})
 
 	t.Run("loading", func(t *testing.T) {

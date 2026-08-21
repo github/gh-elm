@@ -225,7 +225,7 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetVisibility, "target-visibility", "internal", "Target repository visibility (private or internal).")
 	cmd.Flags().BoolVar(&start, "start", false, "Automatically start the migration after creating it.")
 	cmd.Flags().BoolVar(&watch, "watch", false, "After creating and starting, enter live watch mode (requires --start).")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
@@ -280,7 +280,7 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status [MIGRATION-ID]",
 		Short: "Get the status and details of a migration",
 		Long: "Retrieve combined status, progress, cutover readiness, expiration, and timing\n" +
-			"for a migration. Human-readable by default; add --json for the raw API response.",
+			"for a migration. Human-readable by default; add --json for the formatted API response.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
@@ -307,7 +307,7 @@ func newStatusCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to get status for (alternative to the positional argument).")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
@@ -381,7 +381,7 @@ func newListCmd() *cobra.Command {
 			"Use --status to filter (created, queued, in_progress, paused, completed, failed,\n" +
 			"terminated) or --status=all to list migrations in every state. A bare list first\n" +
 			"checks in-progress migrations and falls back to created migrations when none are\n" +
-			"found. Human-readable by default; add --json for the raw API response.",
+			"found. Human-readable by default; add --json for the formatted API response.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if status != "" {
@@ -419,7 +419,7 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (all, created, queued, in_progress, paused, completed, failed, terminated). Defaults to in_progress.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 0, "Number of migrations per page (1-100).")
 	cmd.Flags().StringVar(&after, "after", "", "Cursor for pagination (from next_cursor in a previous response).")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd
@@ -573,7 +573,7 @@ func newRevertCutoverCmd() *cobra.Command {
 		Short: "Revert the effects of a cutover so the source repository can be migrated again",
 		Long: "Revert the effects of a cutover, unarchiving the source repository and\n" +
 			"terminating any cutover or migration still in progress so the source repository\n" +
-			"can be migrated again. Human-readable by default; add --json for the raw API response.",
+			"can be migrated again. Human-readable by default; add --json for the formatted API response.",
 		Example: "  gh elm migration cutover revert 897930cf-51cb-4e2d-9806-6357a6e66b55",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -597,7 +597,7 @@ func newRevertCutoverCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to revert cutover for (alternative to the positional argument).")
-	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's raw JSON response instead of human-readable text.")
+	cmd.Flags().BoolVarP(&asJSON, "json", "j", false, "Output the API's formatted JSON response instead of human-readable text.")
 	sourceFlags(cmd)
 
 	return cmd

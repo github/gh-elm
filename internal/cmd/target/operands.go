@@ -3,25 +3,92 @@ package target
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/github/gh-elm/internal/config"
+	"github.com/github/gh-elm/internal/elmapi"
+	"github.com/github/gh-elm/internal/endpoints"
 )
 
-func resolveTargetMigrationID(positional string, flagValue int64, flagChanged bool) (int64, error) {
+var canonicalUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+type targetMigrationIDOptions struct {
+	value       string
+	sourceURL   string
+	sourceToken string
+}
+
+func (o *targetMigrationIDOptions) addFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&o.value, "migration-id", "m", "", "Target migration ID or source migration UUID (alternative to the positional argument).")
+	cmd.Flags().StringVar(&o.sourceURL, "source-url", "", "Override the source (GHES) API base URL when resolving a source migration UUID.")
+	cmd.Flags().StringVar(&o.sourceToken, "source-token", "", "Override the source (GHES) API token when resolving a source migration UUID.")
+}
+
+func (o *targetMigrationIDOptions) resolve(cmd *cobra.Command, positional string) (int64, error) {
+	flagChanged := cmd.Flags().Changed("migration-id")
 	if positional != "" && flagChanged {
 		return 0, errors.New("TARGET-MIGRATION-ID cannot be provided both positionally and with --migration-id")
 	}
-	if positional != "" {
-		value, err := strconv.ParseInt(positional, 10, 64)
-		if err != nil || value <= 0 {
-			return 0, fmt.Errorf("invalid TARGET-MIGRATION-ID %q: must be a positive integer", positional)
-		}
-		return value, nil
+	value := strings.TrimSpace(positional)
+	if flagChanged {
+		value = strings.TrimSpace(o.value)
 	}
-	if !flagChanged || flagValue <= 0 {
+	if value == "" {
 		return 0, errors.New("TARGET-MIGRATION-ID is required")
 	}
-	return flagValue, nil
+
+	if targetID, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if targetID <= 0 {
+			return 0, fmt.Errorf("invalid TARGET-MIGRATION-ID %q: must be a positive integer or canonical UUID", value)
+		}
+		return targetID, nil
+	}
+	if !canonicalUUIDPattern.MatchString(value) {
+		return 0, fmt.Errorf("invalid TARGET-MIGRATION-ID %q: must be a positive integer or canonical UUID", value)
+	}
+
+	resolver, err := endpoints.NewResolver()
+	if err != nil {
+		return 0, err
+	}
+	ep, err := resolver.Source(o.sourceURL, o.sourceToken)
+	if err != nil {
+		return 0, err
+	}
+	if ep.URL == "" {
+		return 0, fmt.Errorf("resolving source migration UUID %s requires a source URL; run `gh elm config`, set %s, or pass --source-url", value, config.EnvSourceURL)
+	}
+	if ep.Token == "" {
+		return 0, fmt.Errorf("resolving source migration UUID %s requires a source token; run `gh elm config`, set %s, or pass --source-token", value, config.EnvSourceToken)
+	}
+
+	client := elmapi.NewClient(ep.URL, ep.Token)
+	detail, err := client.GetMigrationDetail(cmd.Context(), value)
+	if err != nil {
+		return 0, annotateSourceLookupError(err, ep.URL)
+	}
+	if detail.Migration == nil {
+		return 0, fmt.Errorf("source migration %s returned no migration record", value)
+	}
+	if detail.Migration.TargetMigrationID <= 0 {
+		return 0, fmt.Errorf("source migration %s does not have a target migration ID yet", value)
+	}
+	return detail.Migration.TargetMigrationID, nil
+}
+
+func annotateSourceLookupError(err error, sourceURL string) error {
+	var httpErr *elmapi.HTTPError
+	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
+		return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s; "+
+			"check the source token with `gh elm config show`. Note the %s and %s environment variables override stored config",
+			httpErr.StatusCode, sourceURL, httpErr.Message, config.EnvSourceURL, config.EnvSourceToken)
+	}
+	return err
 }
 
 func resolveStringOperand(name, positional, flagName, flagValue string, flagChanged bool) (string, error) {

@@ -246,7 +246,7 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
-		assert.Contains(t, result.Stdout, `"source":"stored"`)
+		assert.Contains(t, result.Stdout, `"source": "stored"`)
 		assert.Empty(t, result.Stderr)
 	})
 
@@ -265,7 +265,7 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
-		assert.Contains(t, result.Stdout, `"source":"environment"`)
+		assert.Contains(t, result.Stdout, `"source": "environment"`)
 		assert.Empty(t, result.Stderr)
 	})
 
@@ -288,7 +288,7 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 		)
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
-		assert.Contains(t, result.Stdout, `"source":"flag"`)
+		assert.Contains(t, result.Stdout, `"source": "flag"`)
 		assert.Empty(t, result.Stderr)
 	})
 

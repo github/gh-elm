@@ -2,6 +2,7 @@
 package render
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,14 +63,21 @@ func Fields(fields ...Field) string {
 	return strings.TrimSuffix(output.String(), "\n")
 }
 
-// WriteRawJSON writes an API JSON document followed by a newline.
+// WriteRawJSON writes an API JSON document with two-space indentation followed
+// by a newline.
 func WriteRawJSON(out io.Writer, raw json.RawMessage) error {
+	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return nil
 	}
-	if _, err := out.Write(raw); err != nil {
-		return err
+
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, raw, "", "  "); err != nil {
+		return fmt.Errorf("formatting JSON response: %w", err)
 	}
-	_, err := fmt.Fprintln(out)
-	return err
+	formatted.WriteByte('\n')
+	if _, err := out.Write(formatted.Bytes()); err != nil {
+		return fmt.Errorf("writing JSON response: %w", err)
+	}
+	return nil
 }

@@ -166,7 +166,7 @@ var fixtures = []struct {
 }
 
 func main() {
-	asJSON := flag.Bool("json", false, "Show raw JSON responses instead of human-readable output.")
+	asJSON := flag.Bool("json", false, "Show formatted JSON responses instead of human-readable output.")
 	forceColor := flag.Bool("color", false, "Force ANSI color even when output is captured.")
 	flag.Parse()
 

@@ -12,6 +12,23 @@ import (
 )
 
 func TestResources(t *testing.T) {
+	t.Run("resolves a source UUID before listing target resources", func(t *testing.T) {
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"migration":{"target_migration_id":73}}`))
+		}))
+		defer source.Close()
+
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/enterprise/migration/73/nodes", r.URL.Path)
+			_, _ = w.Write([]byte(`{"nodes":[],"after":""}`))
+		}))
+		defer target.Close()
+
+		runResources(t, testSourceMigrationUUID, "octo/repo", "--origin", "backfill",
+			"--source-url", source.URL, "--source-token", "source-tok",
+			"--target-url", target.URL, "--target-token", "target-tok")
+	})
+
 	t.Run("lists resources across both origins in human-readable form", func(t *testing.T) {
 		var origins []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

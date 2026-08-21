@@ -14,6 +14,7 @@ import (
 
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/creds"
+	"github.com/github/gh-elm/internal/endpoints"
 	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
@@ -156,7 +157,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 					Description("The destination the repositories are migrating to."),
 				huh.NewInput().
 					Title("Target URL").
-					Placeholder("https://api.tenant.ghe.com").
+					Placeholder("https://tenant.ghe.com").
 					Value(&targetURL).
 					Validate(validateURL),
 				huh.NewInput().
@@ -175,7 +176,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 
 	cfg.SourceURL = strings.TrimSpace(sourceURL)
 	if configureTarget {
-		cfg.TargetURL = strings.TrimSpace(targetURL)
+		cfg.TargetURL = endpoints.NormalizeTargetAPIURL(targetURL)
 	}
 	if err := cfg.Save(); err != nil {
 		return err

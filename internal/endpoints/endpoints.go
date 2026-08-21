@@ -9,6 +9,7 @@
 package endpoints
 
 import (
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -57,9 +58,15 @@ func (r *Resolver) Source(flagURL, flagToken string) (Endpoint, error) {
 }
 
 // Target resolves the target (GitHub with Data Residency) endpoint. flagURL and flagToken take
-// highest precedence; pass "" when they are not set.
+// highest precedence; pass "" when they are not set. The resolved URL accepts
+// either the target web hostname or its api. hostname.
 func (r *Resolver) Target(flagURL, flagToken string) (Endpoint, error) {
-	return r.resolve(flagURL, flagToken, config.EnvTargetURL, config.EnvTargetToken, r.cfg.TargetURL, creds.TargetToken)
+	ep, err := r.resolve(flagURL, flagToken, config.EnvTargetURL, config.EnvTargetToken, r.cfg.TargetURL, creds.TargetToken)
+	if err != nil {
+		return ep, err
+	}
+	ep.URL = NormalizeTargetAPIURL(ep.URL)
+	return ep, nil
 }
 
 func (r *Resolver) resolve(flagURL, flagToken, envURL, envToken, storedURL, tokenKey string) (Endpoint, error) {
@@ -119,5 +126,27 @@ func ensureGHESRESTBase(raw string) string {
 	if u.Path == "" || u.Path == "/" {
 		u.Path = "/api/v3"
 	}
+	return u.String()
+}
+
+// NormalizeTargetAPIURL turns a target web hostname into its API hostname.
+// Existing API hostnames and local development endpoints are left unchanged.
+func NormalizeTargetAPIURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+
+	hostname := u.Hostname()
+	if hostname == "" || strings.EqualFold(hostname, "localhost") || net.ParseIP(hostname) != nil {
+		return raw
+	}
+	firstLabel, _, _ := strings.Cut(hostname, ".")
+	if strings.EqualFold(firstLabel, "api") {
+		return raw
+	}
+
+	u.Host = "api." + u.Host
 	return u.String()
 }
