@@ -330,13 +330,13 @@ func (m *Model) configurationView() string {
 	if configuration := m.configuration; configuration != nil {
 		sourceURL, sourceTokenSet := effectiveSourceConfiguration(configuration)
 		targetURL, targetTokenSet := effectiveTargetConfiguration(configuration)
-		builder.WriteString("Preflight\n")
-		fmt.Fprintf(&builder, "  %s Source URL\n", checkMark(sourceURL != "" && validHTTPURL(sourceURL)))
-		fmt.Fprintf(&builder, "  %s Source token\n", checkMark(sourceTokenSet))
-		fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
-		fmt.Fprintf(&builder, "  %s Destination URL\n", checkMark(targetURL != "" && validHTTPURL(targetURL)))
-		fmt.Fprintf(&builder, "  %s Destination token\n", checkMark(targetTokenSet))
-		fmt.Fprintf(&builder, "  %s Destination authentication%s\n\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
+		builder.WriteString(m.styles.Bold.Render("Preflight") + "\n")
+		fmt.Fprintf(&builder, "  %s Source URL\n", m.checkMark(sourceURL != "" && validHTTPURL(sourceURL)))
+		fmt.Fprintf(&builder, "  %s Source token\n", m.checkMark(sourceTokenSet))
+		fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
+		fmt.Fprintf(&builder, "  %s Destination URL\n", m.checkMark(targetURL != "" && validHTTPURL(targetURL)))
+		fmt.Fprintf(&builder, "  %s Destination token\n", m.checkMark(targetTokenSet))
+		fmt.Fprintf(&builder, "  %s Destination authentication%s\n\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
 
 		builder.WriteString("Stored configuration\n")
 		fmt.Fprintf(&builder, "Source URL:   %s\n", orUnset(configuration.SourceURL))
@@ -372,26 +372,26 @@ func validHTTPURL(value string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-func checkMark(ok bool) string {
+func (m *Model) checkMark(ok bool) string {
 	if ok {
-		return "✓"
+		return m.styles.Success.Render("✓")
 	}
-	return "✗"
+	return m.styles.Failure.Render("✗")
 }
 
 func (m *Model) authenticationMark(checked bool, err error) string {
 	if !checked {
 		return m.styles.Muted.Render("…")
 	}
-	return checkMark(err == nil)
+	return m.checkMark(err == nil)
 }
 
-func authenticationDetail(checked bool, err error) string {
+func (m *Model) authenticationDetail(checked bool, err error) string {
 	if !checked {
-		return " (checking)"
+		return m.styles.Muted.Render(" (checking)")
 	}
 	if err != nil {
-		return " (" + err.Error() + ")"
+		return m.styles.Failure.Render(" (" + err.Error() + ")")
 	}
 	return ""
 }

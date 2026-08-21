@@ -163,6 +163,14 @@ func TestModel(t *testing.T) {
 		assert.Contains(t, model.View(), "Failed source authentication")
 	})
 
+	t.Run("colors preflight status marks", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		assert.Equal(t, model.styles.Success.Render("✓"), model.checkMark(true))
+		assert.Equal(t, model.styles.Failure.Render("✗"), model.checkMark(false))
+		assert.Equal(t, model.styles.Muted.Render("…"), model.authenticationMark(false, nil))
+	})
+
 	t.Run("opens source migration from list", func(t *testing.T) {
 		status := "in_progress"
 		svc := &fakeService{
