@@ -57,14 +57,9 @@ func (m Model) renderHeader() string {
 	sourceNwo := info.SourceOrganizationLogin + "/" + info.SourceRepositoryName
 	targetNwo := info.TargetOrganizationLogin + "/" + info.TargetRepositoryName
 
-	id := m.migrationID
-	if len(id) > 12 {
-		id = id[:12] + "..."
-	}
-
 	line1 := fmt.Sprintf("%s  %s  %s → %s",
 		m.styles.Info.Render("Migration"),
-		m.styles.Bold.Render(id),
+		m.styles.Bold.Render(m.migrationID),
 		sourceNwo,
 		targetNwo,
 	)
