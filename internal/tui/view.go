@@ -13,6 +13,8 @@ import (
 	"github.com/github/gh-elm/internal/workflow"
 )
 
+const homeTitle = "GitHub Enterprise\nLive migrations"
+
 // View implements tea.Model.
 func (m *Model) View() string {
 	if m.width > 0 && (m.width < 48 || m.height < 12) {
@@ -22,7 +24,7 @@ func (m *Model) View() string {
 	var title, body, help string
 	switch m.screen {
 	case screenHome:
-		title = "Enterprise Live Migrations"
+		title = homeTitle
 		body = m.menu([]string{
 			"Migrations",
 			"Create migration",
@@ -109,6 +111,10 @@ func (m *Model) frame(title, body string) string {
 	}
 	contentWidth := max(20, width-4)
 	header := m.styles.Info.Bold(true).Render(title)
+	if title == homeTitle {
+		header = m.styles.Primary.Bold(true).Render("GitHub Enterprise") + "\n" +
+			m.styles.Success.Render("Live migrations")
+	}
 	if warning := m.configurationWarning(); warning != "" {
 		header = m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
 			m.styles.Warning.Render(warning) + "\n\n" + header

@@ -186,6 +186,8 @@ type Model struct {
 	targetDetail     *elmapi.TargetMigration
 	targetParent     screen
 	repository       string
+	targetListCancel context.CancelFunc
+	targetListGen    uint64
 
 	configuration     *workflow.Configuration
 	configurationErr  error
@@ -242,9 +244,15 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			m.cancelTargetListLoad()
 			return m, tea.Quit
 		}
 		if m.loading {
+			if m.screen == screenTargetList &&
+				(key.Matches(msg, keys.Back) || key.Matches(msg, keys.Quit)) {
+				m.cancelTargetListLoad()
+				return m.back()
+			}
 			return m, nil
 		}
 		return m.updateKey(msg)
@@ -276,6 +284,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return watchTickMsg{} })
 		}
 	case targetListMsg:
+		if msg.generation != m.targetListGen {
+			return m, nil
+		}
+		m.targetListCancel = nil
 		m.loading = false
 		m.err = msg.err
 		if msg.err == nil {
@@ -590,7 +602,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			return m, command
 		case 4:
 			m.screen, m.loading, m.err = screenTargetList, true, nil
-			command := m.loadTargetListCmd()
+			command := m.startTargetListLoad()
 			return m, command
 		case 5:
 			return m, tea.Quit
@@ -669,7 +681,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 		return m, command
 	case screenTargetList:
 		m.loading = true
-		command := m.loadTargetListCmd()
+		command := m.startTargetListLoad()
 		return m, command
 	case screenTargetDetail:
 		m.loading = true
@@ -1566,6 +1578,7 @@ type sourceDetailMsg struct {
 
 type targetListMsg struct {
 	migrations []elmapi.TargetMigration
+	generation uint64
 	err        error
 }
 
@@ -1628,11 +1641,25 @@ func (m *Model) loadSourceDetailCmd() tea.Cmd {
 	}
 }
 
-func (m *Model) loadTargetListCmd() tea.Cmd {
+func (m *Model) startTargetListLoad() tea.Cmd {
+	m.cancelTargetListLoad()
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.targetListCancel = cancel
+	generation := m.targetListGen
 	return func() tea.Msg {
-		migrations, err := m.service.ListTargetMigrations(m.ctx, "", 0)
-		return targetListMsg{migrations: migrations, err: err}
+		migrations, err := m.service.ListTargetMigrations(ctx, "", 0)
+		return targetListMsg{migrations: migrations, generation: generation, err: err}
 	}
+}
+
+func (m *Model) cancelTargetListLoad() {
+	if m.targetListCancel == nil {
+		return
+	}
+	m.targetListCancel()
+	m.targetListCancel = nil
+	m.targetListGen++
+	m.loading = false
 }
 
 func (m *Model) loadTargetDetailCmd() tea.Cmd {

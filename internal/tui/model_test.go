@@ -129,11 +129,55 @@ func TestModel(t *testing.T) {
 
 		view := model.View()
 		warningIndex := strings.Index(view, "Configuration not ready")
-		titleIndex := strings.Index(view, "Enterprise Live Migrations")
+		titleIndex := strings.Index(view, "GitHub Enterprise")
 		require.NotEqual(t, -1, warningIndex)
 		require.NotEqual(t, -1, titleIndex)
 		assert.Less(t, warningIndex, titleIndex)
 		assert.Contains(t, view, "destination URL, destination token")
+	})
+
+	t.Run("styles the home headline", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		view := model.View()
+
+		assert.Contains(t, view, model.styles.Primary.Bold(true).Render("GitHub Enterprise"))
+		assert.Contains(t, view, model.styles.Success.Render("Live migrations"))
+	})
+
+	t.Run("cancels a destination migration load and returns home", func(t *testing.T) {
+		started := make(chan struct{})
+		service := &fakeService{
+			listTargetMigrations: func(ctx context.Context) ([]elmapi.TargetMigration, error) {
+				close(started)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+		}
+		model := New(t.Context(), service)
+		model.cursor = 4
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		require.Equal(t, screenTargetList, model.screen)
+		require.True(t, model.loading)
+
+		response := make(chan tea.Msg)
+		go func() {
+			response <- command()
+		}()
+		<-started
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		model = updated.(*Model)
+		assert.Equal(t, screenHome, model.screen)
+		assert.False(t, model.loading)
+
+		updated, _ = model.Update(<-response)
+		model = updated.(*Model)
+		assert.Equal(t, screenHome, model.screen)
+		assert.NoError(t, model.err)
 	})
 
 	t.Run("hides authentication rows until prerequisites are configured", func(t *testing.T) {
@@ -629,14 +673,15 @@ func actionIDs(actions []actionItem) []string {
 }
 
 type fakeService struct {
-	sourceMigrations    []elmapi.MigrationSummary
-	sourceRepositories  []string
-	sourceDetail        *elmapi.MigrationDetail
-	sourceCreateInput   workflow.SourceCreateInput
-	targetOrganizations []string
-	reclaimCalls        int
-	sourceAuthErr       error
-	targetAuthErr       error
+	sourceMigrations     []elmapi.MigrationSummary
+	sourceRepositories   []string
+	sourceDetail         *elmapi.MigrationDetail
+	sourceCreateInput    workflow.SourceCreateInput
+	targetOrganizations  []string
+	listTargetMigrations func(context.Context) ([]elmapi.TargetMigration, error)
+	reclaimCalls         int
+	sourceAuthErr        error
+	targetAuthErr        error
 }
 
 func (f *fakeService) ListSourceMigrations(context.Context, string) ([]elmapi.MigrationSummary, error) {
@@ -680,7 +725,10 @@ func (f *fakeService) RevertSourceCutover(context.Context, workflow.SourceMigrat
 	return &elmapi.RevertCutoverResponse{}, nil
 }
 
-func (f *fakeService) ListTargetMigrations(context.Context, string, int) ([]elmapi.TargetMigration, error) {
+func (f *fakeService) ListTargetMigrations(ctx context.Context, _ string, _ int) ([]elmapi.TargetMigration, error) {
+	if f.listTargetMigrations != nil {
+		return f.listTargetMigrations(ctx)
+	}
 	return nil, nil
 }
 
