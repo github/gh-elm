@@ -54,7 +54,7 @@ func TestModel(t *testing.T) {
 		model = updated.(*Model)
 		assert.Equal(t, workflow.SourceMigrationID("source-1"), model.sourceID)
 		assert.Equal(t, workflow.TargetMigrationID(42), model.targetID)
-		assert.Contains(t, model.View(), "Open linked target migration")
+		assert.Contains(t, model.View(), "Open destination details")
 
 		model.cursor = len(sourceActions) - 1
 		updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -112,7 +112,19 @@ func TestModel(t *testing.T) {
 		model.height = 24
 		model.cursor = len(sourceActions) - 1
 
-		assert.Contains(t, model.View(), "Open linked target migration")
+		assert.Contains(t, model.View(), "Open destination details")
+	})
+
+	t.Run("home exposes migration creation", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		assert.Contains(t, model.View(), "Create migration")
+
+		model.cursor = 1
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+
+		assert.Equal(t, screenForm, model.screen)
+		assert.Equal(t, "Create migration", model.form.title)
 	})
 
 	t.Run("destructive source action requires confirmation", func(t *testing.T) {

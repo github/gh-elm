@@ -20,27 +20,28 @@ func (m *Model) View() string {
 	case screenHome:
 		title = "Enterprise Live Migrations"
 		body = m.menu([]string{
-			"Source migrations",
-			"Target migrations",
+			"Migrations",
+			"Create migration",
 			"Target mannequins",
 			"Configuration",
+			"Advanced destination operations",
 			"Quit",
 		})
 		help = "↑/↓ move • enter select • q quit"
 	case screenSourceList:
-		title = "Source migrations"
+		title = "Migrations"
 		body = m.sourceListView()
 		help = "↑/↓ move • enter open • n new • m manual ID • r refresh • esc back"
 	case screenSourceDetail:
-		title = fmt.Sprintf("Source migration %s", m.sourceID)
+		title = fmt.Sprintf("Migration %s", m.sourceID)
 		body = m.sourceDetailView()
 		help = "↑/↓ move • enter action • r refresh • esc back"
 	case screenTargetList:
-		title = "Target migrations"
+		title = "Advanced destination migrations"
 		body = m.targetListView()
 		help = "↑/↓ move • enter open • n advanced create • m manual ID • r refresh • esc back"
 	case screenTargetDetail:
-		title = fmt.Sprintf("Target migration %d", m.targetID)
+		title = fmt.Sprintf("Destination migration %d (advanced)", m.targetID)
 		body = m.targetDetailView()
 		help = "↑/↓ move • enter action • r refresh • esc back"
 	case screenMannequins:
@@ -96,7 +97,7 @@ func (m *Model) menu(items []string) string {
 
 func (m *Model) sourceListView() string {
 	if len(m.sourceMigrations) == 0 {
-		return "No source migrations found.\n\nPress n to create one or m to open a migration by UUID."
+		return "No migrations found.\n\nPress n to create one or m to open a migration by UUID."
 	}
 	var builder strings.Builder
 	for index, migration := range m.sourceMigrations {

@@ -282,7 +282,7 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.activate()
 	case "n":
 		if m.screen == screenSourceList {
-			return m.openSourceCreateForm()
+			return m.openSourceCreateForm(screenSourceList)
 		}
 		if m.screen == screenTargetList {
 			return m.openTargetCreateForm()
@@ -307,9 +307,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			command := m.loadSourceListCmd()
 			return m, command
 		case 1:
-			m.screen, m.loading, m.err = screenTargetList, true, nil
-			command := m.loadTargetListCmd()
-			return m, command
+			return m.openSourceCreateForm(screenHome)
 		case 2:
 			m.screen, m.cursor = screenMannequins, 0
 		case 3:
@@ -317,11 +315,15 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			command := m.loadConfigurationCmd()
 			return m, command
 		case 4:
+			m.screen, m.loading, m.err = screenTargetList, true, nil
+			command := m.loadTargetListCmd()
+			return m, command
+		case 5:
 			return m, tea.Quit
 		}
 	case screenSourceList:
 		if len(m.sourceMigrations) == 0 {
-			return m.openSourceCreateForm()
+			return m.openSourceCreateForm(screenSourceList)
 		}
 		m.sourceID = workflow.SourceMigrationID(m.sourceMigrations[m.cursor].MigrationID)
 		m.targetID = 0
@@ -401,7 +403,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 func (m *Model) itemCount() int {
 	switch m.screen {
 	case screenHome:
-		return 5
+		return 6
 	case screenSourceList:
 		return len(m.sourceMigrations)
 	case screenSourceDetail:
@@ -430,7 +432,7 @@ var sourceActions = []string{
 	"Force cutover",
 	"Show cutover status",
 	"Revert cutover",
-	"Open linked target migration",
+	"Open destination details",
 }
 
 func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
@@ -704,10 +706,10 @@ func (m *Model) openSourceIDForm() (tea.Model, tea.Cmd) {
 	})
 }
 
-func (m *Model) openSourceCreateForm() (tea.Model, tea.Cmd) {
+func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
 	return m.openForm(formState{
-		title:  "Create source migration",
-		parent: screenSourceList,
+		title:  "Create migration",
+		parent: parent,
 		fields: []formField{
 			{key: "sourceOwner", label: "Source owner", kind: fieldText},
 			{key: "sourceRepo", label: "Source repository", kind: fieldText},
@@ -735,7 +737,7 @@ func (m *Model) openSourceCreateForm() (tea.Model, tea.Cmd) {
 				if result.Started {
 					body = fmt.Sprintf("Migration %s created and started.", result.Migration.MigrationID)
 				}
-				return actionMsg{title: "Source migration created", body: body, parent: screenSourceDetail, refresh: true}
+				return actionMsg{title: "Migration created", body: body, parent: screenSourceDetail, refresh: true}
 			}, nil
 		},
 	})
