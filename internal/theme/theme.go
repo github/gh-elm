@@ -75,6 +75,10 @@ type Styles struct {
 	Paused lipgloss.Style
 	// Failure marks a failed or blocking item.
 	Failure lipgloss.Style
+	// FocusedButton marks the currently active action.
+	FocusedButton lipgloss.Style
+	// BlurredButton marks an available action that is not focused.
+	BlurredButton lipgloss.Style
 }
 
 // New returns the `gh elm` styles.
@@ -91,6 +95,13 @@ func New() Styles {
 		Warning:     lipgloss.NewStyle().Foreground(warningColor),
 		Paused:      lipgloss.NewStyle().Foreground(warningColor),
 		Failure:     lipgloss.NewStyle().Foreground(githubRed),
+		FocusedButton: lipgloss.NewStyle().
+			Foreground(colorButtonText).
+			Background(colorBlue).
+			Bold(true),
+		BlurredButton: lipgloss.NewStyle().
+			Foreground(buttonIdleForeground).
+			Background(buttonIdleBackground),
 	}
 }
 
@@ -115,10 +126,12 @@ func Form() *huh.Theme {
 	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(colorBlue)
 	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(colorBlue)
 	t.Focused.UnselectedOption = t.Focused.UnselectedOption.UnsetForeground()
-	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(colorButtonText).Background(colorBlue)
+	t.Focused.FocusedButton = t.Focused.FocusedButton.
+		Foreground(s.FocusedButton.GetForeground()).
+		Background(s.FocusedButton.GetBackground())
 	t.Focused.BlurredButton = t.Focused.BlurredButton.
-		Foreground(buttonIdleForeground).
-		Background(buttonIdleBackground)
+		Foreground(s.BlurredButton.GetForeground()).
+		Background(s.BlurredButton.GetBackground())
 	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(colorBlue)
 	t.Focused.TextInput.Placeholder = s.Placeholder
 	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(colorBlue)

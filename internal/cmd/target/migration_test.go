@@ -148,7 +148,7 @@ func TestMigrationCreate(t *testing.T) {
 			"--repository", "octo/repo", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, "{\n  \"migrationId\": \"42\",\n  \"expiresAt\": \"2024-01-01T00:00:00Z\"\n}\n", out)
+		assert.Equal(t, "{\n  \"migrationId\": \"42\",\n  \"expiresAt\": \"2024-01-01T00:00:00Z\"\n}\n", out) //nolint:testifylint // Formatting is part of the command contract.
 	})
 
 	t.Run("requires --source-repository-url", func(t *testing.T) {

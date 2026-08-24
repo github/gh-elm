@@ -144,6 +144,7 @@ type confirmState struct {
 	body    string
 	parent  screen
 	command tea.Cmd
+	focus   int
 }
 
 type resultState struct {
@@ -232,15 +233,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		viewportWidth := max(20, msg.Width-4)
-		viewportHeight := max(3, msg.Height-7)
 		if !m.viewportReady {
-			m.viewport = viewport.New(viewportWidth, viewportHeight)
+			m.viewport = viewport.New(m.contentWidth(), m.bodyHeight())
 			m.viewportReady = true
-		} else {
-			m.viewport.Width = viewportWidth
-			m.viewport.Height = viewportHeight
 		}
+		m.syncViewportSize()
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -279,6 +276,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.detail.Migration != nil && msg.detail.Migration.TargetMigrationID > 0 {
 				m.targetID = workflow.TargetMigrationID(msg.detail.Migration.TargetMigrationID)
 			}
+			m.clampCursor()
 		}
 		if m.sourceWatching {
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return watchTickMsg{} })
@@ -302,6 +300,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if len(msg.migration.Repositories) > 0 {
 				m.repository = msg.migration.Repositories[0]
 			}
+			m.clampCursor()
 		}
 	case configMsg:
 		if msg.generation != m.configGeneration {
@@ -327,20 +326,24 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if validHTTPURL(targetURL) && targetTokenSet {
 				commands = append(commands, m.checkTargetAuthenticationCmd(msg.generation))
 			}
+			m.syncViewportSize()
 			return m, tea.Batch(commands...)
 		}
+		m.syncViewportSize()
 	case sourceAuthenticationMsg:
 		if msg.generation != m.configGeneration {
 			return m, nil
 		}
 		m.sourceAuthChecked = true
 		m.sourceAuthErr = msg.err
+		m.syncViewportSize()
 	case targetAuthenticationMsg:
 		if msg.generation != m.configGeneration {
 			return m, nil
 		}
 		m.targetAuthChecked = true
 		m.targetAuthErr = msg.err
+		m.syncViewportSize()
 	case pickerCatalogMsg:
 		if msg.generation != m.pickerGeneration {
 			return m, nil
@@ -364,7 +367,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetViewport()
 	case confirmRequestMsg:
 		m.loading = false
-		m.confirm = confirmState(msg)
+		m.confirm = confirmState{
+			title:   msg.title,
+			body:    msg.body,
+			parent:  msg.parent,
+			command: msg.command,
+		}
 		m.screen = screenConfirm
 	case watchTickMsg:
 		if m.sourceWatching && m.screen == screenSourceDetail {
@@ -418,12 +426,20 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.screen != screenHome {
 			return m.back()
 		}
+	case key.Matches(msg, keys.Left):
+		if m.actionScreen() && m.cursor > 0 {
+			m.cursor--
+		}
+	case key.Matches(msg, keys.Right):
+		if m.actionScreen() && m.cursor < m.itemCount()-1 {
+			m.cursor++
+		}
 	case key.Matches(msg, keys.Up):
-		if m.cursor > 0 {
+		if !m.actionScreen() && m.cursor > 0 {
 			m.cursor--
 		}
 	case key.Matches(msg, keys.Down):
-		if m.cursor < m.itemCount()-1 {
+		if !m.actionScreen() && m.cursor < m.itemCount()-1 {
 			m.cursor++
 		}
 	case key.Matches(msg, keys.Refresh):
@@ -716,6 +732,19 @@ func (m *Model) itemCount() int {
 	}
 }
 
+func (m *Model) actionScreen() bool {
+	switch m.screen {
+	case screenSourceDetail, screenTargetDetail, screenMannequins, screenConfiguration:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) clampCursor() {
+	m.cursor = min(m.cursor, max(0, m.itemCount()-1))
+}
+
 type actionItem struct {
 	id    string
 	label string
@@ -938,19 +967,30 @@ func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) confirmAction(title, body string, parent screen, command tea.Cmd) (tea.Model, tea.Cmd) {
-	m.confirm = confirmState{title: title, body: body, parent: parent, command: command}
+	m.confirm = confirmState{title: title, body: body, parent: parent, command: command, focus: 0}
 	m.screen = screenConfirm
 	return m, nil
 }
 
 func (m *Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", "Y", "enter":
+	switch {
+	case key.Matches(msg, keys.Left):
+		m.confirm.focus = max(0, m.confirm.focus-1)
+	case key.Matches(msg, keys.Right):
+		m.confirm.focus = min(1, m.confirm.focus+1)
+	case msg.String() == "y" || msg.String() == "Y":
 		m.screen = m.confirm.parent
 		m.loading = true
 		return m, m.confirm.command
-	case "n", "N", "esc", "q":
+	case msg.String() == "n" || msg.String() == "N" || msg.String() == "esc" || msg.String() == "q":
 		m.screen = m.confirm.parent
+	case key.Matches(msg, keys.Open):
+		m.screen = m.confirm.parent
+		if m.confirm.focus == 1 {
+			return m, nil
+		}
+		m.loading = true
+		return m, m.confirm.command
 	}
 	return m, nil
 }
@@ -994,7 +1034,11 @@ func (m *Model) visibleSourceMigrations() []elmapi.MigrationSummary {
 }
 
 func (m *Model) scrollableScreen() bool {
-	switch m.screen {
+	return isScrollableScreen(m.screen)
+}
+
+func isScrollableScreen(current screen) bool {
+	switch current {
 	case screenSourceDetail, screenTargetDetail, screenConfiguration, screenResult:
 		return true
 	default:
@@ -1004,13 +1048,22 @@ func (m *Model) scrollableScreen() bool {
 
 func (m *Model) updateViewport(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.viewportReady {
-		m.viewport = viewport.New(max(20, m.width-4), max(3, displayHeight(m.height)-7))
+		m.viewport = viewport.New(m.contentWidth(), m.bodyHeight())
 		m.viewportReady = true
 	}
+	m.syncViewportSize()
 	m.viewport.SetContent(m.scrollableContent())
 	var command tea.Cmd
 	m.viewport, command = m.viewport.Update(msg)
 	return m, command
+}
+
+func (m *Model) syncViewportSize() {
+	if !m.viewportReady {
+		return
+	}
+	m.viewport.Width = m.contentWidth()
+	m.viewport.Height = m.bodyHeight()
 }
 
 func (m *Model) resetViewport() {

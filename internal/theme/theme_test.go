@@ -21,6 +21,10 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, colorBlue, s.Info.GetForeground())
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
+		assert.Equal(t, colorBlue, s.FocusedButton.GetBackground())
+		assert.Equal(t, colorButtonText, s.FocusedButton.GetForeground())
+		assert.Equal(t, buttonIdleBackground, s.BlurredButton.GetBackground())
+		assert.Equal(t, buttonIdleForeground, s.BlurredButton.GetForeground())
 	})
 
 	t.Run("ANSI palette values are pinned", func(t *testing.T) {

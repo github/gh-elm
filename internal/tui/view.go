@@ -13,16 +13,22 @@ import (
 	"github.com/github/gh-elm/internal/workflow"
 )
 
-const homeTitle = "GitHub Enterprise\nLive migrations"
+const homeTitle = "Live migrations"
 
 // View implements tea.Model.
 func (m *Model) View() string {
 	if m.width > 0 && (m.width < 48 || m.height < 12) {
-		return m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.\n\nctrl+c quit")
+		return m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit")
+	}
+
+	current := m.screen
+	confirming := current == screenConfirm
+	if confirming {
+		current = m.confirm.parent
 	}
 
 	var title, body, help string
-	switch m.screen {
+	switch current {
 	case screenHome:
 		title = homeTitle
 		body = m.menu([]string{
@@ -48,7 +54,7 @@ func (m *Model) View() string {
 	case screenSourceDetail:
 		title = fmt.Sprintf("Migration %s", m.sourceID)
 		body = m.sourceDetailView()
-		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenTargetList:
 		title = "Advanced destination migrations"
 		body = m.targetListView()
@@ -56,15 +62,15 @@ func (m *Model) View() string {
 	case screenTargetDetail:
 		title = fmt.Sprintf("Destination migration %d (advanced)", m.targetID)
 		body = m.targetDetailView()
-		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
 		title = "Target mannequins"
-		body = m.menu(mannequinActions)
-		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Back)
+		body = m.actionButtons(actionsFromLabels(mannequinActions), m.cursor, m.contentWidth())
+		help = helpLine(keys.Left, keys.Open, keys.Back)
 	case screenConfiguration:
 		title = "Configuration"
 		body = m.configurationView()
-		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenPicker:
 		title = m.picker.title
 		body = m.pickerView()
@@ -73,17 +79,13 @@ func (m *Model) View() string {
 		title = m.form.title
 		body = m.formView()
 		help = "tab/↑/↓ fields • type edit • ←/→ choose • space toggle • enter continue • esc cancel"
-	case screenConfirm:
-		title = m.confirm.title
-		body = m.styles.Warning.Render(m.confirm.body) + "\n\nContinue? [y/N]"
-		help = "y/enter confirm • n/esc cancel"
 	case screenResult:
 		title = m.result.title
 		body = m.result.body
 		help = helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown, keys.Back)
 	}
 
-	if m.showHelp {
+	if m.showHelp && !confirming {
 		title = "Keyboard help"
 		body = m.fullHelpView()
 		help = "? close • q quit"
@@ -94,33 +96,67 @@ func (m *Model) View() string {
 	if m.err != nil {
 		body += "\n\n" + m.styles.Failure.Render("Error: "+m.err.Error())
 	}
-	height := displayHeight(m.height)
-	bodyHeight := max(3, height-7)
-	if m.scrollableScreen() || m.showHelp {
+	bodyHeight := m.bodyHeight()
+	if isScrollableScreen(current) || m.showHelp {
 		body = m.viewportView(body, bodyHeight)
 	} else {
 		body = clip(body, bodyHeight)
 	}
-	return m.frame(title, body+"\n\n"+m.styles.Muted.Render(help))
+	if confirming {
+		help = "←/→ select action • enter activate • y confirm • n/esc cancel"
+	}
+	rendered := m.frame(title, body, help)
+	if confirming {
+		rendered = overlayCenter(
+			rendered,
+			m.confirmationOverlay(),
+			m.displayWidth(),
+			displayHeight(m.height),
+		)
+	}
+	return rendered
 }
 
-func (m *Model) frame(title, body string) string {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	contentWidth := max(20, width-4)
-	header := m.styles.Info.Bold(true).Render(title)
+func (m *Model) frame(title, body, help string) string {
+	contentWidth := m.contentWidth()
+	brand := m.styles.Primary.Bold(true).Render("GitHub Enterprise")
+	subtitle := m.styles.Info.Bold(true).Render(title)
 	if title == homeTitle {
-		header = m.styles.Primary.Bold(true).Render("GitHub Enterprise") + "\n" +
-			m.styles.Success.Render("Live migrations")
+		subtitle = m.styles.Success.Render(title)
 	}
+	header := brand + "\n" + subtitle + "\n" +
+		m.styles.Muted.Render(strings.Repeat("─", contentWidth))
+
+	var warningBlock string
 	if warning := m.configurationWarning(); warning != "" {
-		header = m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
-			m.styles.Warning.Render(warning) + "\n\n" + header
+		warning = m.styles.Warning.Width(contentWidth).Render(warning)
+		warningBlock = "\n" + m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
+			warning
 	}
 	content := lipgloss.NewStyle().Width(contentWidth).Render(body)
-	return lipgloss.NewStyle().Padding(1, 2).Width(width).Render(header + "\n\n" + content)
+	footer := m.styles.Muted.Render(help)
+	return lipgloss.NewStyle().Padding(0, 1).Render(
+		header + warningBlock + "\n\n" + content + "\n\n" + footer,
+	)
+}
+
+func (m *Model) displayWidth() int {
+	if m.width > 0 {
+		return m.width
+	}
+	return 80
+}
+
+func (m *Model) contentWidth() int {
+	return max(20, m.displayWidth()-2)
+}
+
+func (m *Model) bodyHeight() int {
+	height := displayHeight(m.height) - 6
+	if warning := m.configurationWarning(); warning != "" {
+		height -= lipgloss.Height(lipgloss.NewStyle().Width(m.contentWidth()).Render(warning)) + 1
+	}
+	return max(3, height)
 }
 
 func (m *Model) configurationWarning() string {
@@ -175,9 +211,20 @@ func (m *Model) configurationWarning() string {
 func (m *Model) menu(items []string) string {
 	var builder strings.Builder
 	for index, item := range items {
-		fmt.Fprintf(&builder, "%s %s\n", m.marker(index), item)
+		if index > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(m.selectorCard(item, index == m.cursor, true))
 	}
 	return builder.String()
+}
+
+func actionsFromLabels(labels []string) []actionItem {
+	actions := make([]actionItem, len(labels))
+	for index, label := range labels {
+		actions[index] = actionItem{label: label}
+	}
+	return actions
 }
 
 func (m *Model) sourceListView() string {
@@ -191,13 +238,13 @@ func (m *Model) sourceListView() string {
 	var builder strings.Builder
 	start, end := m.sourceListBounds(len(migrations))
 	for index := start; index < end; index++ {
-		if index > start && !m.compactSourceList() {
+		if index > start {
 			builder.WriteString("\n")
 		}
 		builder.WriteString(m.sourceMigrationCard(migrations[index], index == m.cursor))
-		builder.WriteString("\n")
 	}
 	if end < len(migrations) {
+		builder.WriteString("\n")
 		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(migrations)-end)))
 	}
 	if start > 0 {
@@ -229,11 +276,7 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 		}
 	}
 
-	style := lipgloss.NewStyle().Border(lipgloss.HiddenBorder(), false, false, false, true).PaddingLeft(1)
-	if selected {
-		style = style.Border(lipgloss.ThickBorder(), false, false, false, true).BorderForeground(lipgloss.Color("4"))
-	}
-	return style.Render(card.String())
+	return m.selectorCard(card.String(), selected, m.compactSourceList())
 }
 
 func (m *Model) sourceDetailView() string {
@@ -247,10 +290,8 @@ func (m *Model) sourceDetailView() string {
 		status.WriteString("\n")
 	}
 	var actions strings.Builder
-	actions.WriteString("Actions\n")
-	for index, action := range m.sourceActionItems() {
-		fmt.Fprintf(&actions, "%s %s\n", m.marker(index), action.label)
-	}
+	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
+	actions.WriteString(m.actionButtons(m.sourceActionItems(), m.cursor, m.contentWidth()))
 	return m.detailLayout(status.String(), actions.String())
 }
 
@@ -259,16 +300,25 @@ func (m *Model) targetListView() string {
 		return "No target migrations found.\n\nPress n for advanced direct creation or m to open a numeric target ID."
 	}
 	var builder strings.Builder
-	for index, migration := range m.targetMigrations {
+	capacity := max(1, (m.bodyHeight()-2)/4)
+	start, end := pickerBounds(m.cursor, len(m.targetMigrations), capacity)
+	if start > 0 {
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)))
+	}
+	for index := start; index < end; index++ {
+		migration := m.targetMigrations[index]
 		repositories := strings.Join(migration.Repositories, ", ")
-		fmt.Fprintf(
-			&builder,
-			"%s %-12s  %s\n  ID %s\n",
-			m.marker(index),
-			friendly(migration.Status),
-			repositories,
-			m.styles.Muted.Render(migration.MigrationID),
-		)
+		var card strings.Builder
+		glyph, status := m.statusDisplay(migration.Status)
+		fmt.Fprintf(&card, "%s %s  %s\n", glyph, status, m.styles.Bold.Render(repositories))
+		fmt.Fprintf(&card, "%s %s", m.styles.Muted.Render("ID"), m.styles.Muted.Render(migration.MigrationID))
+		if index > start {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(m.selectorCard(card.String(), index == m.cursor, false))
+	}
+	if end < len(m.targetMigrations) {
+		fmt.Fprintf(&builder, "\n%s", m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(m.targetMigrations)-end)))
 	}
 	return builder.String()
 }
@@ -309,10 +359,8 @@ func (m *Model) targetDetailView() string {
 		}
 	}
 	var actions strings.Builder
-	actions.WriteString("Actions\n")
-	for index, action := range m.targetActionItems() {
-		fmt.Fprintf(&actions, "%s %s\n", m.marker(index), action.label)
-	}
+	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
+	actions.WriteString(m.actionButtons(m.targetActionItems(), m.cursor, m.contentWidth()))
 	return m.detailLayout(detail.String(), actions.String())
 }
 
@@ -324,15 +372,13 @@ func yesNo(value bool) string {
 }
 
 func (m *Model) detailLayout(detail, actions string) string {
-	if m.width >= 100 {
-		columnWidth := max(30, (m.width-8)/2)
-		return lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			lipgloss.NewStyle().Width(columnWidth).Render(detail),
-			lipgloss.NewStyle().Width(columnWidth).Render(actions),
-		)
+	if detail == "" {
+		return actions
 	}
-	return actions + "\n" + detail
+	if actions == "" {
+		return detail
+	}
+	return detail + "\n\n" + actions
 }
 
 func (m *Model) configurationView() string {
@@ -361,10 +407,8 @@ func (m *Model) configurationView() string {
 		fmt.Fprintf(&builder, "Config:       %s\n", configuration.ConfigPath)
 		fmt.Fprintf(&builder, "Credentials:  %s\n", configuration.CredentialStore)
 	}
-	builder.WriteString("\nActions\n")
-	for index, action := range configurationActions {
-		fmt.Fprintf(&builder, "%s %s\n", m.marker(index), action)
-	}
+	builder.WriteString("\n" + m.styles.Bold.Render("Actions") + "\n\n")
+	builder.WriteString(m.actionButtons(actionsFromLabels(configurationActions), m.cursor, m.contentWidth()))
 	return builder.String()
 }
 
@@ -412,11 +456,12 @@ func (m *Model) authenticationDetail(checked bool, err error) string {
 }
 
 func (m *Model) formView() string {
-	var builder strings.Builder
+	var prefix strings.Builder
 	if m.form.description != "" {
-		builder.WriteString(m.styles.Muted.Render(m.form.description))
-		builder.WriteString("\n\n")
+		prefix.WriteString(m.styles.Muted.Render(m.form.description))
+		prefix.WriteString("\n\n")
 	}
+	blocks := make([]string, 0, len(m.form.fields))
 	for index, field := range m.form.fields {
 		value := field.value
 		switch field.kind {
@@ -438,19 +483,65 @@ func (m *Model) formView() string {
 		if index == m.form.cursor {
 			label = m.styles.Info.Bold(true).Render(label)
 		}
-		marker := " "
-		if index == m.form.cursor {
-			marker = m.styles.Info.Render("›")
-		}
-		fmt.Fprintf(&builder, "%s %s\n    %s\n", marker, label, value)
+		var content strings.Builder
+		fmt.Fprintf(&content, "%s\n  %s", label, value)
 		if field.description != "" {
-			fmt.Fprintf(&builder, "    %s\n", m.styles.Muted.Render(field.description))
+			fmt.Fprintf(&content, "\n  %s", m.styles.Muted.Render(field.description))
 		}
+		blocks = append(blocks, m.selectorCard(content.String(), index == m.form.cursor, true))
 	}
+
+	var suffix string
 	if m.form.err != nil {
-		fmt.Fprintf(&builder, "\n%s\n", m.styles.Failure.Render("Error: "+m.form.err.Error()))
+		suffix = "\n\n" + m.styles.Failure.Render("Error: "+m.form.err.Error())
 	}
+
+	reserved := 0
+	if prefix.Len() > 0 {
+		reserved += lipgloss.Height(prefix.String())
+	}
+	if suffix != "" {
+		reserved += lipgloss.Height(suffix)
+	}
+	available := m.bodyHeight() - reserved
+	start, end := focusedBlockRange(blocks, m.form.cursor, max(1, available-2))
+	var builder strings.Builder
+	builder.WriteString(prefix.String())
+	if start > 0 {
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more field(s)", start)) + "\n")
+	}
+	builder.WriteString(strings.Join(blocks[start:end], "\n"))
+	if end < len(blocks) {
+		builder.WriteString("\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more field(s)", len(blocks)-end)))
+	}
+	builder.WriteString(suffix)
 	return builder.String()
+}
+
+func focusedBlockRange(blocks []string, focus, height int) (start, end int) {
+	if len(blocks) == 0 {
+		return 0, 0
+	}
+	focus = min(max(0, focus), len(blocks)-1)
+	start, end = focus, focus+1
+	used := lipgloss.Height(blocks[focus])
+	for end < len(blocks) {
+		next := lipgloss.Height(blocks[end]) + 1
+		if used+next > height {
+			break
+		}
+		used += next
+		end++
+	}
+	for start > 0 {
+		next := lipgloss.Height(blocks[start-1]) + 1
+		if used+next > height {
+			break
+		}
+		used += next
+		start--
+	}
+	return start, end
 }
 
 func (m *Model) pickerView() string {
@@ -470,12 +561,15 @@ func (m *Model) pickerView() string {
 		fmt.Fprintf(&builder, "%s\n", m.styles.Muted.Render("No matching options."))
 		return builder.String()
 	}
-	start, end := pickerBounds(m.picker.cursor, len(items), max(3, displayHeight(m.height)-11))
+	start, end := pickerBounds(m.picker.cursor, len(items), max(3, m.bodyHeight()-3))
 	for index := start; index < end; index++ {
-		fmt.Fprintf(&builder, "%s %s\n", m.markerFor(index, m.picker.cursor), items[index])
+		if index > start {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(m.selectorCard(items[index], index == m.picker.cursor, true))
 	}
 	if end < len(items) {
-		fmt.Fprintf(&builder, "%s", m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(items)-end)))
+		fmt.Fprintf(&builder, "\n%s", m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(items)-end)))
 	}
 	if start > 0 {
 		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
@@ -483,11 +577,16 @@ func (m *Model) pickerView() string {
 	return builder.String()
 }
 
-func (m *Model) markerFor(index, cursor int) string {
-	if index == cursor {
-		return m.styles.Info.Render("›")
-	}
-	return " "
+func (m *Model) confirmationOverlay() string {
+	width := min(60, max(24, m.contentWidth()-8))
+	content := m.styles.Bold.Render(m.confirm.title) + "\n\n" +
+		m.styles.Warning.Render(m.confirm.body) + "\n\n" +
+		m.actionButtons(
+			[]actionItem{{id: "confirm", label: "Confirm"}, {id: "cancel", label: "Cancel"}},
+			m.confirm.focus,
+			width-6,
+		)
+	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
 }
 
 func pickerBounds(cursor, total, capacity int) (start, end int) {
@@ -501,13 +600,6 @@ func pickerBounds(cursor, total, capacity int) (start, end int) {
 		start = max(0, end-capacity)
 	}
 	return start, end
-}
-
-func (m *Model) marker(index int) string {
-	if index == m.cursor {
-		return m.styles.Info.Render("›")
-	}
-	return " "
 }
 
 func (m *Model) statusDisplay(status string) (glyph, label string) {
@@ -549,7 +641,7 @@ func (m *Model) sourceListBounds(total int) (start, end int) {
 	if m.compactSourceList() {
 		linesPerCard = 2
 	}
-	capacity := max(1, (displayHeight(m.height)-8)/linesPerCard)
+	capacity := max(1, (m.bodyHeight()-1)/linesPerCard)
 	start = max(0, m.cursor-capacity+1)
 	end = min(total, start+capacity)
 	if end-start < capacity {
@@ -559,7 +651,7 @@ func (m *Model) sourceListBounds(total int) (start, end int) {
 }
 
 func (m *Model) viewportView(body string, height int) string {
-	width := max(20, m.width-4)
+	width := m.contentWidth()
 	view := m.viewport
 	if !m.viewportReady {
 		view = viewport.New(width, height)
@@ -574,6 +666,9 @@ func (m *Model) fullHelpView() string {
 	return strings.Join([]string{
 		"Global",
 		"  " + helpLine(keys.Up, keys.Down, keys.Open, keys.Back, keys.Help, keys.Quit),
+		"",
+		"Actions",
+		"  " + helpLine(keys.Left, keys.Open),
 		"",
 		"Migrations",
 		"  " + helpLine(keys.New, keys.Manual, keys.Search, keys.Density, keys.Refresh),

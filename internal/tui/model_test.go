@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -119,7 +120,7 @@ func TestModel(t *testing.T) {
 		assert.Equal(t, "hjk", model.searchInput.Value())
 	})
 
-	t.Run("shows incomplete configuration warning above the title", func(t *testing.T) {
+	t.Run("shows incomplete configuration warning below the persistent header", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		updated, _ := model.Update(configMsg{configuration: &workflow.Configuration{
 			SourceURL:      "https://source.example",
@@ -132,7 +133,7 @@ func TestModel(t *testing.T) {
 		titleIndex := strings.Index(view, "GitHub Enterprise")
 		require.NotEqual(t, -1, warningIndex)
 		require.NotEqual(t, -1, titleIndex)
-		assert.Less(t, warningIndex, titleIndex)
+		assert.Less(t, titleIndex, warningIndex)
 		assert.Contains(t, view, "destination URL, destination token")
 	})
 
@@ -362,7 +363,106 @@ func TestModel(t *testing.T) {
 
 		content := model.sourceDetailView()
 		assert.Contains(t, content, "tail marker")
-		assert.Less(t, strings.Index(content, "Actions"), strings.Index(content, "Migration ID"))
+		assert.Less(t, strings.Index(content, "Migration ID"), strings.Index(content, "Actions"))
+	})
+
+	t.Run("detail actions use horizontal focus", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		setSourceStatus(model, elmapi.StatusCreated)
+
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+		model = updated.(*Model)
+		assert.Equal(t, 1, model.cursor)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*Model)
+		assert.Equal(t, 1, model.cursor)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+		model = updated.(*Model)
+		assert.Zero(t, model.cursor)
+		assert.Contains(t, model.View(), "←/→ select action")
+	})
+
+	t.Run("action buttons wrap without changing focus order", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		actions := []actionItem{
+			{id: "one", label: "First"},
+			{id: "two", label: "Second"},
+			{id: "three", label: "Third"},
+		}
+
+		view := model.actionButtons(actions, 1, 20)
+
+		assert.Greater(t, strings.Count(view, "\n"), 0)
+		assert.Contains(t, view, model.styles.FocusedButton.Padding(0, 2).Render("Second"))
+		for line := range strings.SplitSeq(view, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(line), 20)
+		}
+	})
+
+	t.Run("selected cards preserve geometry", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		selected := model.selectorCard("Repository", true, true)
+		unselected := model.selectorCard("Repository", false, true)
+
+		assert.Equal(t, lipgloss.Width(unselected), lipgloss.Width(selected))
+		assert.Equal(t, lipgloss.Height(unselected), lipgloss.Height(selected))
+	})
+
+	t.Run("forms keep the focused field visible in short terminals", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 80
+		model.height = 16
+		model.form = formState{
+			cursor: 3,
+			fields: []formField{
+				{label: "First", value: "one"},
+				{label: "Second", value: "two"},
+				{label: "Third", value: "three"},
+				{label: "Fourth", value: "four"},
+			},
+		}
+
+		view := model.formView()
+
+		assert.Contains(t, view, "Fourth")
+		assert.Contains(t, view, "more field(s)")
+		assert.LessOrEqual(t, lipgloss.Height(view), model.bodyHeight())
+	})
+
+	t.Run("dynamic warnings synchronize viewport height", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model = updated.(*Model)
+		heightWithoutWarning := model.viewport.Height
+
+		updated, _ = model.Update(configMsg{configuration: &workflow.Configuration{
+			SourceURL:      "https://source.example",
+			SourceTokenSet: true,
+		}})
+		model = updated.(*Model)
+
+		assert.Less(t, model.viewport.Height, heightWithoutWarning)
+		assert.Equal(t, model.bodyHeight(), model.viewport.Height)
+	})
+
+	t.Run("state changes clamp detail action focus", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		model.cursor = 10
+		status := elmapi.StatusCompleted
+
+		updated, _ := model.Update(sourceDetailMsg{
+			detail: &elmapi.MigrationDetail{
+				Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &status},
+			},
+		})
+		model = updated.(*Model)
+
+		assert.Equal(t, len(model.sourceActionItems())-1, model.cursor)
 	})
 
 	t.Run("home exposes migration creation", func(t *testing.T) {
@@ -567,6 +667,36 @@ func TestModel(t *testing.T) {
 		assert.Nil(t, cmd)
 		assert.Equal(t, screenConfirm, model.screen)
 		assert.Contains(t, model.View(), "cannot be undone")
+	})
+
+	t.Run("confirmation overlays preserve parent content and support button focus", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 100
+		model.height = 40
+		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
+		setSourceStatus(model, elmapi.StatusCreated)
+		updated, _ := model.confirmAction(
+			"Cancel migration",
+			"This cannot be undone.",
+			screenSourceDetail,
+			func() tea.Msg { return nil },
+		)
+		model = updated.(*Model)
+
+		view := model.View()
+		assert.Contains(t, view, "Migration source-1")
+		assert.Contains(t, view, "Cancel migration")
+		assert.Contains(t, view, "Confirm")
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+		model = updated.(*Model)
+		assert.Equal(t, 1, model.confirm.focus)
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		assert.Nil(t, command)
+		assert.Equal(t, screenSourceDetail, model.screen)
 	})
 
 	t.Run("source actions follow migration state", func(t *testing.T) {

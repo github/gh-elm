@@ -10,6 +10,8 @@ import (
 type keyMap struct {
 	Up       key.Binding
 	Down     key.Binding
+	Left     key.Binding
+	Right    key.Binding
 	Open     key.Binding
 	Back     key.Binding
 	Refresh  key.Binding
@@ -31,6 +33,14 @@ var keys = keyMap{
 	Down: key.NewBinding(
 		key.WithKeys("down", "j"),
 		key.WithHelp("↓/j", "down"),
+	),
+	Left: key.NewBinding(
+		key.WithKeys("left"),
+		key.WithHelp("←/→", "select action"),
+	),
+	Right: key.NewBinding(
+		key.WithKeys("right"),
+		key.WithHelp("←/→", "select action"),
 	),
 	Open: key.NewBinding(
 		key.WithKeys("enter", "l"),
