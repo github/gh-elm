@@ -33,6 +33,24 @@ func TestRenderReportSurfacesWriterError(t *testing.T) {
 }
 
 func TestReportRequest(t *testing.T) {
+	t.Run("resolves a source UUID before requesting a target report", func(t *testing.T) {
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"migration":{"target_migration_id":74}}`))
+		}))
+		defer source.Close()
+
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/enterprise/migration/74/reports", r.URL.Path)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer target.Close()
+
+		runReports(t, "report", "request", testSourceMigrationUUID, "--stage", "backfill",
+			"--source-url", source.URL, "--source-token", "source-tok",
+			"--target-url", target.URL, "--target-token", "target-tok")
+	})
+
 	t.Run("requests a report and prints human-readable confirmation", func(t *testing.T) {
 		var gotStage, gotState string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +97,8 @@ func TestReportRequest(t *testing.T) {
 		out := runReports(t, "report", "request", "42", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"requestedAt\":")
 	})
 
 	t.Run("defaults --state to all", func(t *testing.T) {
@@ -174,7 +193,8 @@ func TestReportStatus(t *testing.T) {
 		out := runReports(t, "report", "status", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"status\":")
 	})
 
 	t.Run("requires a target migration ID", func(t *testing.T) {
@@ -217,7 +237,8 @@ func TestReportURL(t *testing.T) {
 		out := runReports(t, "report", "url", "--migration-id", "3", "--stage", "backfill", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"url\":")
 	})
 }
 

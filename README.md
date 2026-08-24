@@ -35,9 +35,11 @@ gh elm                   # launch the interactive terminal UI
 gh elm --help            # list available commands
 gh elm --version         # print the extension version
 
-gh elm config       # interactively set up credentials
-gh elm config show  # print current config (tokens redacted)
-gh elm config reset # remove stored config and credentials
+gh elm config                # interactively set up credentials
+gh elm config show           # print current config (tokens redacted)
+gh elm config reset          # remove stored config and credentials
+gh elm config set-source-pat ORG # set an organization's SOURCE_PAT secret
+gh elm config set-target-pat ORG # set an organization's TARGET_PAT secret
 ```
 
 When standard input and output are interactive terminals, invoking `gh elm` with no
@@ -64,7 +66,7 @@ formats remain the supported automation interface.
   cancel, cutover) against the GHES REST API, plus `target-id` to resolve a
   migration's destination (GitHub with Data Residency) migration ID for use with the
   `gh elm target *` commands. Create, status, list, and cutover-revert output is
-  human-readable by default; add `--json` for the raw API response.
+  human-readable by default; add `--json` for the formatted API response.
 - `gh elm target migration list|create|status|pause|resume|abort` — manage a migration
   record directly on the target (GitHub with Data Residency) side. Most workflows only need `list` and
   `status`; `create`/`pause`/`resume`/`abort` are lower-level operations for debugging or
@@ -72,7 +74,7 @@ formats remain the supported automation interface.
   the source side.
 - `gh elm target report request|status|url` — request a migration's node report, poll its
   status, and get a signed download URL. Human-readable by default; add `--json` for the
-  raw API response.
+  formatted API response.
 - `gh elm target mannequin list|reclaim` — manage mannequins for a target organization.
   Use `--output` on `list` to save a CSV, then edit and pass it to `reclaim --csv`.
 
@@ -80,7 +82,11 @@ formats remain the supported automation interface.
 
 Resolve the target endpoint via `gh elm config` (or `GH_TARGET_HOST` /
 `GH_TARGET_TOKEN`); every command also accepts per-invocation `--target-url` and
-`--target-token` overrides.
+`--target-token` overrides. During `gh elm config`, the target URL may use the
+web hostname (for example, `https://staffship.example.com`); the saved
+configuration uses and displays its corresponding `api.` hostname
+(`https://api.staffship.example.com`). Environment variables and command-line
+overrides accept either hostname form as well.
 
 Migration responses are rendered for people by default:
 
@@ -98,7 +104,7 @@ gh elm migration cancel <uuid>
 gh elm migration status <uuid>
 gh elm migration list --status all
 
-# Preserve the raw API response for scripts and jq
+# Preserve the complete API response as formatted JSON for scripts and jq
 gh elm migration status <uuid> --json | jq .combined_state.status
 gh elm migration list --status all --json | jq '.migrations[]'
 
@@ -132,8 +138,10 @@ gh elm target resources "$TARGET_ID" octo-org/octo-repo
 Migration resources — `gh elm target resources`:
 
 ```sh
-# Resources for a repository (both backfill and live-update origins)
+# Resources for a repository (both backfill and live-update origins).
+# Target commands accept either the numeric target ID or the source UUID.
 gh elm target resources 42 octo-org/octo-repo
+gh elm target resources 897930cf-51cb-4e2d-9806-6357a6e66b55 octo-org/octo-repo
 
 # Filter further by origin and state
 gh elm target resources 42 octo-org/octo-repo --origin backfill
@@ -165,7 +173,7 @@ gh elm target migration abort --migration-id 42
 ```
 
 Node reports — `gh elm target report request|status|url` (human-readable by default; add
-`--json` for the raw API response):
+`--json` for the formatted API response):
 
 ```sh
 # Request a backfill report over all nodes (default --state all)
@@ -174,7 +182,7 @@ gh elm target report request 42 --stage backfill
 # Request a live-updates report over only unmigrated nodes
 gh elm target report request 42 --stage live-update --state unmigrated
 
-# Poll status (human-readable), or as raw JSON piped to jq
+# Poll status (human-readable), or as formatted JSON piped to jq
 gh elm target report status 42 --stage backfill
 gh elm target report status 42 --stage backfill --json | jq -r .status
 
@@ -237,6 +245,27 @@ The environment variables use a unified `GH_SOURCE_*` / `GH_TARGET_*` scheme:
 | Source token | `GH_SOURCE_TOKEN` |
 | Target host | `GH_TARGET_HOST` |
 | Target token | `GH_TARGET_TOKEN` |
+
+### Migrator PATs
+
+Set the organization-scoped PATs used by the migrator through the source GHES API:
+
+```sh
+# Secure interactive input
+gh elm config set-source-pat octo-org
+gh elm config set-target-pat octo-org
+
+# Environment, --body, or standard input also work
+SOURCE_PAT=ghp_example gh elm config set-source-pat octo-org
+gh elm config set-target-pat octo-org --body "$TARGET_PAT"
+printf %s "$TARGET_PAT" | gh elm config set-target-pat --org octo-org
+```
+
+The required `ORG` operand identifies the organization that owns the secret; `--org`
+provides an equivalent flag form. The commands use the configured source URL and source
+admin token. Per-command
+`--source-url` and `--source-token` flags override those values. Values passed with
+`--body` can appear in shell history, so prefer the prompt, environment, or standard input.
 
 Other overrides:
 

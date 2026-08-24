@@ -87,7 +87,7 @@ func TestConfiguration(t *testing.T) {
 	assert.True(t, configuration.TargetTokenSet)
 	assert.Equal(t, "https://source.example/api/v3", configuration.ResolvedSourceURL)
 	assert.True(t, configuration.ResolvedSourceTokenSet)
-	assert.Equal(t, "https://target.example", configuration.ResolvedTargetURL)
+	assert.Equal(t, "https://api.target.example", configuration.ResolvedTargetURL)
 	assert.True(t, configuration.ResolvedTargetTokenSet)
 
 	t.Setenv(config.EnvSourceURL, "source-env.example")
@@ -98,7 +98,7 @@ func TestConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://source-env.example/api/v3", configuration.ResolvedSourceURL)
 	assert.True(t, configuration.ResolvedSourceTokenSet)
-	assert.Equal(t, "https://target-env.example", configuration.ResolvedTargetURL)
+	assert.Equal(t, "https://api.target-env.example", configuration.ResolvedTargetURL)
 	assert.True(t, configuration.ResolvedTargetTokenSet)
 
 	require.NoError(t, service.ResetConfiguration(t.Context()))

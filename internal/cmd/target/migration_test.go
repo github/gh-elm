@@ -135,7 +135,7 @@ func TestMigrationCreate(t *testing.T) {
 		assert.Contains(t, out, "Expires at:")
 	})
 
-	t.Run("emits the raw API JSON with --json", func(t *testing.T) {
+	t.Run("emits formatted API JSON with --json", func(t *testing.T) {
 		const respBody = `{"migrationId":"42","expiresAt":"2024-01-01T00:00:00Z"}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusCreated)
@@ -148,7 +148,7 @@ func TestMigrationCreate(t *testing.T) {
 			"--repository", "octo/repo", "--json",
 			"--target-url", srv.URL, "--target-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // encoded-compare
+		assert.Equal(t, "{\n  \"migrationId\": \"42\",\n  \"expiresAt\": \"2024-01-01T00:00:00Z\"\n}\n", out)
 	})
 
 	t.Run("requires --source-repository-url", func(t *testing.T) {

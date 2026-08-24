@@ -52,7 +52,7 @@ func TestCreate(t *testing.T) {
 		assert.Contains(t, out, "mig-1")
 	})
 
-	t.Run("--json preserves the raw create response", func(t *testing.T) {
+	t.Run("--json preserves and formats the create response", func(t *testing.T) {
 		const respBody = `{"migration_id":"mig-1","expires_at":null,"future_field":"preserved"}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
@@ -69,7 +69,8 @@ func TestCreate(t *testing.T) {
 			"--target-org", "acme-cloud", "--target-repo", "web", "--json",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"migration_id\":")
 	})
 
 	t.Run("create --start posts start and reports success", func(t *testing.T) {
@@ -288,7 +289,8 @@ func TestStatus(t *testing.T) {
 		out := run(t, "status", "--migration-id", "mig-1", "--json",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"migration\":")
 	})
 }
 
@@ -322,7 +324,8 @@ func TestList(t *testing.T) {
 		out := run(t, "list", "--json",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"migrations\":")
 	})
 
 	t.Run("bare list falls back to created migrations", func(t *testing.T) {
@@ -517,7 +520,8 @@ func TestRevertCutoverJSON(t *testing.T) {
 
 		out := run(t, "cutover", "revert", "--migration-id", "m", "--json",
 			"--source-url", srv.URL, "--source-token", "tok")
-		assert.Equal(t, respBody+"\n", out) //nolint:testifylint // exact raw response contract
+		assert.JSONEq(t, respBody, out)
+		assert.Contains(t, out, "\n  \"success\":")
 	})
 }
 
