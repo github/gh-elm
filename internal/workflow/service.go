@@ -227,7 +227,7 @@ func (s *Service) CreateSourceMigration(ctx context.Context, in SourceCreateInpu
 		TargetOrganizationLogin: in.TargetOwner,
 		TargetRepositoryName:    in.TargetRepo,
 		TargetAPIEndpoint:       target.URL,
-		PATName:                 "BOGON",
+		PATName:                 elmapi.SystemPATName,
 		TargetVisibility:        visibility,
 	}
 	if err := ensureUniqueSourceMigration(ctx, sourceClient, req); err != nil {

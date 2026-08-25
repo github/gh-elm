@@ -40,8 +40,7 @@ func TestCreate(t *testing.T) {
 		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations"), "path suffix: %q", gotPath)
 		// The target endpoint is derived from GH_TARGET_HOST (API-defect workaround).
 		assert.Equal(t, "https://api.example.ghe.com", gotBody.TargetAPIEndpoint)
-		// pat_name is stubbed with a sentinel (API-defect workaround).
-		assert.Equal(t, "BOGON", gotBody.PATName)
+		assert.Equal(t, elmapi.SystemPATName, gotBody.PATName)
 		assert.Equal(t, "acme", gotBody.SourceOrganizationLogin)
 		assert.Equal(t, "web", gotBody.SourceRepositoryName)
 		assert.Equal(t, "acme-cloud", gotBody.TargetOrganizationLogin)
