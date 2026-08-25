@@ -1,0 +1,197 @@
+package migration
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
+
+	"github.com/github/gh-elm/internal/cmd/migration/watch"
+	"github.com/github/gh-elm/internal/config"
+	"github.com/github/gh-elm/internal/elmapi"
+)
+
+const elmUnavailableMessage = "it seems like ELM is not enabled in any of your organizations or your version of GHES does not support ELM"
+
+var minimumELMPatches = map[int]int{
+	17: 17,
+	18: 11,
+	19: 8,
+	20: 4,
+	21: 2,
+}
+
+// annotateSourceAPIError turns authentication failures and an unavailable ELM
+// API into actionable messages. A 404 for an individual migration can be valid,
+// so the collection endpoint is probed before concluding that ELM is unavailable.
+func annotateSourceAPIError(ctx context.Context, client *elmapi.Client, err error, sourceURL string) error {
+	var httpErr *elmapi.HTTPError
+	if !errors.As(err, &httpErr) {
+		return err
+	}
+	if isAuthenticationError(httpErr) {
+		return authenticationError(httpErr, sourceURL)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		return err
+	}
+
+	_, probeErr := client.ListMigrations(ctx, elmapi.ListMigrationsOptions{PageSize: 1})
+	if probeErr == nil {
+		return err
+	}
+
+	var probeHTTPError *elmapi.HTTPError
+	if !errors.As(probeErr, &probeHTTPError) {
+		return err
+	}
+	if isAuthenticationError(probeHTTPError) {
+		return authenticationError(probeHTTPError, sourceURL)
+	}
+	if probeHTTPError.StatusCode != http.StatusNotFound {
+		return err
+	}
+
+	authErr := client.CheckAuthentication(ctx)
+	if authErr == nil {
+		version := httpErr.EnterpriseVersion
+		if version == "" {
+			version = probeHTTPError.EnterpriseVersion
+		}
+		if minimumVersion, unsupported := minimumELMVersion(version); unsupported {
+			return fmt.Errorf("source GHES version %s does not support ELM; upgrade to GHES %s or later", version, minimumVersion)
+		}
+		return errors.New(elmUnavailableMessage)
+	}
+	var authHTTPError *elmapi.HTTPError
+	if errors.As(authErr, &authHTTPError) && isAuthenticationError(authHTTPError) {
+		return authenticationError(authHTTPError, sourceURL)
+	}
+	return err
+}
+
+// minimumELMVersion returns the upgrade floor when version is conclusively too
+// old for ELM. Unknown versions are left to the generic availability error.
+func minimumELMVersion(version string) (string, bool) {
+	major, minor, patch, ok := parseGHESVersion(version)
+	if !ok {
+		return "", false
+	}
+
+	if major < 3 || (major == 3 && minor < 17) {
+		return "3.17.17", true
+	}
+	if major > 3 || minor > 21 {
+		return "", false
+	}
+
+	minimumPatch, knownRelease := minimumELMPatches[minor]
+	if !knownRelease || patch >= minimumPatch {
+		return "", false
+	}
+	return fmt.Sprintf("%d.%d.%d", major, minor, minimumPatch), true
+}
+
+func parseGHESVersion(version string) (major, minor, patch int, ok bool) {
+	version = strings.TrimSpace(version)
+	if base, _, found := strings.Cut(version, "-"); found {
+		version = base
+	}
+	if base, _, found := strings.Cut(version, "+"); found {
+		version = base
+	}
+
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, false
+	}
+
+	values := []*int{&major, &minor, &patch}
+	for i, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return 0, 0, 0, false
+		}
+		*values[i] = value
+	}
+	return major, minor, patch, true
+}
+
+func isAuthenticationError(err *elmapi.HTTPError) bool {
+	return err.StatusCode == http.StatusUnauthorized || err.StatusCode == http.StatusForbidden
+}
+
+func authenticationError(err *elmapi.HTTPError, sourceURL string) error {
+	return fmt.Errorf("authentication failed (HTTP %d) for source %s: %s; "+
+		"check the source token with `gh elm config show`. Note the %s and %s environment variables override stored config",
+		err.StatusCode, sourceURL, err.Message, config.EnvSourceURL, config.EnvSourceToken)
+}
+
+// defaultWatchInterval is the default refresh interval for watch mode.
+const defaultWatchInterval = 2 * time.Second
+
+// newWatchCmd builds `gh elm migration watch`.
+func newWatchCmd() *cobra.Command {
+	var (
+		migrationID string
+		intervalStr string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch [MIGRATION-ID]",
+		Short: "Watch migration progress with a live-updating display",
+		Long: "Display a live-updating phased timeline of migration progress, including\n" +
+			"export, backfill, and cutover status.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMigrationID, err := resolveMigrationID(args, migrationID, cmd.Flags().Changed("migration-id"))
+			if err != nil {
+				return err
+			}
+			interval, err := time.ParseDuration(intervalStr)
+			if err != nil {
+				return fmt.Errorf("invalid interval %q: %w", intervalStr, err)
+			}
+			if interval <= 0 {
+				return fmt.Errorf("interval must be positive, got %s", interval)
+			}
+
+			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			if err != nil {
+				return err
+			}
+			return runWatchInterval(cmd, client, srcURL, resolvedMigrationID, interval)
+		},
+	}
+
+	cmd.Flags().StringVarP(&migrationID, "migration-id", "m", "", "Migration ID (UUID) to watch (alternative to the positional argument).")
+	cmd.Flags().StringVarP(&intervalStr, "interval", "i", "2s", "Refresh interval (e.g. 2s, 5s, 1m).")
+	sourceFlags(cmd)
+
+	return cmd
+}
+
+// runWatch watches a migration at the default interval. Used by the --watch flag
+// on create/start/cutover.
+func runWatch(cmd *cobra.Command, client *elmapi.Client, sourceURL, migrationID string) error {
+	return runWatchInterval(cmd, client, sourceURL, migrationID, defaultWatchInterval)
+}
+
+// runWatchInterval starts the bubbletea watch program for the given migration.
+// sourceURL is currently unused (fetch errors surface in the watch footer rather
+// than being annotated) but is kept for signature symmetry with the callers.
+func runWatchInterval(cmd *cobra.Command, client *elmapi.Client, _ /* sourceURL */, migrationID string, interval time.Duration) error {
+	model := watch.New(migrationID, interval, client)
+	p := tea.NewProgram(model, tea.WithContext(cmd.Context()), tea.WithAltScreen())
+
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("watch display error: %w", err)
+	}
+	return nil
+}
