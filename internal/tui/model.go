@@ -1522,7 +1522,7 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 				Force:          values["force"] == "true",
 				SkipInvitation: values["skip"] == "true",
 			}
-			if strings.HasSuffix(input.TargetUser, "[bot]") {
+			if ghapi.IsBotLogin(input.TargetUser) {
 				input.SkipInvitation = true
 			}
 			action := func() tea.Msg {
@@ -1538,7 +1538,7 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 			if csvMode {
 				confirmation = "Reclaim mannequins from this CSV? Rows targeting app[bot] accounts are reattributed immediately and cannot be undone."
 			}
-			if input.SkipInvitation || strings.HasSuffix(input.TargetUser, "[bot]") {
+			if input.SkipInvitation || ghapi.IsBotLogin(input.TargetUser) {
 				confirmation = "This immediately reattributes mannequin content and cannot be undone."
 			}
 			return func() tea.Msg {

@@ -354,7 +354,7 @@ func confirmBotReclaims(cmd *cobra.Command, log mannequinLogger, records []ghapi
 		}
 		summary += "."
 	} else {
-		summary = fmt.Sprintf("You are about to reattribute mannequin %q to the GitHub App / bot account %q.", firstBot.MannequinUser, firstBot.TargetUser)
+		summary = fmt.Sprintf("You are about to reattribute every mannequin identity matching %q to the GitHub App / bot account %q.", firstBot.MannequinUser, firstBot.TargetUser)
 	}
 
 	if !confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),

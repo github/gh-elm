@@ -209,7 +209,7 @@ gh elm target mannequin reclaim octo-org --csv mannequins.csv --skip-invitation
 
 # Reclaim to a customer-owned GitHub App / bot account (target login ends in [bot]);
 # irreversible, so it prompts unless --no-prompt
-gh elm target mannequin reclaim octo-org legacy-ci[bot] example-ci[bot]
+gh elm target mannequin reclaim octo-org 'legacy-ci[bot]' 'example-ci[bot]'
 ```
 
 ## Configuration
