@@ -2,7 +2,6 @@ package ghapi
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -141,20 +140,14 @@ func TestReattributeMannequinToUser(t *testing.T) {
 func TestBotID(t *testing.T) {
 	t.Run("returns the node id for a bot", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.HasPrefix(r.URL.Path, "/users/") {
-				t.Errorf("path = %q", r.URL.Path)
-			}
+			assert.True(t, strings.HasPrefix(r.URL.Path, "/users/"), "path = %q", r.URL.Path)
 			_, _ = io.WriteString(w, `{"type":"Bot","node_id":"BOT_kgDNAbc"}`)
 		}))
 		defer srv.Close()
 
 		id, err := NewClient(srv.URL, "tok").BotID(t.Context(), "example-ci[bot]")
-		if err != nil {
-			t.Fatalf("BotID: %v", err)
-		}
-		if id != "BOT_kgDNAbc" {
-			t.Errorf("id = %q", id)
-		}
+		require.NoError(t, err, "BotID")
+		assert.Equal(t, "BOT_kgDNAbc", id)
 	})
 
 	t.Run("errors when the account is not a bot", func(t *testing.T) {
@@ -164,9 +157,8 @@ func TestBotID(t *testing.T) {
 		defer srv.Close()
 
 		_, err := NewClient(srv.URL, "tok").BotID(t.Context(), "mona")
-		if err == nil || !strings.Contains(err.Error(), "not a GitHub App / bot account") {
-			t.Fatalf("expected not-a-bot error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a GitHub App / bot account")
 	})
 
 	t.Run("returns ErrUserNotFound on 404", func(t *testing.T) {
@@ -176,28 +168,21 @@ func TestBotID(t *testing.T) {
 		defer srv.Close()
 
 		_, err := NewClient(srv.URL, "tok").BotID(t.Context(), "ghost[bot]")
-		if !errors.Is(err, ErrUserNotFound) {
-			t.Fatalf("expected ErrUserNotFound, got %v", err)
-		}
+		require.ErrorIs(t, err, ErrUserNotFound)
 	})
 }
 
 func TestReattributeMannequinToBot(t *testing.T) {
 	t.Run("returns the source/target pair", func(t *testing.T) {
 		srv := graphQLServer(t, func(q string, _ map[string]any) string {
-			if !strings.Contains(q, "reattributeMannequinToBot") {
-				t.Errorf("unexpected query: %s", q)
-			}
+			assert.Contains(t, q, "reattributeMannequinToBot", "unexpected query")
 			return `{"data":{"reattributeMannequinToBot":{"source":{"id":"m1","login":"alice"},"target":{"id":"b1","login":"example-ci[bot]"}}}}`
 		})
 		defer srv.Close()
 
 		res, err := NewClient(srv.URL, "tok").ReattributeMannequinToBot(t.Context(), "ORG", "m1", "b1")
-		if err != nil {
-			t.Fatalf("ReattributeMannequinToBot: %v", err)
-		}
-		if res.SourceID != "m1" || res.TargetID != "b1" {
-			t.Errorf("result = %+v", res)
-		}
+		require.NoError(t, err, "ReattributeMannequinToBot")
+		assert.Equal(t, "m1", res.SourceID)
+		assert.Equal(t, "b1", res.TargetID)
 	})
 }

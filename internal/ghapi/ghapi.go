@@ -24,11 +24,10 @@ const (
 	apiVersionHeader = "X-GitHub-Api-Version"
 	apiVersion       = "2022-11-28"
 
-	// graphQLFeaturesHeader opts into preview GraphQL schema features. The
-	// mannequin_claiming_emu feature exposes the reattributeMannequinToUser
-	// mutation used by `mannequin reclaim --skip-invitation`; without it the
-	// mutation; mannequin_claiming_bot
-	// exposes reattributeMannequinToBot used when reclaiming to a GitHub App / bot
+	// graphQLFeaturesHeader opts into preview GraphQL schema features.
+	// mannequin_claiming_emu exposes the reattributeMannequinToUser mutation used
+	// by `mannequin reclaim --skip-invitation`; mannequin_claiming_bot exposes the
+	// reattributeMannequinToBot mutation used when reclaiming to a GitHub App / bot
 	// account. Without them the mutations are absent from the schema and the call
 	// fails with "doesn't exist on type 'Mutation'". gh-gei sends this header on
 	// every request (it is ignored by REST), so we do the same.

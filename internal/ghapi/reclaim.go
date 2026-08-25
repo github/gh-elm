@@ -60,7 +60,7 @@ func (s *ReclaimService) ReclaimMannequin(ctx context.Context, mannequinUser, ma
 		return fmt.Errorf("user %s is already mapped to a user; use --force to reclaim again", mannequinUser)
 	}
 
-	isBot := isBotLogin(targetUser)
+	isBot := IsBotLogin(targetUser)
 	targetUserID, err := s.resolveTargetID(ctx, targetUser, isBot)
 	if err != nil {
 		return err
@@ -119,7 +119,7 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, records []Manneq
 			continue
 		}
 
-		isBot := isBotLogin(r.TargetUser)
+		isBot := IsBotLogin(r.TargetUser)
 		claimantID, err := s.resolveTargetID(ctx, r.TargetUser, isBot)
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
@@ -132,8 +132,10 @@ func (s *ReclaimService) ReclaimMannequins(ctx context.Context, records []Manneq
 
 		m := Mannequin{ID: r.MannequinID, Login: r.MannequinUser}
 		if !s.reclaimOne(ctx, orgID, m, r.TargetUser, claimantID, skipInvitation, isBot) && (skipInvitation || isBot) {
-			// Fail-fast for skip-invitation and bot reclaims, matching gh-gei.
-			return nil
+			// Fail-fast for skip-invitation and bot reclaims: the operation is
+			// irreversible, so surface an error rather than exiting 0 so automation
+			// can detect that the reclaim did not complete.
+			return errors.New("failed to reclaim mannequin")
 		}
 	}
 	return nil
@@ -145,14 +147,14 @@ func (s *ReclaimService) reclaimOne(ctx context.Context, orgID string, m Mannequ
 	if isBot {
 		result, err := s.client.ReattributeMannequinToBot(ctx, orgID, m.ID, targetUserID)
 		if err != nil && isBotReclaimUnavailable(err) {
-			s.log.Warnf("Reclaiming mannequins to a GitHub App / bot account is not enabled for your GitHub organization. For more details, contact GitHub Support.")
+			s.log.Warnf("Reclaiming mannequins to a GitHub App / bot account is not enabled for your GitHub organization or enterprise. For more details, contact GitHub Support.")
 			return false
 		}
-		return s.handleReattribution(m, targetUser, targetUserID, result, err)
+		return s.handleReattribution(m, targetUser, targetUserID, result, err, true)
 	}
 	if skipInvitation {
 		result, err := s.client.ReattributeMannequinToUser(ctx, orgID, m.ID, targetUserID)
-		return s.handleReattribution(m, targetUser, targetUserID, result, err)
+		return s.handleReattribution(m, targetUser, targetUserID, result, err, false)
 	}
 	result, err := s.client.CreateAttributionInvitation(ctx, orgID, m.ID, targetUserID)
 	return s.handleInvitation(m, targetUser, targetUserID, result, err)
@@ -167,10 +169,11 @@ func (s *ReclaimService) resolveTargetID(ctx context.Context, targetUser string,
 	return s.client.UserID(ctx, targetUser)
 }
 
-// isBotLogin reports whether a target login is a GitHub App / bot account, which
-// GitHub renders with a trailing "[bot]" suffix.
-func isBotLogin(login string) bool {
-	return strings.HasSuffix(login, "[bot]")
+// IsBotLogin reports whether a target login is a GitHub App / bot account, which
+// GitHub renders with a trailing "[bot]" suffix. GitHub logins are
+// case-insensitive, so the suffix is matched case-insensitively.
+func IsBotLogin(login string) bool {
+	return strings.HasSuffix(strings.ToLower(login), "[bot]")
 }
 
 func (s *ReclaimService) handleInvitation(m Mannequin, targetUser, targetUserID string, result *AttributionResult, err error) bool {
@@ -186,19 +189,21 @@ func (s *ReclaimService) handleInvitation(m Mannequin, targetUser, targetUserID 
 	return true
 }
 
-func (s *ReclaimService) handleReattribution(m Mannequin, targetUser, targetUserID string, result *AttributionResult, err error) bool {
+func (s *ReclaimService) handleReattribution(m Mannequin, targetUser, targetUserID string, result *AttributionResult, err error, bot bool) bool {
 	if err != nil {
 		if isSkipInvitationUnavailable(err) {
 			s.log.Warnf("Reclaiming mannequins with --skip-invitation is not enabled for your GitHub organization. For more details, contact GitHub Support.")
 			return false
 		}
-		// "Target must be a member" and similar are per-mannequin soft failures.
+		// "Target must be a member" and similar are per-mannequin soft failures for
+		// user reattribution; a bot reattribution is irreversible, so any failure is
+		// hard so the caller can fail-fast rather than report a false success.
 		s.log.Warnf("Failed to reattribute content belonging to mannequin %s (%s) to %s: %v", m.Login, m.ID, targetUser, err)
-		return true
+		return !bot
 	}
 	if result == nil || result.SourceID != m.ID || result.TargetID != targetUserID {
 		s.log.Warnf("Failed to reattribute content belonging to mannequin %s (%s) to %s", m.Login, m.ID, targetUser)
-		return true
+		return !bot
 	}
 	s.log.Successf("Successfully reclaimed content belonging to mannequin %s (%s) to %s", m.Login, m.ID, targetUser)
 	return true
