@@ -299,6 +299,36 @@ func TestReclaimMannequins(t *testing.T) {
 	})
 }
 
+func TestBotReclaimAdvisory(t *testing.T) {
+	t.Run("classifies bot and user targets and flags mis-targets", func(t *testing.T) {
+		botCount, userCount, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "legacy-ci[bot]", TargetUser: "example-ci[bot]"},
+			{MannequinUser: "human", TargetUser: "app[bot]"},
+			{MannequinUser: "alice", TargetUser: "alice-t"},
+		})
+		assert.Equal(t, 2, botCount)
+		assert.Equal(t, 1, userCount)
+		assert.Equal(t, []string{"human"}, mistargets)
+	})
+
+	t.Run("trims the target and matches casing", func(t *testing.T) {
+		botCount, userCount, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "human", TargetUser: "app[BOT] "},
+		})
+		assert.Equal(t, 1, botCount)
+		assert.Zero(t, userCount)
+		assert.Equal(t, []string{"human"}, mistargets)
+	})
+
+	t.Run("deduplicates mis-target source logins", func(t *testing.T) {
+		_, _, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "human", TargetUser: "a[bot]"},
+			{MannequinUser: "human", TargetUser: "b[bot]"},
+		})
+		assert.Equal(t, []string{"human"}, mistargets)
+	})
+}
+
 func TestIsSkipInvitationUnavailable(t *testing.T) {
 	t.Run("missing mutation", func(t *testing.T) {
 		err := &GraphQLError{Messages: []string{"Field 'reattributeMannequinToUser' doesn't exist on type 'Mutation'"}}

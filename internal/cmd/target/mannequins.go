@@ -220,12 +220,7 @@ func newMannequinReclaimCmd() *cobra.Command {
 			log := mannequinLogger{w: cmd.ErrOrStderr()}
 			svc := ghapi.NewReclaimService(client, log)
 
-			if skipInvitation {
-				if err := ensureSkipInvitationAllowed(cmd, client, githubOrg, noPrompt); err != nil {
-					return annotateMannequinAuthError(err, targetURLResolved)
-				}
-			}
-
+			var records []ghapi.MannequinRecord
 			if csvPath != "" {
 				log.Infof("Reclaiming mannequins from CSV...")
 				f, err := os.Open(csvPath)
@@ -233,21 +228,32 @@ func newMannequinReclaimCmd() *cobra.Command {
 					return fmt.Errorf("opening %s: %w", csvPath, err)
 				}
 				defer func() { _ = f.Close() }()
-				records, err := ghapi.ReadMannequinCSV(f)
+				records, err = ghapi.ReadMannequinCSV(f)
 				if err != nil {
 					return err
 				}
-				if err := confirmBotReclaims(cmd, log, records, noPrompt); err != nil {
-					return err
+			} else {
+				log.Infof("Reclaiming mannequin...")
+				records = []ghapi.MannequinRecord{{MannequinUser: mannequinUser, TargetUser: targetUser}}
+			}
+
+			if skipInvitation {
+				if _, userCount, _ := ghapi.BotReclaimAdvisory(records); userCount > 0 {
+					if err := ensureSkipInvitationAllowed(cmd, client, githubOrg, noPrompt); err != nil {
+						return annotateMannequinAuthError(err, targetURLResolved)
+					}
 				}
+			}
+
+			if err := confirmBotReclaims(cmd, log, records, noPrompt); err != nil {
+				return err
+			}
+
+			if csvPath != "" {
 				if err := svc.ReclaimMannequins(cmd.Context(), records, githubOrg, force, skipInvitation); err != nil {
 					return annotateMannequinAuthError(err, targetURLResolved)
 				}
 				return nil
-			}
-			log.Infof("Reclaiming mannequin...")
-			if err := confirmBotReclaims(cmd, log, []ghapi.MannequinRecord{{MannequinUser: mannequinUser, TargetUser: targetUser}}, noPrompt); err != nil {
-				return err
 			}
 			if err := svc.ReclaimMannequin(cmd.Context(), mannequinUser, mannequinID, targetUser, githubOrg, force, skipInvitation); err != nil {
 				return annotateMannequinAuthError(err, targetURLResolved)
@@ -324,22 +330,9 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 // mis-target (a human's content going to a bot), but the convention is
 // GitHub-specific, so we warn and let the admin proceed rather than blocking.
 func confirmBotReclaims(cmd *cobra.Command, log mannequinLogger, records []ghapi.MannequinRecord, noPrompt bool) error {
-	var botCount, humanCount int
-	warned := make(map[string]bool)
-	var firstBot ghapi.MannequinRecord
-	for _, r := range records {
-		if !ghapi.IsBotLogin(r.TargetUser) {
-			humanCount++
-			continue
-		}
-		if botCount == 0 {
-			firstBot = r
-		}
-		botCount++
-		if !ghapi.IsBotLogin(r.MannequinUser) && !warned[r.MannequinUser] {
-			warned[r.MannequinUser] = true
-			log.Warnf("%q does not look like a bot mannequin (its login does not end in %q). Are you sure you want to do this?", r.MannequinUser, "[bot]")
-		}
+	botCount, humanCount, mistargets := ghapi.BotReclaimAdvisory(records)
+	for _, src := range mistargets {
+		log.Warnf("%q does not look like a bot mannequin (its login does not end in %q). Are you sure you want to do this?", src, "[bot]")
 	}
 
 	if botCount == 0 || noPrompt {
@@ -354,7 +347,7 @@ func confirmBotReclaims(cmd *cobra.Command, log mannequinLogger, records []ghapi
 		}
 		summary += "."
 	} else {
-		summary = fmt.Sprintf("You are about to reattribute every mannequin identity matching %q to the GitHub App / bot account %q.", firstBot.MannequinUser, firstBot.TargetUser)
+		summary = fmt.Sprintf("You are about to reattribute every mannequin identity matching %q to the GitHub App / bot account %q.", records[0].MannequinUser, records[0].TargetUser)
 	}
 
 	if !confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),

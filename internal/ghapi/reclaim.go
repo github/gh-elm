@@ -176,6 +176,27 @@ func IsBotLogin(login string) bool {
 	return strings.HasSuffix(strings.ToLower(login), "[bot]")
 }
 
+// BotReclaimAdvisory classifies reclaim records by target type. It returns the
+// number of records targeting a bot, the number targeting a user, and the
+// distinct source logins that target a bot but do not themselves look like a
+// bot (likely mis-targets worth warning about). Target logins are trimmed
+// before classification so surrounding whitespace does not change the result.
+func BotReclaimAdvisory(records []MannequinRecord) (botCount, userCount int, mistargetSources []string) {
+	seen := make(map[string]bool)
+	for _, r := range records {
+		if !IsBotLogin(strings.TrimSpace(r.TargetUser)) {
+			userCount++
+			continue
+		}
+		botCount++
+		if !IsBotLogin(r.MannequinUser) && !seen[r.MannequinUser] {
+			seen[r.MannequinUser] = true
+			mistargetSources = append(mistargetSources, r.MannequinUser)
+		}
+	}
+	return botCount, userCount, mistargetSources
+}
+
 func (s *ReclaimService) handleInvitation(m Mannequin, targetUser, targetUserID string, result *AttributionResult, err error) bool {
 	if err != nil {
 		s.log.Warnf("Failed to send reclaim invitation email to %s for mannequin %s (%s): %v", targetUser, m.Login, m.ID, err)
