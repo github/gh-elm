@@ -327,6 +327,17 @@ func TestBotReclaimAdvisory(t *testing.T) {
 		})
 		assert.Equal(t, []string{"human"}, mistargets)
 	})
+
+	t.Run("ignores rows with an empty target", func(t *testing.T) {
+		botCount, userCount, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "alice", TargetUser: ""},
+			{MannequinUser: "bob", TargetUser: "   "},
+			{MannequinUser: "legacy-ci[bot]", TargetUser: "example-ci[bot]"},
+		})
+		assert.Equal(t, 1, botCount)
+		assert.Zero(t, userCount)
+		assert.Empty(t, mistargets)
+	})
 }
 
 func TestIsSkipInvitationUnavailable(t *testing.T) {

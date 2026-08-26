@@ -180,11 +180,17 @@ func IsBotLogin(login string) bool {
 // number of records targeting a bot, the number targeting a user, and the
 // distinct source logins that target a bot but do not themselves look like a
 // bot (likely mis-targets worth warning about). Target logins are trimmed
-// before classification so surrounding whitespace does not change the result.
+// before classification so surrounding whitespace does not change the result;
+// records with an empty target are ignored, mirroring ReclaimMannequins, which
+// skips them (e.g. unedited rows exported by `mannequin list`).
 func BotReclaimAdvisory(records []MannequinRecord) (botCount, userCount int, mistargetSources []string) {
 	seen := make(map[string]bool)
 	for _, r := range records {
-		if !IsBotLogin(strings.TrimSpace(r.TargetUser)) {
+		target := strings.TrimSpace(r.TargetUser)
+		if target == "" {
+			continue
+		}
+		if !IsBotLogin(target) {
 			userCount++
 			continue
 		}
