@@ -65,7 +65,7 @@ func (m *Model) View() string {
 		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
 		title = "Target mannequins"
-		body = m.actionButtons(actionsFromLabels(mannequinActions), m.cursor, m.contentWidth())
+		body = m.actionButtons(mannequinActions, m.actionFocus, m.contentWidth())
 		help = helpLine(keys.Left, keys.Open, keys.Back)
 	case screenConfiguration:
 		title = "Configuration"
@@ -75,6 +75,9 @@ func (m *Model) View() string {
 		title = m.picker.title
 		body = m.pickerView()
 		help = "type to search • ↑/↓ select • enter continue • ctrl+e manual entry • esc cancel"
+		if m.picker.kind == pickerSourceRepository {
+			help = "type to search • ↑/↓ select • enter continue • ? repository details • ctrl+e manual entry • esc cancel"
+		}
 	case screenForm:
 		title = m.form.title
 		body = m.formView()
@@ -113,6 +116,15 @@ func (m *Model) View() string {
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
+	} else if m.pickerInfoOpen {
+		if overlay := m.pickerInfoOverlay(); overlay != "" {
+			rendered = overlayCenter(
+				rendered,
+				overlay,
+				m.displayWidth(),
+				displayHeight(m.height),
+			)
+		}
 	}
 	return rendered
 }
@@ -219,14 +231,6 @@ func (m *Model) menu(items []string) string {
 	return builder.String()
 }
 
-func actionsFromLabels(labels []string) []actionItem {
-	actions := make([]actionItem, len(labels))
-	for index, label := range labels {
-		actions[index] = actionItem{label: label}
-	}
-	return actions
-}
-
 func (m *Model) sourceListView() string {
 	migrations := m.visibleSourceMigrations()
 	if len(migrations) == 0 {
@@ -263,16 +267,19 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 	target := migration.TargetOrganizationLogin + "/" + migration.TargetRepositoryName
 
 	var card strings.Builder
-	fmt.Fprintf(&card, "%s %s  %s\n", glyph, statusText, m.styles.Bold.Render(source+" → "+target))
+	fmt.Fprintf(&card, "%s %s  %s\n", glyph, statusText, m.repositoryChip(source+" → "+target))
 	if m.compactSourceList() {
-		fmt.Fprintf(&card, "  %s", m.styles.Muted.Render(migration.MigrationID))
+		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("id:"), m.styles.Muted.Render(migration.MigrationID))
 	} else {
-		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("ID"), m.styles.Muted.Render(migration.MigrationID))
+		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("id:"), m.styles.Muted.Render(migration.MigrationID))
 		if migration.TargetMigrationID > 0 {
 			fmt.Fprintf(&card, "%s%s", m.styles.Muted.Render(" · destination "), m.styles.Bold.Render(fmt.Sprintf("%d", migration.TargetMigrationID)))
 		}
 		if migration.CreatedAt != nil && *migration.CreatedAt != "" {
 			fmt.Fprintf(&card, "%s%s", m.styles.Muted.Render(" · created "), m.styles.Muted.Render(*migration.CreatedAt))
+		}
+		if migration.TargetVisibility != nil && *migration.TargetVisibility != "" {
+			fmt.Fprintf(&card, "  %s", m.metadataBadge(*migration.TargetVisibility))
 		}
 	}
 
@@ -291,7 +298,7 @@ func (m *Model) sourceDetailView() string {
 	}
 	var actions strings.Builder
 	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
-	actions.WriteString(m.actionButtons(m.sourceActionItems(), m.cursor, m.contentWidth()))
+	actions.WriteString(m.actionButtons(m.sourceActionItems(), m.actionFocus, m.contentWidth()))
 	return m.detailLayout(status.String(), actions.String())
 }
 
@@ -310,8 +317,8 @@ func (m *Model) targetListView() string {
 		repositories := strings.Join(migration.Repositories, ", ")
 		var card strings.Builder
 		glyph, status := m.statusDisplay(migration.Status)
-		fmt.Fprintf(&card, "%s %s  %s\n", glyph, status, m.styles.Bold.Render(repositories))
-		fmt.Fprintf(&card, "%s %s", m.styles.Muted.Render("ID"), m.styles.Muted.Render(migration.MigrationID))
+		fmt.Fprintf(&card, "%s %s  %s\n", glyph, status, m.repositoryChip(repositories))
+		fmt.Fprintf(&card, "%s %s", m.styles.Muted.Render("id:"), m.styles.Muted.Render(migration.MigrationID))
 		if index > start {
 			builder.WriteString("\n")
 		}
@@ -360,7 +367,7 @@ func (m *Model) targetDetailView() string {
 	}
 	var actions strings.Builder
 	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
-	actions.WriteString(m.actionButtons(m.targetActionItems(), m.cursor, m.contentWidth()))
+	actions.WriteString(m.actionButtons(m.targetActionItems(), m.actionFocus, m.contentWidth()))
 	return m.detailLayout(detail.String(), actions.String())
 }
 
@@ -408,7 +415,7 @@ func (m *Model) configurationView() string {
 		fmt.Fprintf(&builder, "Credentials:  %s\n", configuration.CredentialStore)
 	}
 	builder.WriteString("\n" + m.styles.Bold.Render("Actions") + "\n\n")
-	builder.WriteString(m.actionButtons(actionsFromLabels(configurationActions), m.cursor, m.contentWidth()))
+	builder.WriteString(m.actionButtons(configurationActions, m.actionFocus, m.contentWidth()))
 	return builder.String()
 }
 
@@ -566,15 +573,110 @@ func (m *Model) pickerView() string {
 		if index > start {
 			builder.WriteString("\n")
 		}
-		builder.WriteString(m.selectorCard(items[index], index == m.picker.cursor, true))
+		builder.WriteString(m.pickerItemView(items[index], index == m.picker.cursor))
 	}
 	if end < len(items) {
 		fmt.Fprintf(&builder, "\n%s", m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(items)-end)))
 	}
+	list := builder.String()
 	if start > 0 {
-		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
+		list = m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + list
 	}
-	return builder.String()
+	if m.picker.kind != pickerSourceRepository || m.contentWidth() < 92 {
+		return list
+	}
+	selected := items[m.picker.cursor]
+	if selected.repository == nil {
+		return list
+	}
+	info := m.repositoryInfoPanel(*selected.repository, false)
+	listWidth := max(30, m.contentWidth()-lipgloss.Width(info)-4)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(listWidth).Render(list),
+		"    ",
+		info,
+	)
+}
+
+func (m *Model) pickerItemView(item pickerItem, selected bool) string {
+	if item.repository == nil {
+		return m.selectorCard(item.value, selected, true)
+	}
+	repository := item.repository
+	var metadata []string
+	if repository.Stargazers > 0 {
+		metadata = append(metadata, fmt.Sprintf("★ %d", repository.Stargazers))
+	}
+	if repository.OpenIssueCount > 0 {
+		metadata = append(metadata, fmt.Sprintf("≡ %d", repository.OpenIssueCount))
+	}
+	if repository.Language != "" {
+		metadata = append(metadata, "◆ "+repository.Language)
+	}
+	switch {
+	case repository.Archived:
+		metadata = append(metadata, "archived")
+	case repository.Visibility != "":
+		metadata = append(metadata, repository.Visibility)
+	case repository.Private:
+		metadata = append(metadata, "private")
+	}
+	if repository.Fork {
+		metadata = append(metadata, "fork")
+	}
+	content := m.styles.Bold.Render(repository.FullName)
+	if len(metadata) > 0 {
+		content += "  " + m.styles.Muted.Render(strings.Join(metadata, " · "))
+	}
+	return m.selectorCard(content, selected, true)
+}
+
+func (m *Model) pickerInfoOverlay() string {
+	items := m.visiblePickerItems()
+	if m.picker.cursor < 0 || m.picker.cursor >= len(items) || items[m.picker.cursor].repository == nil {
+		return ""
+	}
+	return m.repositoryInfoPanel(*items[m.picker.cursor].repository, true)
+}
+
+func (m *Model) repositoryInfoPanel(repository elmapi.Repository, closeButton bool) string {
+	const width = 36
+	row := func(label, value string) string {
+		return m.styles.Muted.Render(fmt.Sprintf("%-14s", label)) + value
+	}
+	visibility := repository.Visibility
+	if visibility == "" && repository.Private {
+		visibility = "private"
+	}
+	if visibility == "" {
+		visibility = "unknown"
+	}
+	description := repository.Description
+	if description == "" {
+		description = "No description."
+	}
+	lines := []string{
+		m.styles.Bold.Render(repository.FullName),
+		"",
+		m.styles.Muted.Render(description),
+		"",
+		row("★ Stars", fmt.Sprintf("%d", repository.Stargazers)),
+		row("≡ Open issues", fmt.Sprintf("%d", repository.OpenIssueCount)),
+		row("◆ Language", orUnset(repository.Language)),
+		row("Visibility", visibility),
+	}
+	if repository.Archived {
+		lines = append(lines, row("State", m.styles.Warning.Render("archived")))
+	}
+	if repository.Fork {
+		lines = append(lines, row("Type", "fork"))
+	}
+	if closeButton {
+		lines = append(lines, "", m.actionButtons([]actionItem{{id: "close", label: "Close", shortcut: "esc"}}, 0, width))
+	}
+	content := lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+	return m.panel(content)
 }
 
 func (m *Model) confirmationOverlay() string {

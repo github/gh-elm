@@ -91,7 +91,7 @@ func New() Styles {
 		Muted:       lipgloss.NewStyle().Foreground(colorMuted),
 		Placeholder: lipgloss.NewStyle().Foreground(colorPlaceholder),
 		Success:     lipgloss.NewStyle().Foreground(colorGreen),
-		Active:      lipgloss.NewStyle().Foreground(colorBlue),
+		Active:      lipgloss.NewStyle().Foreground(colorGreen),
 		Warning:     lipgloss.NewStyle().Foreground(warningColor),
 		Paused:      lipgloss.NewStyle().Foreground(warningColor),
 		Failure:     lipgloss.NewStyle().Foreground(githubRed),

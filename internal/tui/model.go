@@ -49,8 +49,13 @@ type targetService interface {
 }
 
 type catalogService interface {
-	ListSourceRepositories(context.Context) ([]string, error)
+	ListSourceRepositories(context.Context) ([]elmapi.Repository, error)
 	ListTargetOrganizations(context.Context) ([]string, error)
+}
+
+type pickerItem struct {
+	value      string
+	repository *elmapi.Repository
 }
 
 type mannequinService interface {
@@ -130,7 +135,7 @@ type pickerState struct {
 	kind       pickerKind
 	title      string
 	parent     screen
-	items      []string
+	items      []pickerItem
 	cursor     int
 	input      textinput.Model
 	loading    bool
@@ -164,6 +169,7 @@ type Model struct {
 	width         int
 	height        int
 	cursor        int
+	actionFocus   int
 	loading       bool
 	err           error
 	viewport      viewport.Model
@@ -199,6 +205,7 @@ type Model struct {
 	targetAuthErr     error
 	picker            pickerState
 	pickerGeneration  uint64
+	pickerInfoOpen    bool
 	form              formState
 	confirm           confirmState
 	result            resultState
@@ -276,7 +283,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.detail.Migration != nil && msg.detail.Migration.TargetMigrationID > 0 {
 				m.targetID = workflow.TargetMigrationID(msg.detail.Migration.TargetMigrationID)
 			}
-			m.clampCursor()
+			m.clampActionFocus()
 		}
 		if m.sourceWatching {
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return watchTickMsg{} })
@@ -300,7 +307,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if len(msg.migration.Repositories) > 0 {
 				m.repository = msg.migration.Repositories[0]
 			}
-			m.clampCursor()
+			m.clampActionFocus()
 		}
 	case configMsg:
 		if msg.generation != m.configGeneration {
@@ -414,6 +421,8 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case m.actionScreen() && m.activateActionShortcut(msg.String()):
+		return m.activate()
 	case key.Matches(msg, keys.Help):
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -427,12 +436,12 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.back()
 		}
 	case key.Matches(msg, keys.Left):
-		if m.actionScreen() && m.cursor > 0 {
-			m.cursor--
+		if m.actionScreen() && m.actionFocus > 0 {
+			m.actionFocus--
 		}
 	case key.Matches(msg, keys.Right):
-		if m.actionScreen() && m.cursor < m.itemCount()-1 {
-			m.cursor++
+		if m.actionScreen() && m.actionFocus < m.itemCount()-1 {
+			m.actionFocus++
 		}
 	case key.Matches(msg, keys.Up):
 		if !m.actionScreen() && m.cursor > 0 {
@@ -518,6 +527,13 @@ func (m *Model) updateSourceSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pickerInfoOpen {
+		switch msg.String() {
+		case "esc", "enter", "?", "q":
+			m.pickerInfoOpen = false
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "ctrl+e":
 		source := ""
@@ -527,6 +543,14 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openManualSourceCreateForm(m.picker.parent, source)
 	case "ctrl+r":
 		return m.reloadPicker()
+	case "?":
+		items := m.visiblePickerItems()
+		if m.picker.kind == pickerSourceRepository &&
+			m.picker.cursor >= 0 && m.picker.cursor < len(items) &&
+			items[m.picker.cursor].repository != nil {
+			m.pickerInfoOpen = true
+		}
+		return m, nil
 	case "esc":
 		if m.picker.input.Value() != "" {
 			m.picker.input.SetValue("")
@@ -547,7 +571,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(items) == 0 {
 			return m, nil
 		}
-		selected := items[m.picker.cursor]
+		selected := items[m.picker.cursor].value
 		if m.picker.kind == pickerSourceRepository {
 			return m.openTargetOrganizationPicker(m.picker.parent, selected)
 		}
@@ -574,14 +598,14 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m *Model) visiblePickerItems() []string {
+func (m *Model) visiblePickerItems() []pickerItem {
 	query := strings.ToLower(strings.TrimSpace(m.picker.input.Value()))
 	if query == "" {
 		return m.picker.items
 	}
-	items := make([]string, 0, len(m.picker.items))
+	items := make([]pickerItem, 0, len(m.picker.items))
 	for _, item := range m.picker.items {
-		if strings.Contains(strings.ToLower(item), query) {
+		if strings.Contains(strings.ToLower(item.value), query) {
 			items = append(items, item)
 		}
 	}
@@ -610,9 +634,10 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		case 1:
 			return m.openSourceCreateForm(screenHome)
 		case 2:
-			m.screen, m.cursor = screenMannequins, 0
+			m.screen, m.actionFocus = screenMannequins, 0
 		case 3:
 			m.screen, m.loading, m.err = screenConfiguration, true, nil
+			m.actionFocus = 0
 			m.resetViewport()
 			command := m.startConfigurationLoad()
 			return m, command
@@ -631,7 +656,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		m.sourceID = workflow.SourceMigrationID(migrations[m.cursor].MigrationID)
 		m.targetID = 0
 		m.screen, m.loading, m.err = screenSourceDetail, true, nil
-		m.cursor = 0
+		m.actionFocus = 0
 		m.resetViewport()
 		command := m.loadSourceDetailCmd()
 		return m, command
@@ -649,7 +674,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		m.targetID = id
 		m.targetParent = screenTargetList
 		m.screen, m.loading, m.err = screenTargetDetail, true, nil
-		m.cursor = 0
+		m.actionFocus = 0
 		m.resetViewport()
 		command := m.loadTargetDetailCmd()
 		return m, command
@@ -666,6 +691,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 func (m *Model) back() (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.cursor = 0
+	m.actionFocus = 0
 	switch m.screen {
 	case screenSourceList:
 		m.sourceSearch = false
@@ -741,21 +767,22 @@ func (m *Model) actionScreen() bool {
 	}
 }
 
-func (m *Model) clampCursor() {
-	m.cursor = min(m.cursor, max(0, m.itemCount()-1))
+func (m *Model) clampActionFocus() {
+	m.actionFocus = min(max(0, m.actionFocus), max(0, m.itemCount()-1))
 }
 
 type actionItem struct {
-	id    string
-	label string
+	id       string
+	label    string
+	shortcut string
 }
 
 func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 	actions := m.sourceActionItems()
-	if m.cursor < 0 || m.cursor >= len(actions) {
+	if m.actionFocus < 0 || m.actionFocus >= len(actions) {
 		return m, nil
 	}
-	switch actions[m.cursor].id {
+	switch actions[m.actionFocus].id {
 	case "refresh":
 		return m.refresh()
 	case "watch":
@@ -801,7 +828,7 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 		}
 		m.screen, m.loading, m.err = screenTargetDetail, true, nil
 		m.targetParent = screenSourceDetail
-		m.cursor = 0
+		m.actionFocus = 0
 		m.resetViewport()
 		command := m.loadTargetDetailCmd()
 		return m, command
@@ -811,8 +838,8 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 
 func (m *Model) sourceActionItems() []actionItem {
 	actions := []actionItem{
-		{id: "refresh", label: "Refresh status"},
-		{id: "watch", label: watchLabel(m.sourceWatching)},
+		{id: "refresh", label: "Refresh status", shortcut: "r"},
+		{id: "watch", label: watchLabel(m.sourceWatching), shortcut: "w"},
 	}
 
 	status := ""
@@ -826,40 +853,40 @@ func (m *Model) sourceActionItems() []actionItem {
 	switch status {
 	case "created":
 		actions = append(actions,
-			actionItem{id: "start", label: "Start migration"},
-			actionItem{id: "cancel", label: "Cancel migration"},
+			actionItem{id: "start", label: "Start migration", shortcut: "s"},
+			actionItem{id: "cancel", label: "Cancel migration", shortcut: "x"},
 		)
 	case "queued", "in progress":
-		actions = append(actions, actionItem{id: "pause", label: "Pause migration"})
+		actions = append(actions, actionItem{id: "pause", label: "Pause migration", shortcut: "p"})
 		if readyForCutover {
-			actions = append(actions, actionItem{id: "cutover", label: "Initiate cutover"})
+			actions = append(actions, actionItem{id: "cutover", label: "Initiate cutover", shortcut: "c"})
 		} else {
-			actions = append(actions, actionItem{id: "force-cutover", label: "Force cutover"})
+			actions = append(actions, actionItem{id: "force-cutover", label: "Force cutover", shortcut: "c"})
 		}
-		actions = append(actions, actionItem{id: "cancel", label: "Cancel migration"})
+		actions = append(actions, actionItem{id: "cancel", label: "Cancel migration", shortcut: "x"})
 	case "paused":
 		actions = append(actions,
-			actionItem{id: "resume", label: "Resume migration"},
-			actionItem{id: "cancel", label: "Cancel migration"},
+			actionItem{id: "resume", label: "Resume migration", shortcut: "u"},
+			actionItem{id: "cancel", label: "Cancel migration", shortcut: "x"},
 		)
 	case "completed":
-		actions = append(actions, actionItem{id: "revert", label: "Revert cutover"})
+		actions = append(actions, actionItem{id: "revert", label: "Revert cutover", shortcut: "v"})
 	}
 	if m.sourceDetail != nil && m.sourceDetail.CombinedState != nil {
-		actions = append(actions, actionItem{id: "cutover-status", label: "Show cutover status"})
+		actions = append(actions, actionItem{id: "cutover-status", label: "Show cutover status", shortcut: "i"})
 	}
 	if m.targetID > 0 {
-		actions = append(actions, actionItem{id: "destination", label: "Open destination details"})
+		actions = append(actions, actionItem{id: "destination", label: "Open destination details", shortcut: "d"})
 	}
 	return actions
 }
 
 func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
 	actions := m.targetActionItems()
-	if m.cursor < 0 || m.cursor >= len(actions) {
+	if m.actionFocus < 0 || m.actionFocus >= len(actions) {
 		return m, nil
 	}
-	switch actions[m.cursor].id {
+	switch actions[m.actionFocus].id {
 	case "refresh":
 		return m.refresh()
 	case "resources":
@@ -885,11 +912,11 @@ func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
 
 func (m *Model) targetActionItems() []actionItem {
 	actions := []actionItem{
-		{id: "refresh", label: "Refresh status"},
-		{id: "resources", label: "List repository resources"},
-		{id: "report-request", label: "Request node report"},
-		{id: "report-status", label: "Check report status"},
-		{id: "report-url", label: "Get report download URL"},
+		{id: "refresh", label: "Refresh status", shortcut: "r"},
+		{id: "resources", label: "List repository resources", shortcut: "o"},
+		{id: "report-request", label: "Request node report", shortcut: "n"},
+		{id: "report-status", label: "Check report status", shortcut: "s"},
+		{id: "report-url", label: "Get report download URL", shortcut: "u"},
 	}
 	status := ""
 	if m.targetDetail != nil {
@@ -898,13 +925,13 @@ func (m *Model) targetActionItems() []actionItem {
 	switch status {
 	case "in progress":
 		actions = append(actions,
-			actionItem{id: "pause", label: "Pause destination migration"},
-			actionItem{id: "abort", label: "Abort destination migration"},
+			actionItem{id: "pause", label: "Pause destination migration", shortcut: "p"},
+			actionItem{id: "abort", label: "Abort destination migration", shortcut: "x"},
 		)
 	case "paused":
 		actions = append(actions,
-			actionItem{id: "resume", label: "Resume destination migration"},
-			actionItem{id: "abort", label: "Abort destination migration"},
+			actionItem{id: "resume", label: "Resume destination migration", shortcut: "m"},
+			actionItem{id: "abort", label: "Abort destination migration", shortcut: "x"},
 		)
 	}
 	return actions
@@ -923,15 +950,15 @@ func normalizedStatus(status string) string {
 	return strings.ToLower(strings.TrimSpace(status))
 }
 
-var mannequinActions = []string{
-	"List mannequins",
-	"Export mannequins to CSV",
-	"Reclaim a mannequin",
-	"Reclaim mannequins from CSV",
+var mannequinActions = []actionItem{
+	{id: "list", label: "List mannequins", shortcut: "a"},
+	{id: "export", label: "Export mannequins to CSV", shortcut: "e"},
+	{id: "reclaim", label: "Reclaim a mannequin", shortcut: "r"},
+	{id: "reclaim-csv", label: "Reclaim mannequins from CSV", shortcut: "c"},
 }
 
 func (m *Model) activateMannequinAction() (tea.Model, tea.Cmd) {
-	switch m.cursor {
+	switch m.actionFocus {
 	case 0:
 		return m.openMannequinListForm(false)
 	case 1:
@@ -944,14 +971,14 @@ func (m *Model) activateMannequinAction() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-var configurationActions = []string{
-	"Refresh configuration",
-	"Edit configuration",
-	"Reset configuration",
+var configurationActions = []actionItem{
+	{id: "refresh", label: "Refresh configuration", shortcut: "r"},
+	{id: "edit", label: "Edit configuration", shortcut: "e"},
+	{id: "reset", label: "Reset configuration", shortcut: "x"},
 }
 
 func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
-	switch m.cursor {
+	switch m.actionFocus {
 	case 0:
 		return m.refresh()
 	case 1:
@@ -964,6 +991,30 @@ func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
 			})
 	}
 	return m, nil
+}
+
+func (m *Model) activateActionShortcut(value string) bool {
+	if len(value) != 1 {
+		return false
+	}
+	var actions []actionItem
+	switch m.screen {
+	case screenSourceDetail:
+		actions = m.sourceActionItems()
+	case screenTargetDetail:
+		actions = m.targetActionItems()
+	case screenMannequins:
+		actions = mannequinActions
+	case screenConfiguration:
+		actions = configurationActions
+	}
+	for index, action := range actions {
+		if strings.EqualFold(value, action.shortcut) {
+			m.actionFocus = index
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) confirmAction(title, body string, parent screen, command tea.Cmd) (tea.Model, tea.Cmd) {
@@ -1003,7 +1054,7 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Open), key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		parent := m.result.parent
 		refresh := m.result.refresh
-		m.screen, m.cursor, m.err = parent, 0, nil
+		m.screen, m.cursor, m.actionFocus, m.err = parent, 0, 0, nil
 		if refresh {
 			return m.refresh()
 		}
@@ -1195,6 +1246,7 @@ func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
 	input.Focus()
 
 	m.pickerGeneration++
+	m.pickerInfoOpen = false
 	m.picker = pickerState{
 		kind:       pickerSourceRepository,
 		title:      "Select source repository",
@@ -1216,6 +1268,7 @@ func (m *Model) openTargetOrganizationPicker(parent screen, source string) (tea.
 	input.Focus()
 
 	m.pickerGeneration++
+	m.pickerInfoOpen = false
 	m.picker = pickerState{
 		kind:       pickerTargetOrganization,
 		title:      "Select destination organization",
@@ -1658,7 +1711,7 @@ type targetAuthenticationMsg struct {
 
 type pickerCatalogMsg struct {
 	generation uint64
-	items      []string
+	items      []pickerItem
 	err        error
 }
 
@@ -1752,13 +1805,26 @@ func (m *Model) checkTargetAuthenticationCmd(generation uint64) tea.Cmd {
 
 func (m *Model) loadPickerCatalogCmd(kind pickerKind, generation uint64) tea.Cmd {
 	return func() tea.Msg {
-		var items []string
+		var items []pickerItem
 		var err error
 		switch kind {
 		case pickerSourceRepository:
-			items, err = m.service.ListSourceRepositories(m.ctx)
+			var repositories []elmapi.Repository
+			repositories, err = m.service.ListSourceRepositories(m.ctx)
+			items = make([]pickerItem, 0, len(repositories))
+			for index := range repositories {
+				items = append(items, pickerItem{
+					value:      repositories[index].FullName,
+					repository: &repositories[index],
+				})
+			}
 		case pickerTargetOrganization:
-			items, err = m.service.ListTargetOrganizations(m.ctx)
+			var organizations []string
+			organizations, err = m.service.ListTargetOrganizations(m.ctx)
+			items = make([]pickerItem, 0, len(organizations))
+			for _, organization := range organizations {
+				items = append(items, pickerItem{value: organization})
+			}
 		}
 		return pickerCatalogMsg{generation: generation, items: items, err: err}
 	}
