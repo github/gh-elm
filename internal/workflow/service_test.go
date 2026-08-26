@@ -144,7 +144,7 @@ func TestRepositoryCatalog(t *testing.T) {
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v3/user/repos", r.URL.Path)
 		_, _ = w.Write([]byte(`[
-			{"full_name":"octo/source","owner":{"type":"Organization"}},
+			{"full_name":"octo/source","description":"Source repository","language":"Go","stargazers_count":7,"owner":{"type":"Organization"}},
 			{"full_name":"personal/source","owner":{"type":"User"}}
 		]`))
 	}))
@@ -167,7 +167,11 @@ func TestRepositoryCatalog(t *testing.T) {
 
 	repositories, err := service.ListSourceRepositories(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"octo/source"}, repositories)
+	require.Len(t, repositories, 1)
+	assert.Equal(t, "octo/source", repositories[0].FullName)
+	assert.Equal(t, "Source repository", repositories[0].Description)
+	assert.Equal(t, "Go", repositories[0].Language)
+	assert.Equal(t, 7, repositories[0].Stargazers)
 
 	organizations, err := service.ListTargetOrganizations(t.Context())
 	require.NoError(t, err)
