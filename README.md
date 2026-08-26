@@ -49,12 +49,15 @@ and reports without repeatedly copying IDs. Lower-level destination migration co
 remain available under **Advanced destination operations**. Use arrow keys or `j`/`k`
 to move, Enter to select, Escape to go back, `/` to search migrations, `Ctrl+V` to
 toggle list density, `?` for contextual help, and `q` to quit. Long detail and result
-views support Page Up and Page Down.
+views support Page Up and Page Down. Action screens always focus their first button;
+use Left/Right and Enter or the shortcut shown inside a button to activate it.
 
 Migration creation lazily loads searchable source repositories and destination
 organizations from the configured APIs. The destination repository name defaults to
 the selected source name and remains editable. Press `Ctrl+E` from either picker to
-fall back to manual `org/repo` entry.
+fall back to manual `org/repo` entry. Source repository rows include metadata returned
+by the source appliance; press `?` to inspect the selected repository when its detail
+panel does not fit beside the list.
 
 In scripts, redirected output, and other non-interactive environments, bare `gh elm`
 continues to print help and exit successfully. Explicit commands and machine-readable
