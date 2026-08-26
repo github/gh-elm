@@ -81,8 +81,11 @@ jobs:
             script/e2e/lib/configuration.sh
             script/e2e/lib/ownership.sh
             script/e2e/lib/migration.sh
+            script/e2e/lib/polling.sh
+            script/e2e/lib/target.sh
             script/e2e/lib/cleanup.sh
             script/e2e/scenarios/control-plane.sh
+            script/e2e/scenarios/lifecycle.sh
           )
 
           missing_harness_files=()
@@ -108,8 +111,9 @@ jobs:
             echo "- Requested ref: \`$CANDIDATE_REF\`"
             echo "- Resolved commit: \`$sha\`"
             echo "- Environment: \`migration-e2e\`"
-            echo "- Scenario: \`control-plane\`"
-            echo "- Complete control-plane harness present: \`$harness_present\`"
+            echo "- Candidate setup: build and install once"
+            echo "- Scenarios: \`control-plane\`, then \`lifecycle\`"
+            echo "- Complete E2E harness present: \`$harness_present\`"
 
             if (( ${#missing_harness_files[@]} > 0 )); then
               echo
@@ -135,27 +139,29 @@ jobs:
           {
             echo "## E2E test not run"
             echo
-            echo "The selected revision does not contain the complete control-plane E2E harness."
+            echo "The selected revision does not contain the complete E2E harness."
             echo
             echo "The resolve job summary lists the missing files."
             echo
             echo "No E2E credentials were requested, and no migration services were contacted."
           } >>"$GITHUB_STEP_SUMMARY"
 
-          echo "::notice::The selected revision has an incomplete control-plane E2E harness. Nothing was run."
+          echo "::notice::The selected revision has an incomplete E2E harness. Nothing was run."
 
   e2e:
-    name: Control-plane scenario
+    name: Migration scenarios
     needs: resolve
     if: needs.resolve.outputs.harness_present == 'true'
     runs-on: ubuntu-latest
 
-    # This is the only job referencing the protected environment. Approval
-    # therefore covers candidate setup and the complete control-plane scenario.
+    # This is the only job referencing the protected environment. One approval
+    # therefore covers candidate setup and both scenarios.
     environment:
       name: migration-e2e
 
-    timeout-minutes: 30
+    # The lifecycle polling budget is at most 90 minutes. Leave additional time
+    # for candidate setup, the control-plane scenario, evidence, and cleanup.
+    timeout-minutes: 120
 
     env:
       # Source GHES
@@ -253,8 +259,11 @@ jobs:
             script/e2e/lib/configuration.sh
             script/e2e/lib/ownership.sh
             script/e2e/lib/migration.sh
+            script/e2e/lib/polling.sh
+            script/e2e/lib/target.sh
             script/e2e/lib/cleanup.sh
             script/e2e/scenarios/control-plane.sh
+            script/e2e/scenarios/lifecycle.sh
           )
 
           for file in "${harness_files[@]}"; do
@@ -271,7 +280,7 @@ jobs:
             fi
           done
 
-          echo "All control-plane harness files passed Bash syntax validation."
+          echo "All E2E harness files passed Bash syntax validation."
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -301,6 +310,9 @@ jobs:
             exit 1
           fi
 
+          # Keep the runner's existing GH_CONFIG_DIR for both installation and
+          # scenario execution. The harness isolates gh-elm configuration
+          # separately through GH_ELM_CONFIG_DIR.
           gh extension install .
 
           installed_version="$(gh elm --version)"
@@ -311,6 +323,9 @@ jobs:
             exit 1
           fi
 
+      # Control-plane runs first. If it or its cleanup fails, normal Actions
+      # step behavior prevents lifecycle from starting against an unsafe
+      # migration environment.
       - name: Run control-plane scenario
         id: control_plane
         env:
@@ -320,12 +335,22 @@ jobs:
         shell: bash
         run: bash script/e2e/test-elm-ghes.sh
 
-      - name: Add E2E summary
+      - name: Run lifecycle scenario
+        id: lifecycle
+        env:
+          E2E_MODE: lifecycle
+          E2E_RUN_ID: actions-${{ github.run_id }}-${{ github.run_attempt }}-lifecycle
+          OUTDIR: ${{ github.workspace }}/elm-results/lifecycle
+        shell: bash
+        run: bash script/e2e/test-elm-ghes.sh
+
+      - name: Add combined E2E summary
         if: always()
         env:
           CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
           JOB_STATUS: ${{ job.status }}
-          SCENARIO_OUTDIR: ${{ github.workspace }}/elm-results/control-plane
+          CONTROL_PLANE_OUTDIR: ${{ github.workspace }}/elm-results/control-plane
+          LIFECYCLE_OUTDIR: ${{ github.workspace }}/elm-results/lifecycle
         shell: bash
         run: |
           {
@@ -333,29 +358,39 @@ jobs:
             echo
             echo "- Candidate: \`$CANDIDATE_SHA\`"
             echo "- Environment: \`migration-e2e\`"
-            echo "- Scenario: \`control-plane\`"
+            echo "- Candidate setup: built and installed once"
+            echo "- Execution order: \`control-plane\`, then \`lifecycle\`"
             echo "- Job result: \`$JOB_STATUS\`"
           } >>"$GITHUB_STEP_SUMMARY"
 
-          if [[ -f "$SCENARIO_OUTDIR/evidence.md" ]]; then
+          append_scenario_evidence() {
+            local scenario="$1"
+            local scenario_outdir="$2"
+
             {
               echo
-              echo "### Control-plane scenario"
+              echo "### ${scenario} scenario"
               echo
             } >>"$GITHUB_STEP_SUMMARY"
 
-            cat "$SCENARIO_OUTDIR/evidence.md" \
-              >>"$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo
-              echo "### Control-plane scenario"
-              echo
-              echo "No evidence file was produced. The scenario may not have started."
-            } >>"$GITHUB_STEP_SUMMARY"
-          fi
+            if [[ -f "$scenario_outdir/evidence.md" ]]; then
+              cat "$scenario_outdir/evidence.md" \
+                >>"$GITHUB_STEP_SUMMARY"
+            else
+              echo "No evidence file was produced. The scenario may not have started." \
+                >>"$GITHUB_STEP_SUMMARY"
+            fi
+          }
 
-      - name: Upload E2E evidence
+          append_scenario_evidence \
+            "Control-plane" \
+            "$CONTROL_PLANE_OUTDIR"
+
+          append_scenario_evidence \
+            "Lifecycle" \
+            "$LIFECYCLE_OUTDIR"
+
+      - name: Upload combined E2E evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Evidence initialization, structured metadata, and result recording for the
-# gh-elm control-plane E2E harness.
+# gh-elm E2E harness.
 #
 # This file is sourced by script/e2e/test-elm-ghes.sh and is not intended to
 # be executed directly.
@@ -12,6 +12,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 initialize_harness() {
+  local polling_timeline_file
+
   if [[ -z "${OUTDIR:-}" ]]; then
     printf 'OUTDIR must be set before initializing the E2E harness.\n' >&2
     return 1
@@ -28,12 +30,25 @@ initialize_harness() {
   CLEANUP_LOG="$OUTDIR/cleanup.log"
   COMMAND_LOG="$OUTDIR/commands.log"
   METADATA_FILE="$OUTDIR/metadata.json"
+  polling_timeline_file="$OUTDIR/poll-timeline.ndjson"
+
+  # Remove migration-specific polling snapshots left by a previous local
+  # invocation that reused the same output directory. Run-level evidence files
+  # are truncated separately below.
+  if ! rm -f -- \
+    "$OUTDIR"/poll-*.json \
+    "$OUTDIR"/poll-*.json.tmp; then
+    printf 'Failed to reset polling snapshots under: %s\n' \
+      "$OUTDIR" >&2
+    return 1
+  fi
 
   if ! : >"$EVIDENCE_FILE" ||
     ! : >"$RESULTS_FILE" ||
     ! : >"$MIGRATIONS_FILE" ||
     ! : >"$CLEANUP_LOG" ||
-    ! : >"$COMMAND_LOG"; then
+    ! : >"$COMMAND_LOG" ||
+    ! : >"$polling_timeline_file"; then
     printf 'Failed to initialize E2E evidence files under: %s\n' \
       "$OUTDIR" >&2
     return 1
@@ -108,22 +123,53 @@ write_evidence_header() {
       "Evidence paths are unavailable; initialize_harness must run first."
   fi
 
-  if [[ -z "${TARGET_REPO_PRIMARY:-}" ||
-    -z "${TARGET_REPO_PAGINATION:-}" ]]; then
+  if [[ -z "${TARGET_REPO_PRIMARY:-}" ]]; then
     fail \
       "Harness" \
       "Runtime repository names are unavailable; configure_runtime must run before write_evidence_header."
   fi
 
-  target_repositories_json="$(
-    jq -cn \
-      --arg primary "$TARGET_REPO_PRIMARY" \
-      --arg pagination "$TARGET_REPO_PAGINATION" \
-      '[$primary, $pagination]'
-  )"
+  case "$E2E_MODE" in
+    control-plane)
+      if [[ -z "${TARGET_REPO_PAGINATION:-}" ]]; then
+        fail \
+          "Harness" \
+          "The control-plane scenario requires a pagination target repository name."
+      fi
+
+      if ! target_repositories_json="$(
+        jq -cn \
+          --arg primary "$TARGET_REPO_PRIMARY" \
+          --arg pagination "$TARGET_REPO_PAGINATION" \
+          '[$primary, $pagination]'
+      )"; then
+        fail \
+          "Evidence" \
+          "Failed to construct control-plane target repository metadata."
+      fi
+      ;;
+    lifecycle)
+      if ! target_repositories_json="$(
+        jq -cn \
+          --arg primary "$TARGET_REPO_PRIMARY" \
+          '[$primary]'
+      )"; then
+        fail \
+          "Evidence" \
+          "Failed to construct lifecycle target repository metadata."
+      fi
+      ;;
+    *)
+      fail \
+        "Configuration" \
+        "Unsupported E2E_MODE: $E2E_MODE. Expected control-plane or lifecycle."
+      ;;
+  esac
 
   temporary_metadata_file="${METADATA_FILE}.tmp"
 
+  # Timeout values have already been validated and normalized as positive
+  # decimal integers by validate_configuration().
   if ! jq -n \
     --arg run_id "$E2E_RUN_ID" \
     --arg scenario "$E2E_MODE" \
@@ -133,6 +179,9 @@ write_evidence_header() {
     --arg target_organization "$TARGET_ORG" \
     --arg target_visibility "$TARGET_VISIBILITY" \
     --argjson target_repositories "$target_repositories_json" \
+    --argjson poll_interval_seconds "$E2E_POLL_INTERVAL_SECONDS" \
+    --argjson state_timeout_seconds "$E2E_STATE_TIMEOUT_SECONDS" \
+    --argjson cutover_timeout_seconds "$E2E_CUTOVER_TIMEOUT_SECONDS" \
     '{
       run_id: $run_id,
       scenario: $scenario,
@@ -141,7 +190,12 @@ write_evidence_header() {
       target_host: $target_host,
       target_organization: $target_organization,
       target_visibility: $target_visibility,
-      target_repositories: $target_repositories
+      target_repositories: $target_repositories,
+      timeouts: {
+        poll_interval_seconds: $poll_interval_seconds,
+        state_timeout_seconds: $state_timeout_seconds,
+        cutover_timeout_seconds: $cutover_timeout_seconds
+      }
     }' >"$temporary_metadata_file"; then
     rm -f "$temporary_metadata_file"
 
@@ -159,18 +213,33 @@ write_evidence_header() {
   fi
 
   if ! {
-    echo "# gh-elm GHES E2E evidence"
-    echo
-    echo "- Run ID: \`$E2E_RUN_ID\`"
-    echo "- Scenario: \`$E2E_MODE\`"
-    echo "- Source host: \`$SOURCE_HOST\`"
-    echo "- Source fixture: \`$SOURCE_ORG/$SOURCE_REPO\`"
-    echo "- Target host: \`$TARGET_HOST\`"
-    echo "- Target organization: \`$TARGET_ORG\`"
-    echo "- Target visibility: \`$TARGET_VISIBILITY\`"
-    echo "- Primary target: \`$TARGET_ORG/$TARGET_REPO_PRIMARY\`"
-    echo "- Pagination target: \`$TARGET_ORG/$TARGET_REPO_PAGINATION\`"
-    echo
+    printf '# gh-elm GHES E2E evidence\n\n'
+    printf -- '- Run ID: `%s`\n' "$E2E_RUN_ID"
+    printf -- '- Scenario: `%s`\n' "$E2E_MODE"
+    printf -- '- Source host: `%s`\n' "$SOURCE_HOST"
+    printf -- '- Source fixture: `%s/%s`\n' \
+      "$SOURCE_ORG" \
+      "$SOURCE_REPO"
+    printf -- '- Target host: `%s`\n' "$TARGET_HOST"
+    printf -- '- Target organization: `%s`\n' "$TARGET_ORG"
+    printf -- '- Target visibility: `%s`\n' "$TARGET_VISIBILITY"
+    printf -- '- Primary target: `%s/%s`\n' \
+      "$TARGET_ORG" \
+      "$TARGET_REPO_PRIMARY"
+
+    if [[ "$E2E_MODE" == "control-plane" ]]; then
+      printf -- '- Pagination target: `%s/%s`\n' \
+        "$TARGET_ORG" \
+        "$TARGET_REPO_PAGINATION"
+    fi
+
+    printf -- '- Poll interval: `%ss`\n' \
+      "$E2E_POLL_INTERVAL_SECONDS"
+    printf -- '- State timeout: `%ss`\n' \
+      "$E2E_STATE_TIMEOUT_SECONDS"
+    printf -- '- Cutover timeout: `%ss`\n' \
+      "$E2E_CUTOVER_TIMEOUT_SECONDS"
+    printf '\n'
   } >>"$EVIDENCE_FILE"; then
     fail \
       "Evidence" \

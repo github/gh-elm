@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Configuration validation and runtime setup for the gh-elm control-plane E2E
-# harness.
+# Configuration validation and runtime setup for the gh-elm E2E harness.
 #
 # This file is sourced by script/e2e/test-elm-ghes.sh and is not intended to
 # be executed directly.
@@ -88,6 +87,10 @@ validate_token() {
 validate_configuration() {
   local variable
   local dependency
+  local value
+  local normalized_value
+  local maximum_value
+  local lifecycle_polling_budget
 
   for variable in \
     SOURCE_HOST \
@@ -106,15 +109,21 @@ validate_configuration() {
     gh \
     jq \
     sed \
-    tr; do
+    tr \
+    sleep \
+    date; do
     require_command "$dependency"
   done
 
-  if [[ "$E2E_MODE" != "control-plane" ]]; then
-    fail \
-      "Configuration" \
-      "Unsupported E2E_MODE: $E2E_MODE. Expected control-plane."
-  fi
+  case "$E2E_MODE" in
+    control-plane | lifecycle)
+      ;;
+    *)
+      fail \
+        "Configuration" \
+        "Unsupported E2E_MODE: $E2E_MODE. Expected control-plane or lifecycle."
+      ;;
+  esac
 
   case "$TARGET_VISIBILITY" in
     private | internal)
@@ -125,6 +134,83 @@ validate_configuration() {
         "TARGET_VISIBILITY must be private or internal, not $TARGET_VISIBILITY."
       ;;
   esac
+
+  # Validate and bound timeout strings before using Bash arithmetic. Bash uses
+  # fixed-width signed integers, so evaluating an unbounded digits-only value
+  # could overflow before a later maximum-value check is reached.
+  for variable in \
+    E2E_POLL_INTERVAL_SECONDS \
+    E2E_STATE_TIMEOUT_SECONDS \
+    E2E_CUTOVER_TIMEOUT_SECONDS; do
+    value="${!variable:-}"
+
+    if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+      fail \
+        "Configuration" \
+        "$variable must be a positive integer, not ${value:-<empty>}."
+    fi
+
+    # Remove leading zeroes without first interpreting the value as an integer.
+    normalized_value="$(
+      printf '%s' "$value" |
+        sed -E 's/^0+//'
+    )"
+
+    if [[ -z "$normalized_value" ]]; then
+      fail \
+        "Configuration" \
+        "$variable must be a positive integer, not $value."
+    fi
+
+    case "$variable" in
+      E2E_POLL_INTERVAL_SECONDS)
+        maximum_value=300
+        ;;
+      E2E_STATE_TIMEOUT_SECONDS | E2E_CUTOVER_TIMEOUT_SECONDS)
+        maximum_value=2700
+        ;;
+    esac
+
+    # Compare string lengths first. Arithmetic is safe only after proving that
+    # the normalized value contains no more digits than the small upper bound.
+    if ((${#normalized_value} > ${#maximum_value})) ||
+      ((${#normalized_value} == ${#maximum_value} &&
+        10#$normalized_value > maximum_value)); then
+      fail \
+        "Configuration" \
+        "$variable must not exceed $maximum_value seconds."
+    fi
+
+    # The value is now known to be small enough for safe decimal conversion.
+    printf -v "$variable" '%d' "$((10#$normalized_value))"
+  done
+
+  if ((E2E_STATE_TIMEOUT_SECONDS < E2E_POLL_INTERVAL_SECONDS)); then
+    fail \
+      "Configuration" \
+      "E2E_STATE_TIMEOUT_SECONDS must be at least E2E_POLL_INTERVAL_SECONDS."
+  fi
+
+  if ((E2E_CUTOVER_TIMEOUT_SECONDS < E2E_POLL_INTERVAL_SECONDS)); then
+    fail \
+      "Configuration" \
+      "E2E_CUTOVER_TIMEOUT_SECONDS must be at least E2E_POLL_INTERVAL_SECONDS."
+  fi
+
+  # Lifecycle can use each timeout twice. Both values are already bounded at
+  # 2700 seconds, so this addition cannot overflow. Requiring their sum to be
+  # at most 2700 is equivalent to limiting the four lifecycle polling phases
+  # to an aggregate budget of 5400 seconds.
+  lifecycle_polling_budget=$((
+    E2E_STATE_TIMEOUT_SECONDS +
+    E2E_CUTOVER_TIMEOUT_SECONDS
+  ))
+
+  if ((lifecycle_polling_budget > 2700)); then
+    fail \
+      "Configuration" \
+      "E2E_STATE_TIMEOUT_SECONDS plus E2E_CUTOVER_TIMEOUT_SECONDS must not exceed 2700 seconds (5400 seconds across the four lifecycle polling phases)."
+  fi
 
   validate_http_url SOURCE_HOST
   validate_http_url TARGET_HOST
@@ -193,7 +279,7 @@ configure_runtime() {
   fi
 
   # Calculate the maximum run-ID length using the longest generated repository
-  # suffix. This ensures both generated repository names fit within the
+  # suffix. This ensures every generated repository name fits within the
   # repository-name limit.
   if ((${#primary_suffix} >= ${#pagination_suffix})); then
     longest_suffix_length="${#primary_suffix}"
@@ -253,6 +339,8 @@ configure_runtime() {
   # Keep temporary gh-elm configuration outside the uploaded evidence
   # directory. GH_CONFIG_DIR deliberately remains unchanged so the candidate
   # installed by the workflow remains registered for subsequent gh elm calls.
+  # The workflow gives each scenario a unique E2E_RUN_ID, so their gh-elm
+  # configuration directories do not overlap.
   config_root="${RUNNER_TEMP:-/tmp}/gh-elm-e2e-$SAFE_RUN_ID"
 
   if [[ -e "$config_root" && ! -d "$config_root" ]]; then
@@ -281,7 +369,10 @@ configure_runtime() {
       "Failed to restrict temporary gh-elm configuration directory permissions."
   fi
 
-  log "Configured runtime for the control-plane E2E scenario."
+  log "Configured runtime for E2E scenario $E2E_MODE."
   log "Primary target repository: $TARGET_ORG/$TARGET_REPO_PRIMARY"
-  log "Pagination target repository: $TARGET_ORG/$TARGET_REPO_PAGINATION"
+
+  if [[ "$E2E_MODE" == "control-plane" ]]; then
+    log "Pagination target repository: $TARGET_ORG/$TARGET_REPO_PAGINATION"
+  fi
 }

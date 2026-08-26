@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 #
-# Control-plane E2E entrypoint for the gh-elm CLI against a protected GHES
-# migration environment.
+# E2E scenario entrypoint for the gh-elm CLI against a protected GHES migration
+# environment.
 #
-# The workflow builds, installs, and verifies the candidate before invoking
-# this script. The control-plane scenario exercises migration creation, status
-# retrieval, list pagination, explicit cancellation, and run-owned cleanup.
+# The workflow builds, installs, and verifies the candidate once before invoking
+# this script sequentially for each supported scenario:
 #
-# Shared functionality lives under script/e2e/lib/. The scenario implementation
-# lives in script/e2e/scenarios/control-plane.sh.
+#   control-plane
+#     Exercises migration creation, status retrieval, list pagination,
+#     cancellation, and run-owned cleanup.
+#
+#   lifecycle
+#     Exercises migration creation, start, target-side APIs, cutover, cutover
+#     completion, revert, and post-revert verification.
+#
+# Shared functionality lives under script/e2e/lib/. Each scenario defines a
+# run_scenario function under script/e2e/scenarios/.
 
 set -Eeuo pipefail
 
@@ -32,11 +39,41 @@ source "$SCRIPT_DIR/lib/ownership.sh"
 # shellcheck source=script/e2e/lib/migration.sh
 source "$SCRIPT_DIR/lib/migration.sh"
 
+# shellcheck source=script/e2e/lib/polling.sh
+source "$SCRIPT_DIR/lib/polling.sh"
+
+# shellcheck source=script/e2e/lib/target.sh
+source "$SCRIPT_DIR/lib/target.sh"
+
 # shellcheck source=script/e2e/lib/cleanup.sh
 source "$SCRIPT_DIR/lib/cleanup.sh"
 
-# shellcheck source=script/e2e/scenarios/control-plane.sh
-source "$SCRIPT_DIR/scenarios/control-plane.sh"
+load_scenario() {
+  case "$E2E_MODE" in
+    control-plane)
+      # shellcheck source=script/e2e/scenarios/control-plane.sh
+      source "$SCRIPT_DIR/scenarios/control-plane.sh"
+      ;;
+    lifecycle)
+      # shellcheck source=script/e2e/scenarios/lifecycle.sh
+      source "$SCRIPT_DIR/scenarios/lifecycle.sh"
+      ;;
+    *)
+      # validate_configuration should reject unsupported modes before this
+      # function runs. Keep this guard so E2E_MODE can never be used to derive
+      # an arbitrary source path.
+      fail \
+        "Configuration" \
+        "Unsupported E2E_MODE: $E2E_MODE. Expected control-plane or lifecycle."
+      ;;
+  esac
+
+  if ! declare -F run_scenario >/dev/null 2>&1; then
+    fail \
+      "Harness" \
+      "Scenario $E2E_MODE did not define the required run_scenario function."
+  fi
+}
 
 main() {
   # Create evidence before validation or external operations so early failures
@@ -52,25 +89,20 @@ main() {
   validate_configuration
   configure_runtime
   write_evidence_header
+  load_scenario
 
   record_result \
     "Configuration" \
     "✅ pass" \
-    "Required control-plane E2E configuration is present."
+    "Required $E2E_MODE E2E configuration is present."
 
-  # The workflow has already built, installed, and verified gh elm for this
-  # job. Scenario execution uses that existing installation.
+  # The workflow has already built, installed, and verified gh elm once for
+  # this job. Scenario execution uses that existing installation.
   run_preflight
-
-  if ! declare -F run_scenario >/dev/null 2>&1; then
-    fail \
-      "Harness" \
-      "The control-plane scenario did not define the required run_scenario function."
-  fi
 
   run_scenario "$@"
 
-  log "Control-plane E2E scenario assertions completed."
+  log "$E2E_MODE E2E scenario assertions completed."
 }
 
 main "$@"
