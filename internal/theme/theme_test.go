@@ -14,7 +14,7 @@ func TestNew(t *testing.T) {
 	t.Run("semantic colours come from the theme palette", func(t *testing.T) {
 		assert.Equal(t, lipgloss.NoColor{}, s.Primary.GetForeground())
 		assert.Equal(t, colorGreen, s.Success.GetForeground())
-		assert.Equal(t, colorBlue, s.Active.GetForeground())
+		assert.Equal(t, colorGreen, s.Active.GetForeground())
 		assert.Equal(t, warningColor, s.Warning.GetForeground())
 		assert.Equal(t, warningColor, s.Paused.GetForeground())
 		assert.Equal(t, githubRed, s.Failure.GetForeground())

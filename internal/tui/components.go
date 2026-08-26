@@ -24,9 +24,28 @@ func (m *Model) selectorCard(content string, selected, compact bool) string {
 	return style.Render(content)
 }
 
+func (m *Model) repositoryChip(value string) string {
+	return lipgloss.NewStyle().
+		Background(lipgloss.AdaptiveColor{Light: "#f6f8fa", Dark: "#262c33"}).
+		Bold(true).
+		Padding(0, 1).
+		Render(value)
+}
+
+func (m *Model) metadataBadge(value string) string {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#57606a", Dark: "#b1bac4"}).
+		Background(lipgloss.AdaptiveColor{Light: "#eaeef2", Dark: "#21262d"}).
+		Padding(0, 1).
+		Render(value)
+}
+
 func (m *Model) actionButtons(items []actionItem, focus, width int) string {
 	if len(items) == 0 {
 		return ""
+	}
+	if focus < 0 || focus >= len(items) {
+		focus = 0
 	}
 
 	width = max(1, width)
@@ -34,10 +53,25 @@ func (m *Model) actionButtons(items []actionItem, focus, width int) string {
 	row := ""
 	for index, item := range items {
 		style := m.styles.BlurredButton
+		shortcutForeground := lipgloss.TerminalColor(
+			lipgloss.AdaptiveColor{Light: "#8c959f", Dark: "#6e7681"},
+		)
 		if index == focus {
 			style = m.styles.FocusedButton
+			shortcutForeground = lipgloss.Color("#bcd0f5")
 		}
-		button := style.Padding(0, 2).Render(item.label)
+		inner := style.Render(item.label)
+		if item.shortcut != "" {
+			inner += lipgloss.NewStyle().
+				Foreground(shortcutForeground).
+				Background(style.GetBackground()).
+				Bold(index == focus).
+				Render("  " + item.shortcut)
+		}
+		button := lipgloss.NewStyle().
+			Background(style.GetBackground()).
+			Padding(0, 2).
+			Render(inner)
 		candidate := button
 		if row != "" {
 			candidate = row + buttonGap + button
