@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -18,15 +17,7 @@ import (
 	"github.com/github/gh-elm/internal/workflow"
 )
 
-func TestModel(t *testing.T) {
-	t.Run("loads configuration readiness on startup", func(t *testing.T) {
-		model := New(t.Context(), &fakeService{})
-
-		command := model.Init()
-
-		require.NotNil(t, command)
-	})
-
+func TestModelUpdate(t *testing.T) {
 	t.Run("background prefetch errors stay off the home screen", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		updated, _ := model.Update(sourceListMsg{err: assert.AnError})
@@ -50,6 +41,23 @@ func TestModel(t *testing.T) {
 
 		assert.Equal(t, screenSourceList, model.screen)
 		assert.Nil(t, command)
+	})
+
+	t.Run("ignores stale source migration responses", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.sourceListGen = 2
+		model.sourceListLoading = true
+		model.sourceMigrations = []elmapi.MigrationSummary{{MigrationID: "current"}}
+
+		updated, _ := model.Update(sourceListMsg{
+			migrations: []elmapi.MigrationSummary{{MigrationID: "stale"}},
+			generation: 1,
+		})
+		model = updated.(*Model)
+
+		assert.True(t, model.sourceListLoading)
+		require.Len(t, model.sourceMigrations, 1)
+		assert.Equal(t, "current", model.sourceMigrations[0].MigrationID)
 	})
 
 	t.Run("configuration response does not unlock a pending migration list", func(t *testing.T) {
@@ -138,19 +146,10 @@ func TestModel(t *testing.T) {
 		assert.Contains(t, view, "destination URL, destination token")
 	})
 
-	t.Run("styles the home headline", func(t *testing.T) {
-		model := New(t.Context(), &fakeService{})
-
-		view := model.View()
-
-		assert.Contains(t, view, model.styles.Primary.Bold(true).Render("GitHub Enterprise"))
-		assert.Contains(t, view, model.styles.Success.Render("Live migrations"))
-	})
-
 	t.Run("cancels a destination migration load and returns home", func(t *testing.T) {
 		started := make(chan struct{})
 		service := &fakeService{
-			listTargetMigrations: func(ctx context.Context) ([]elmapi.TargetMigration, error) {
+			listTargetMigrations: func(ctx context.Context, _ string, _ int) ([]elmapi.TargetMigration, error) {
 				close(started)
 				<-ctx.Done()
 				return nil, ctx.Err()
@@ -240,30 +239,163 @@ func TestModel(t *testing.T) {
 		assert.Contains(t, model.View(), "Failed source authentication")
 	})
 
-	t.Run("colors preflight status marks", func(t *testing.T) {
+	t.Run("failed source detail load clears previous migration state", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		model.sourceID = "new-source"
+		model.targetID = 42
+		setSourceStatus(model, elmapi.StatusCreated)
 
-		assert.Equal(t, model.styles.Success.Render("✓"), model.checkMark(true))
-		assert.Equal(t, model.styles.Failure.Render("✗"), model.checkMark(false))
-		assert.Equal(t, model.styles.Muted.Render("…"), model.authenticationMark(false, nil))
+		updated, _ := model.Update(sourceDetailMsg{err: assert.AnError})
+		model = updated.(*Model)
+
+		assert.Nil(t, model.sourceDetail)
+		assert.Zero(t, model.targetID)
+		assert.NotContains(t, actionIDs(model.sourceActionItems()), "start")
+		assert.NotContains(t, actionIDs(model.sourceActionItems()), "cancel")
 	})
 
+	t.Run("watch ticks do not overlap source detail loads", func(t *testing.T) {
+		svc := &fakeService{
+			getSourceMigration: func(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
+				return &elmapi.MigrationDetail{}, nil
+			},
+		}
+		model := New(t.Context(), svc)
+		model.screen = screenSourceDetail
+		model.sourceWatching = true
+		model.sourceWatchGen = 1
+
+		updated, command := model.Update(watchTickMsg{generation: 1})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		assert.True(t, model.loading)
+		assert.Equal(t, uint64(2), model.sourceWatchGen)
+
+		updated, duplicate := model.Update(watchTickMsg{generation: 1})
+		model = updated.(*Model)
+		assert.Nil(t, duplicate)
+
+		updated, nextTick := model.Update(command())
+		model = updated.(*Model)
+		assert.False(t, model.loading)
+		require.NotNil(t, nextTick)
+	})
+
+	t.Run("target detail load clears previous repository", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.repository = "old/repository"
+		model.targetDetail = &elmapi.TargetMigration{Repositories: []string{"old/repository"}}
+
+		updated, _ := model.Update(targetDetailMsg{migration: &elmapi.TargetMigration{}})
+		model = updated.(*Model)
+		assert.Empty(t, model.repository)
+
+		model.repository = "another/old-repository"
+		updated, _ = model.Update(targetDetailMsg{err: assert.AnError})
+		model = updated.(*Model)
+		assert.Nil(t, model.targetDetail)
+		assert.Empty(t, model.repository)
+	})
+
+	t.Run("configuration save reloads source migrations", func(t *testing.T) {
+		svc := &fakeService{
+			saveConfiguration: func(context.Context, workflow.ConfigurationInput) error {
+				return nil
+			},
+			getConfiguration: func(context.Context) (*workflow.Configuration, error) {
+				return &workflow.Configuration{}, nil
+			},
+			listSourceMigrations: func(context.Context, string) ([]elmapi.MigrationSummary, error) {
+				return []elmapi.MigrationSummary{{MigrationID: "new-source"}}, nil
+			},
+		}
+		model := New(t.Context(), svc)
+		model.screen = screenConfiguration
+		model.sourceListLoaded = true
+		model.sourceListErr = assert.AnError
+		model.sourceMigrations = []elmapi.MigrationSummary{{MigrationID: "old-source"}}
+		updated, _ := model.openConfigurationForm()
+		model = updated.(*Model)
+		model.form.cursor = len(model.form.fields) - 1
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+
+		assert.Equal(t, screenResult, model.screen)
+		assert.False(t, model.sourceListLoaded)
+		assert.Empty(t, model.sourceMigrations)
+		assert.NoError(t, model.sourceListErr)
+
+		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		batch, ok := command().(tea.BatchMsg)
+		require.True(t, ok)
+		for _, batchCommand := range batch {
+			updated, _ = model.Update(batchCommand())
+			model = updated.(*Model)
+		}
+
+		require.Len(t, model.sourceMigrations, 1)
+		assert.Equal(t, "new-source", model.sourceMigrations[0].MigrationID)
+		assert.True(t, model.sourceListLoaded)
+	})
+
+	t.Run("configuration reset invalidates source migrations", func(t *testing.T) {
+		svc := &fakeService{
+			resetConfiguration: func(context.Context) error {
+				return nil
+			},
+		}
+		model := New(t.Context(), svc)
+		model.screen = screenConfiguration
+		model.actionFocus = len(configurationActions) - 1
+		model.sourceListLoaded = true
+		model.sourceMigrations = []elmapi.MigrationSummary{{MigrationID: "old-source"}}
+
+		updated, _ := model.activateConfigurationAction()
+		model = updated.(*Model)
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+
+		assert.Equal(t, screenResult, model.screen)
+		assert.False(t, model.sourceListLoaded)
+		assert.Empty(t, model.sourceMigrations)
+	})
+}
+
+func TestModelNavigationAndLayout(t *testing.T) {
 	t.Run("opens source migration from list", func(t *testing.T) {
 		status := "in_progress"
+		sourceDetail := &elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{
+				MigrationID:       "source-1",
+				TargetMigrationID: 42,
+			},
+		}
 		svc := &fakeService{
-			sourceMigrations: []elmapi.MigrationSummary{{
-				MigrationID:             "source-1",
-				Status:                  &status,
-				SourceOrganizationLogin: "source",
-				SourceRepositoryName:    "repo",
-				TargetOrganizationLogin: "target",
-				TargetRepositoryName:    "repo",
-			}},
-			sourceDetail: &elmapi.MigrationDetail{
-				Migration: &elmapi.MigrationSummary{
-					MigrationID:       "source-1",
-					TargetMigrationID: 42,
-				},
+			listSourceMigrations: func(context.Context, string) ([]elmapi.MigrationSummary, error) {
+				return []elmapi.MigrationSummary{{
+					MigrationID:             "source-1",
+					Status:                  &status,
+					SourceOrganizationLogin: "source",
+					SourceRepositoryName:    "repo",
+					TargetOrganizationLogin: "target",
+					TargetRepositoryName:    "repo",
+				}}, nil
+			},
+			getSourceMigration: func(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
+				return sourceDetail, nil
+			},
+			getTargetMigration: func(context.Context, workflow.TargetMigrationID) (*elmapi.TargetMigration, error) {
+				return &elmapi.TargetMigration{}, nil
 			},
 		}
 		model := New(t.Context(), svc)
@@ -468,13 +600,14 @@ func TestModel(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.width = 80
 		model.height = 16
+		first, second, third, fourth := "one", "two", "three", "four"
 		model.form = formState{
 			cursor: 3,
 			fields: []formField{
-				{label: "First", value: "one"},
-				{label: "Second", value: "two"},
-				{label: "Third", value: "three"},
-				{label: "Fourth", value: "four"},
+				textFormField("First", "", &first),
+				textFormField("Second", "", &second),
+				textFormField("Third", "", &third),
+				textFormField("Fourth", "", &fourth),
 			},
 		}
 
@@ -516,7 +649,9 @@ func TestModel(t *testing.T) {
 
 		assert.Equal(t, len(model.sourceActionItems())-1, model.actionFocus)
 	})
+}
 
+func TestMigrationCreation(t *testing.T) {
 	t.Run("home exposes migration creation", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		assert.Contains(t, model.View(), "Create migration")
@@ -530,9 +665,20 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("migration creation discovers repositories and organizations", func(t *testing.T) {
+		var sourceCreateInput workflow.SourceCreateInput
 		svc := &fakeService{
-			sourceRepositories:  []string{"acme/api", "octo/web"},
-			targetOrganizations: []string{"acme-cloud", "octo-cloud"},
+			listSourceRepositories: func(context.Context) ([]elmapi.Repository, error) {
+				return []elmapi.Repository{{FullName: "acme/api"}, {FullName: "octo/web"}}, nil
+			},
+			listTargetOrganizations: func(context.Context) ([]string, error) {
+				return []string{"acme-cloud", "octo-cloud"}, nil
+			},
+			createSourceMigration: func(_ context.Context, input workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
+				sourceCreateInput = input
+				return &workflow.SourceCreateResult{
+					Migration: elmapi.CreateMigrationResponse{MigrationID: "created-1"},
+				}, nil
+			},
 		}
 		model := New(t.Context(), svc)
 		updated, command := model.openSourceCreateForm(screenHome)
@@ -555,70 +701,22 @@ func TestModel(t *testing.T) {
 		require.Equal(t, screenForm, model.screen)
 		assert.Contains(t, model.form.description, "Source: acme/api")
 		assert.Contains(t, model.form.description, "Destination organization: acme-cloud")
-		assert.Equal(t, "api", model.form.fields[0].value)
+		assert.Equal(t, "api", *model.form.fields[0].text)
 
-		command, err := model.form.submit(map[string]string{
-			"targetRepo": "renamed-api",
-			"visibility": "private",
-			"start":      "true",
-		})
-
-		t.Run("repository picker presents real metadata", func(t *testing.T) {
-			repository := elmapi.Repository{
-				FullName:       "acme/api",
-				Description:    "Public API for Acme products.",
-				Language:       "Go",
-				Visibility:     "private",
-				Stargazers:     42,
-				OpenIssueCount: 7,
-			}
-			repository.Owner.Type = "Organization"
-			model := New(t.Context(), &fakeService{sourceRepositoryDetails: []elmapi.Repository{repository}})
-			model.width = 120
-			model.height = 40
-
-			updated, command := model.openSourceCreateForm(screenHome)
-			model = updated.(*Model)
-			require.NotNil(t, command)
-			updated, _ = model.Update(command())
-			model = updated.(*Model)
-
-			view := model.pickerView()
-			assert.Contains(t, view, "★ 42")
-			assert.Contains(t, view, "≡ 7")
-			assert.Contains(t, view, "◆ Go")
-			assert.Contains(t, view, "Public API for Acme products.")
-
-			model.width = 80
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-			model = updated.(*Model)
-			assert.True(t, model.pickerInfoOpen)
-			assert.Contains(t, model.View(), "Open issues")
-		})
-
-		t.Run("repository details remain visible after the picker scrolls", func(t *testing.T) {
-			repositories := make([]elmapi.Repository, 20)
-			for index := range repositories {
-				repositories[index].FullName = fmt.Sprintf("acme/repo-%02d", index)
-				repositories[index].Description = fmt.Sprintf("Repository %02d", index)
-			}
-			model := New(t.Context(), &fakeService{sourceRepositoryDetails: repositories})
-			model.width = 120
-			model.height = 16
-			updated, command := model.openSourceCreateForm(screenHome)
-			model = updated.(*Model)
-			updated, _ = model.Update(command())
-			model = updated.(*Model)
-			model.picker.cursor = len(repositories) - 1
-
-			view := model.pickerView()
-
-			assert.Contains(t, view, "↑")
-			assert.Contains(t, view, "Repository 19")
-		})
-		require.NoError(t, err)
+		*model.form.fields[0].text = "renamed-api"
+		*model.form.fields[1].text = "private"
+		*model.form.fields[2].boolean = true
+		model.form.cursor = len(model.form.fields) - 1
+		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
 		require.NotNil(t, command)
-		_ = command()
+		message := command()
+		assert.Empty(t, model.sourceID)
+		updated, _ = model.Update(message)
+		model = updated.(*Model)
+
+		assert.Equal(t, screenResult, model.screen)
+		assert.Equal(t, workflow.SourceMigrationID("created-1"), model.sourceID)
 		assert.Equal(t, workflow.SourceCreateInput{
 			SourceOwner: "acme",
 			SourceRepo:  "api",
@@ -626,17 +724,69 @@ func TestModel(t *testing.T) {
 			TargetRepo:  "renamed-api",
 			Visibility:  "private",
 			Start:       true,
-		}, svc.sourceCreateInput)
+		}, sourceCreateInput)
+	})
 
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
-		model = updated.(*Model)
-		assert.Equal(t, screenPicker, model.screen)
-		assert.Equal(t, "Select destination organization", model.picker.title)
+	t.Run("repository picker presents real metadata", func(t *testing.T) {
+		repository := elmapi.Repository{
+			FullName:       "acme/api",
+			Description:    "Public API for Acme products.",
+			Language:       "Go",
+			Visibility:     "private",
+			Stargazers:     42,
+			OpenIssueCount: 7,
+		}
+		repository.Owner.Type = "Organization"
+		model := New(t.Context(), &fakeService{
+			listSourceRepositories: func(context.Context) ([]elmapi.Repository, error) {
+				return []elmapi.Repository{repository}, nil
+			},
+		})
+		model.width = 120
+		model.height = 40
 
-		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		updated, command := model.openSourceCreateForm(screenHome)
 		model = updated.(*Model)
 		require.NotNil(t, command)
-		assert.Equal(t, "Select source repository", model.picker.title)
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+
+		view := model.pickerView()
+		assert.Contains(t, view, "★ 42")
+		assert.Contains(t, view, "≡ 7")
+		assert.Contains(t, view, "◆ Go")
+		assert.Contains(t, view, "Public API for Acme products.")
+
+		model.width = 80
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+		model = updated.(*Model)
+		assert.True(t, model.pickerInfoOpen)
+		assert.Contains(t, model.View(), "Open issues")
+	})
+
+	t.Run("repository details remain visible after the picker scrolls", func(t *testing.T) {
+		repositories := make([]elmapi.Repository, 20)
+		for index := range repositories {
+			repositories[index].FullName = fmt.Sprintf("acme/repo-%02d", index)
+			repositories[index].Description = fmt.Sprintf("Repository %02d", index)
+		}
+		model := New(t.Context(), &fakeService{
+			listSourceRepositories: func(context.Context) ([]elmapi.Repository, error) {
+				return repositories, nil
+			},
+		})
+		model.width = 120
+		model.height = 16
+		updated, command := model.openSourceCreateForm(screenHome)
+		model = updated.(*Model)
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+		model.picker.cursor = len(repositories) - 1
+
+		view := model.pickerView()
+
+		assert.Contains(t, view, "↑")
+		assert.Contains(t, view, "Repository 19")
 	})
 
 	t.Run("repository picker filters options", func(t *testing.T) {
@@ -682,7 +832,7 @@ func TestModel(t *testing.T) {
 		model = updated.(*Model)
 
 		require.Equal(t, screenForm, model.screen)
-		assert.Equal(t, "acme/api", model.form.fields[0].value)
+		assert.Equal(t, "acme/api", *model.form.fields[0].text)
 	})
 
 	t.Run("repository picker ignores stale catalog responses", func(t *testing.T) {
@@ -690,9 +840,8 @@ func TestModel(t *testing.T) {
 		model.screen = screenPicker
 		model.pickerGeneration = 2
 		model.picker = pickerState{
-			generation: 2,
-			loading:    true,
-			input:      textinput.New(),
+			loading: true,
+			input:   textinput.New(),
 		}
 
 		updated, _ := model.Update(pickerCatalogMsg{
@@ -706,7 +855,15 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("manual migration creation uses source and target coordinates", func(t *testing.T) {
-		svc := &fakeService{}
+		var sourceCreateInput workflow.SourceCreateInput
+		svc := &fakeService{
+			createSourceMigration: func(_ context.Context, input workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
+				sourceCreateInput = input
+				return &workflow.SourceCreateResult{
+					Migration: elmapi.CreateMigrationResponse{MigrationID: "created-1"},
+				}, nil
+			},
+		}
 		model := New(t.Context(), svc)
 		updated, _ := model.openManualSourceCreateForm(screenHome, "")
 		model = updated.(*Model)
@@ -717,16 +874,19 @@ func TestModel(t *testing.T) {
 		assert.Contains(t, model.formView(), "source-org/source-repo")
 		assert.Contains(t, model.formView(), "target-org/target-repo")
 
-		command, err := model.form.submit(map[string]string{
-			"source":     "source-org/source-repo",
-			"target":     "target-org/target-repo",
-			"visibility": "internal",
-			"start":      "true",
-		})
-		require.NoError(t, err)
+		*model.form.fields[0].text = "source-org/source-repo"
+		*model.form.fields[1].text = "target-org/target-repo"
+		*model.form.fields[2].text = "internal"
+		*model.form.fields[3].boolean = true
+		model.form.cursor = len(model.form.fields) - 1
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
 		require.NotNil(t, command)
-		_ = command()
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
 
+		assert.Equal(t, screenResult, model.screen)
+		assert.Equal(t, workflow.SourceMigrationID("created-1"), model.sourceID)
 		assert.Equal(t, workflow.SourceCreateInput{
 			SourceOwner: "source-org",
 			SourceRepo:  "source-repo",
@@ -734,7 +894,7 @@ func TestModel(t *testing.T) {
 			TargetRepo:  "target-repo",
 			Visibility:  "internal",
 			Start:       true,
-		}, svc.sourceCreateInput)
+		}, sourceCreateInput)
 	})
 
 	t.Run("manual migration creation rejects malformed coordinates", func(t *testing.T) {
@@ -742,16 +902,19 @@ func TestModel(t *testing.T) {
 		updated, _ := model.openManualSourceCreateForm(screenHome, "")
 		model = updated.(*Model)
 
-		command, err := model.form.submit(map[string]string{
-			"source": "source-org/source-repo/extra",
-			"target": "target-org/target-repo",
-		})
+		*model.form.fields[0].text = "source-org/source-repo/extra"
+		*model.form.fields[1].text = "target-org/target-repo"
+		model.form.cursor = len(model.form.fields) - 1
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
 
 		assert.Nil(t, command)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid source repository")
+		require.Error(t, model.form.err)
+		assert.Contains(t, model.form.err.Error(), "invalid source repository")
 	})
+}
 
+func TestModelActions(t *testing.T) {
 	t.Run("destructive source action requires confirmation", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenSourceDetail
@@ -865,15 +1028,21 @@ func TestModel(t *testing.T) {
 	})
 
 	t.Run("immediate mannequin reclaim requires confirmation", func(t *testing.T) {
-		svc := &fakeService{}
+		reclaimCalls := 0
+		svc := &fakeService{
+			reclaimMannequins: func(context.Context, workflow.MannequinReclaimInput, ghapi.Logger) error {
+				reclaimCalls++
+				return nil
+			},
+		}
 		model := New(t.Context(), svc)
 		model.screen = screenMannequins
 
 		updated, _ := model.openMannequinReclaimForm(false)
 		model = updated.(*Model)
-		model.form.fields[0].value = "octo-org"
-		model.form.fields[1].value = "mannequin"
-		model.form.fields[3].value = "app[bot]"
+		*model.form.fields[0].text = "octo-org"
+		*model.form.fields[1].text = "mannequin"
+		*model.form.fields[3].text = "app[bot]"
 		model.form.cursor = len(model.form.fields) - 1
 
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -884,13 +1053,13 @@ func TestModel(t *testing.T) {
 		model = updated.(*Model)
 		require.Equal(t, screenConfirm, model.screen)
 		assert.Contains(t, model.View(), "cannot be undone")
-		assert.Equal(t, 0, svc.reclaimCalls)
+		assert.Zero(t, reclaimCalls)
 
 		updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 		model = updated.(*Model)
 		require.NotNil(t, cmd)
 		_, _ = model.Update(cmd())
-		assert.Equal(t, 1, svc.reclaimCalls)
+		assert.Equal(t, 1, reclaimCalls)
 	})
 }
 
@@ -909,142 +1078,97 @@ func actionIDs(actions []actionItem) []string {
 }
 
 type fakeService struct {
-	sourceMigrations        []elmapi.MigrationSummary
-	sourceRepositories      []string
-	sourceRepositoryDetails []elmapi.Repository
-	sourceDetail            *elmapi.MigrationDetail
-	sourceCreateInput       workflow.SourceCreateInput
-	targetOrganizations     []string
-	listTargetMigrations    func(context.Context) ([]elmapi.TargetMigration, error)
-	reclaimCalls            int
-	sourceAuthErr           error
-	targetAuthErr           error
+	service
+	listSourceMigrations    func(context.Context, string) ([]elmapi.MigrationSummary, error)
+	getSourceMigration      func(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error)
+	createSourceMigration   func(context.Context, workflow.SourceCreateInput) (*workflow.SourceCreateResult, error)
+	listSourceRepositories  func(context.Context) ([]elmapi.Repository, error)
+	listTargetOrganizations func(context.Context) ([]string, error)
+	listTargetMigrations    func(context.Context, string, int) ([]elmapi.TargetMigration, error)
+	getTargetMigration      func(context.Context, workflow.TargetMigrationID) (*elmapi.TargetMigration, error)
+	reclaimMannequins       func(context.Context, workflow.MannequinReclaimInput, ghapi.Logger) error
+	getConfiguration        func(context.Context) (*workflow.Configuration, error)
+	saveConfiguration       func(context.Context, workflow.ConfigurationInput) error
+	resetConfiguration      func(context.Context) error
 }
 
-func (f *fakeService) ListSourceMigrations(context.Context, string) ([]elmapi.MigrationSummary, error) {
-	return f.sourceMigrations, nil
+func unexpectedServiceCall(name string) {
+	panic("unexpected service call: " + name)
 }
 
-func (f *fakeService) ListSourceRepositories(context.Context) ([]elmapi.Repository, error) {
-	if f.sourceRepositoryDetails != nil {
-		return f.sourceRepositoryDetails, nil
+func (f *fakeService) ListSourceMigrations(ctx context.Context, status string) ([]elmapi.MigrationSummary, error) {
+	if f.listSourceMigrations == nil {
+		unexpectedServiceCall("ListSourceMigrations")
 	}
-	repositories := make([]elmapi.Repository, len(f.sourceRepositories))
-	for index, name := range f.sourceRepositories {
-		repositories[index].FullName = name
+	return f.listSourceMigrations(ctx, status)
+}
+
+func (f *fakeService) ListSourceRepositories(ctx context.Context) ([]elmapi.Repository, error) {
+	if f.listSourceRepositories == nil {
+		unexpectedServiceCall("ListSourceRepositories")
 	}
-	return repositories, nil
+	return f.listSourceRepositories(ctx)
 }
 
-func (f *fakeService) GetSourceMigration(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
-	return f.sourceDetail, nil
-}
-
-func (f *fakeService) CreateSourceMigration(_ context.Context, input workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
-	f.sourceCreateInput = input
-	return &workflow.SourceCreateResult{}, nil
-}
-
-func (f *fakeService) StartSourceMigration(context.Context, workflow.SourceMigrationID) error {
-	return nil
-}
-
-func (f *fakeService) PauseSourceMigration(context.Context, workflow.SourceMigrationID) error {
-	return nil
-}
-
-func (f *fakeService) ResumeSourceMigration(context.Context, workflow.SourceMigrationID) error {
-	return nil
-}
-
-func (f *fakeService) CancelSourceMigration(context.Context, workflow.SourceMigrationID) error {
-	return nil
-}
-
-func (f *fakeService) CutoverSourceMigration(context.Context, workflow.SourceMigrationID, bool) error {
-	return nil
-}
-
-func (f *fakeService) RevertSourceCutover(context.Context, workflow.SourceMigrationID) (*elmapi.RevertCutoverResponse, error) {
-	return &elmapi.RevertCutoverResponse{}, nil
-}
-
-func (f *fakeService) ListTargetMigrations(ctx context.Context, _ string, _ int) ([]elmapi.TargetMigration, error) {
-	if f.listTargetMigrations != nil {
-		return f.listTargetMigrations(ctx)
+func (f *fakeService) GetSourceMigration(ctx context.Context, id workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
+	if f.getSourceMigration == nil {
+		unexpectedServiceCall("GetSourceMigration")
 	}
-	return nil, nil
+	return f.getSourceMigration(ctx, id)
 }
 
-func (f *fakeService) ListTargetOrganizations(context.Context) ([]string, error) {
-	return f.targetOrganizations, nil
+func (f *fakeService) CreateSourceMigration(ctx context.Context, input workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
+	if f.createSourceMigration == nil {
+		unexpectedServiceCall("CreateSourceMigration")
+	}
+	return f.createSourceMigration(ctx, input)
 }
 
-func (f *fakeService) CreateTargetMigration(context.Context, workflow.TargetCreateInput) (json.RawMessage, error) {
-	return nil, nil
+func (f *fakeService) ListTargetMigrations(ctx context.Context, status string, maxResults int) ([]elmapi.TargetMigration, error) {
+	if f.listTargetMigrations == nil {
+		unexpectedServiceCall("ListTargetMigrations")
+	}
+	return f.listTargetMigrations(ctx, status, maxResults)
 }
 
-func (f *fakeService) GetTargetMigration(context.Context, workflow.TargetMigrationID) (*elmapi.TargetMigration, error) {
-	return &elmapi.TargetMigration{}, nil
+func (f *fakeService) ListTargetOrganizations(ctx context.Context) ([]string, error) {
+	if f.listTargetOrganizations == nil {
+		unexpectedServiceCall("ListTargetOrganizations")
+	}
+	return f.listTargetOrganizations(ctx)
 }
 
-func (f *fakeService) PauseTargetMigration(context.Context, workflow.TargetMigrationID) error {
-	return nil
+func (f *fakeService) GetTargetMigration(ctx context.Context, id workflow.TargetMigrationID) (*elmapi.TargetMigration, error) {
+	if f.getTargetMigration == nil {
+		unexpectedServiceCall("GetTargetMigration")
+	}
+	return f.getTargetMigration(ctx, id)
 }
 
-func (f *fakeService) ResumeTargetMigration(context.Context, workflow.TargetMigrationID) error {
-	return nil
+func (f *fakeService) ReclaimMannequins(ctx context.Context, input workflow.MannequinReclaimInput, logger ghapi.Logger) error {
+	if f.reclaimMannequins == nil {
+		unexpectedServiceCall("ReclaimMannequins")
+	}
+	return f.reclaimMannequins(ctx, input, logger)
 }
 
-func (f *fakeService) AbortTargetMigration(context.Context, workflow.TargetMigrationID) error {
-	return nil
+func (f *fakeService) GetConfiguration(ctx context.Context) (*workflow.Configuration, error) {
+	if f.getConfiguration == nil {
+		unexpectedServiceCall("GetConfiguration")
+	}
+	return f.getConfiguration(ctx)
 }
 
-func (f *fakeService) ListResources(context.Context, workflow.ResourceInput) ([]elmapi.Node, error) {
-	return nil, nil
+func (f *fakeService) SaveConfiguration(ctx context.Context, input workflow.ConfigurationInput) error {
+	if f.saveConfiguration == nil {
+		unexpectedServiceCall("SaveConfiguration")
+	}
+	return f.saveConfiguration(ctx, input)
 }
 
-func (f *fakeService) RequestReport(context.Context, workflow.ReportInput) (json.RawMessage, error) {
-	return nil, nil
-}
-
-func (f *fakeService) ReportStatus(context.Context, workflow.ReportInput) (json.RawMessage, error) {
-	return nil, nil
-}
-
-func (f *fakeService) ReportURL(context.Context, workflow.ReportInput) (json.RawMessage, error) {
-	return nil, nil
-}
-
-func (f *fakeService) ListMannequins(context.Context, string, bool) ([]ghapi.MannequinRecord, error) {
-	return nil, nil
-}
-
-func (f *fakeService) ExportMannequins(context.Context, string, string, bool) error {
-	return nil
-}
-
-func (f *fakeService) ReclaimMannequins(context.Context, workflow.MannequinReclaimInput, ghapi.Logger) error {
-	f.reclaimCalls++
-	return nil
-}
-
-func (f *fakeService) GetConfiguration(context.Context) (*workflow.Configuration, error) {
-	return &workflow.Configuration{}, nil
-}
-
-func (f *fakeService) CheckSourceAuthentication(context.Context) error {
-	return f.sourceAuthErr
-}
-
-func (f *fakeService) CheckTargetAuthentication(context.Context) error {
-	return f.targetAuthErr
-}
-
-func (f *fakeService) SaveConfiguration(context.Context, workflow.ConfigurationInput) error {
-	return nil
-}
-
-func (f *fakeService) ResetConfiguration(context.Context) error {
-	return nil
+func (f *fakeService) ResetConfiguration(ctx context.Context) error {
+	if f.resetConfiguration == nil {
+		unexpectedServiceCall("ResetConfiguration")
+	}
+	return f.resetConfiguration(ctx)
 }

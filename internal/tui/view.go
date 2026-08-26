@@ -31,14 +31,7 @@ func (m *Model) View() string {
 	switch current {
 	case screenHome:
 		title = homeTitle
-		body = m.menu([]string{
-			"Migrations",
-			"Create migration",
-			"Target mannequins",
-			"Configuration",
-			"Advanced destination operations",
-			"Quit",
-		})
+		body = m.menu(homeActions)
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Help, keys.Quit)
 	case screenSourceList:
 		title = "Migrations"
@@ -220,13 +213,13 @@ func (m *Model) configurationWarning() string {
 	return strings.Join(issues, ". ") + ". Open Configuration to finish setup."
 }
 
-func (m *Model) menu(items []string) string {
+func (m *Model) menu(items []actionItem) string {
 	var builder strings.Builder
 	for index, item := range items {
 		if index > 0 {
 			builder.WriteString("\n")
 		}
-		builder.WriteString(m.selectorCard(item, index == m.cursor, true))
+		builder.WriteString(m.selectorCard(item.label, index == m.cursor, true))
 	}
 	return builder.String()
 }
@@ -470,12 +463,15 @@ func (m *Model) formView() string {
 	}
 	blocks := make([]string, 0, len(m.form.fields))
 	for index, field := range m.form.fields {
-		value := field.value
+		value := ""
+		if field.text != nil {
+			value = *field.text
+		}
 		switch field.kind {
 		case fieldSecret:
 			value = strings.Repeat("•", len([]rune(value)))
 		case fieldBool:
-			if value == "true" {
+			if field.boolean != nil && *field.boolean {
 				value = "[x]"
 			} else {
 				value = "[ ]"

@@ -106,11 +106,11 @@ const (
 )
 
 type formField struct {
-	key         string
 	label       string
 	description string
 	kind        fieldKind
-	value       string
+	text        *string
+	boolean     *bool
 	options     []string
 }
 
@@ -120,8 +120,24 @@ type formState struct {
 	fields      []formField
 	cursor      int
 	parent      screen
-	submit      func(map[string]string) (tea.Cmd, error)
+	submit      func() (tea.Cmd, error)
 	err         error
+}
+
+func textFormField(label, description string, value *string) formField {
+	return formField{label: label, description: description, kind: fieldText, text: value}
+}
+
+func secretFormField(label string, value *string) formField {
+	return formField{label: label, kind: fieldSecret, text: value}
+}
+
+func boolFormField(label string, value *bool) formField {
+	return formField{label: label, kind: fieldBool, boolean: value}
+}
+
+func selectFormField(label string, value *string, options ...string) formField {
+	return formField{label: label, kind: fieldSelect, text: value, options: options}
 }
 
 type pickerKind int
@@ -132,16 +148,15 @@ const (
 )
 
 type pickerState struct {
-	kind       pickerKind
-	title      string
-	parent     screen
-	items      []pickerItem
-	cursor     int
-	input      textinput.Model
-	loading    bool
-	err        error
-	source     string
-	generation uint64
+	kind    pickerKind
+	title   string
+	parent  screen
+	items   []pickerItem
+	cursor  int
+	input   textinput.Model
+	loading bool
+	err     error
+	source  string
 }
 
 type confirmState struct {
@@ -153,10 +168,11 @@ type confirmState struct {
 }
 
 type resultState struct {
-	title   string
-	body    string
-	parent  screen
-	refresh bool
+	title            string
+	body             string
+	parent           screen
+	refresh          bool
+	reloadSourceList bool
 }
 
 // Model is the Bubble Tea application model.
@@ -180,9 +196,11 @@ type Model struct {
 	sourceListLoaded  bool
 	sourceListLoading bool
 	sourceListErr     error
+	sourceListGen     uint64
 	sourceID          workflow.SourceMigrationID
 	sourceDetail      *elmapi.MigrationDetail
 	sourceWatching    bool
+	sourceWatchGen    uint64
 	sourceSearch      bool
 	searchInput       textinput.Model
 	compact           bool
@@ -231,7 +249,7 @@ func New(ctx context.Context, svc service) *Model {
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
 	m.sourceListLoading = true
-	return tea.Batch(m.startConfigurationLoad(), m.loadSourceListCmd())
+	return tea.Batch(m.startConfigurationLoad(), m.startSourceListLoad())
 }
 
 // Update implements tea.Model.
@@ -261,6 +279,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateKey(msg)
 	case sourceListMsg:
+		if msg.generation != m.sourceListGen {
+			return m, nil
+		}
 		m.sourceListLoading = false
 		m.sourceListLoaded = true
 		m.sourceListErr = msg.err
@@ -284,9 +305,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.targetID = workflow.TargetMigrationID(msg.detail.Migration.TargetMigrationID)
 			}
 			m.clampActionFocus()
+		} else {
+			m.sourceDetail = nil
+			m.targetID = 0
 		}
 		if m.sourceWatching {
-			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return watchTickMsg{} })
+			return m, m.scheduleWatchTick()
 		}
 	case targetListMsg:
 		if msg.generation != m.targetListGen {
@@ -304,10 +328,14 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.err == nil {
 			m.targetDetail = msg.migration
+			m.repository = ""
 			if len(msg.migration.Repositories) > 0 {
 				m.repository = msg.migration.Repositories[0]
 			}
 			m.clampActionFocus()
+		} else {
+			m.targetDetail = nil
+			m.repository = ""
 		}
 	case configMsg:
 		if msg.generation != m.configGeneration {
@@ -367,7 +395,19 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.result = resultState{title: "Action failed", body: msg.err.Error(), parent: msg.parent}
 		} else {
-			m.result = resultState{title: msg.title, body: msg.body, parent: msg.parent, refresh: msg.refresh}
+			if msg.sourceID != "" {
+				m.sourceID = msg.sourceID
+			}
+			if msg.reloadSourceList {
+				m.invalidateSourceList()
+			}
+			m.result = resultState{
+				title:            msg.title,
+				body:             msg.body,
+				parent:           msg.parent,
+				refresh:          msg.refresh,
+				reloadSourceList: msg.reloadSourceList,
+			}
 		}
 		m.screen = screenResult
 		m.cursor = 0
@@ -382,7 +422,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = screenConfirm
 	case watchTickMsg:
-		if m.sourceWatching && m.screen == screenSourceDetail {
+		if msg.generation == m.sourceWatchGen &&
+			m.sourceWatching &&
+			m.screen == screenSourceDetail &&
+			!m.loading {
+			m.sourceWatchGen++
 			m.loading = true
 			command := m.loadSourceDetailCmd()
 			return m, command
@@ -615,8 +659,11 @@ func (m *Model) visiblePickerItems() []pickerItem {
 func (m *Model) activate() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenHome:
-		switch m.cursor {
-		case 0:
+		if m.cursor < 0 || m.cursor >= len(homeActions) {
+			return m, nil
+		}
+		switch homeActions[m.cursor].id {
+		case "migrations":
 			m.screen, m.err = screenSourceList, m.sourceListErr
 			switch {
 			case m.sourceListLoading:
@@ -628,24 +675,24 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			default:
 				m.loading = true
 				m.sourceListLoading = true
-				command := m.loadSourceListCmd()
+				command := m.startSourceListLoad()
 				return m, command
 			}
-		case 1:
+		case "create":
 			return m.openSourceCreateForm(screenHome)
-		case 2:
+		case "mannequins":
 			m.screen, m.actionFocus = screenMannequins, 0
-		case 3:
+		case "configuration":
 			m.screen, m.loading, m.err = screenConfiguration, true, nil
 			m.actionFocus = 0
 			m.resetViewport()
 			command := m.startConfigurationLoad()
 			return m, command
-		case 4:
+		case "target":
 			m.screen, m.loading, m.err = screenTargetList, true, nil
 			command := m.startTargetListLoad()
 			return m, command
-		case 5:
+		case "quit":
 			return m, tea.Quit
 		}
 	case screenSourceList:
@@ -654,6 +701,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			return m.openSourceCreateForm(screenSourceList)
 		}
 		m.sourceID = workflow.SourceMigrationID(migrations[m.cursor].MigrationID)
+		m.sourceDetail = nil
 		m.targetID = 0
 		m.screen, m.loading, m.err = screenSourceDetail, true, nil
 		m.actionFocus = 0
@@ -672,6 +720,8 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.targetID = id
+		m.targetDetail = nil
+		m.repository = ""
 		m.targetParent = screenTargetList
 		m.screen, m.loading, m.err = screenTargetDetail, true, nil
 		m.actionFocus = 0
@@ -702,6 +752,7 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 		m.screen = screenHome
 	case screenSourceDetail:
 		m.sourceWatching = false
+		m.sourceWatchGen++
 		m.screen = screenSourceList
 	case screenTargetDetail:
 		m.screen = m.targetParent
@@ -715,9 +766,12 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 	case screenSourceList:
 		m.loading = true
 		m.sourceListLoading = true
-		command := m.loadSourceListCmd()
+		command := m.startSourceListLoad()
 		return m, command
 	case screenSourceDetail:
+		if m.sourceWatching {
+			m.sourceWatchGen++
+		}
 		m.loading = true
 		command := m.loadSourceDetailCmd()
 		return m, command
@@ -740,7 +794,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 func (m *Model) itemCount() int {
 	switch m.screen {
 	case screenHome:
-		return 6
+		return len(homeActions)
 	case screenSourceList:
 		return len(m.visibleSourceMigrations())
 	case screenSourceDetail:
@@ -777,6 +831,15 @@ type actionItem struct {
 	shortcut string
 }
 
+var homeActions = []actionItem{
+	{id: "migrations", label: "Migrations"},
+	{id: "create", label: "Create migration"},
+	{id: "mannequins", label: "Target mannequins"},
+	{id: "configuration", label: "Configuration"},
+	{id: "target", label: "Advanced destination operations"},
+	{id: "quit", label: "Quit"},
+}
+
 func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 	actions := m.sourceActionItems()
 	if m.actionFocus < 0 || m.actionFocus >= len(actions) {
@@ -787,6 +850,7 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 		return m.refresh()
 	case "watch":
 		m.sourceWatching = !m.sourceWatching
+		m.sourceWatchGen++
 		if m.sourceWatching {
 			m.loading = true
 			command := m.loadSourceDetailCmd()
@@ -827,6 +891,8 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen, m.loading, m.err = screenTargetDetail, true, nil
+		m.targetDetail = nil
+		m.repository = ""
 		m.targetParent = screenSourceDetail
 		m.actionFocus = 0
 		m.resetViewport()
@@ -958,14 +1024,17 @@ var mannequinActions = []actionItem{
 }
 
 func (m *Model) activateMannequinAction() (tea.Model, tea.Cmd) {
-	switch m.actionFocus {
-	case 0:
+	if m.actionFocus < 0 || m.actionFocus >= len(mannequinActions) {
+		return m, nil
+	}
+	switch mannequinActions[m.actionFocus].id {
+	case "list":
 		return m.openMannequinListForm(false)
-	case 1:
+	case "export":
 		return m.openMannequinListForm(true)
-	case 2:
+	case "reclaim":
 		return m.openMannequinReclaimForm(false)
-	case 3:
+	case "reclaim-csv":
 		return m.openMannequinReclaimForm(true)
 	}
 	return m, nil
@@ -978,16 +1047,26 @@ var configurationActions = []actionItem{
 }
 
 func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
-	switch m.actionFocus {
-	case 0:
+	if m.actionFocus < 0 || m.actionFocus >= len(configurationActions) {
+		return m, nil
+	}
+	switch configurationActions[m.actionFocus].id {
+	case "refresh":
 		return m.refresh()
-	case 1:
+	case "edit":
 		return m.openConfigurationForm()
-	case 2:
+	case "reset":
 		return m.confirmAction("Reset configuration", "Remove all stored endpoint URLs and credentials?", screenConfiguration,
 			func() tea.Msg {
 				err := m.service.ResetConfiguration(m.ctx)
-				return actionMsg{title: "Configuration reset", body: "Stored configuration and credentials were cleared.", parent: screenConfiguration, refresh: true, err: err}
+				return actionMsg{
+					title:            "Configuration reset",
+					body:             "Stored configuration and credentials were cleared.",
+					parent:           screenConfiguration,
+					refresh:          true,
+					reloadSourceList: true,
+					err:              err,
+				}
 			})
 	}
 	return m, nil
@@ -1054,12 +1133,30 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Open), key.Matches(msg, keys.Back), key.Matches(msg, keys.Quit):
 		parent := m.result.parent
 		refresh := m.result.refresh
+		reloadSourceList := m.result.reloadSourceList
 		m.screen, m.cursor, m.actionFocus, m.err = parent, 0, 0, nil
 		if refresh {
-			return m.refresh()
+			model, command := m.refresh()
+			if reloadSourceList {
+				m.sourceListLoading = true
+				return model, tea.Batch(command, m.startSourceListLoad())
+			}
+			return model, command
+		}
+		if reloadSourceList {
+			m.sourceListLoading = true
+			return m, m.startSourceListLoad()
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) invalidateSourceList() {
+	m.sourceListGen++
+	m.sourceMigrations = nil
+	m.sourceListLoaded = false
+	m.sourceListLoading = false
+	m.sourceListErr = nil
 }
 
 func (m *Model) visibleSourceMigrations() []elmapi.MigrationSummary {
@@ -1151,8 +1248,8 @@ func (m *Model) openForm(form formState) (tea.Model, tea.Cmd) {
 func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	field := &m.form.fields[m.form.cursor]
 	if msg.Type == tea.KeyRunes {
-		if field.kind == fieldText || field.kind == fieldSecret {
-			field.value += string(msg.Runes)
+		if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) {
+			*field.text += string(msg.Runes)
 			return m, nil
 		}
 	}
@@ -1170,30 +1267,22 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left":
 		cycleOption(field, -1)
 	case "right", " ":
-		if field.kind == fieldBool {
-			if field.value == "true" {
-				field.value = "false"
-			} else {
-				field.value = "true"
-			}
+		if field.boolean != nil {
+			*field.boolean = !*field.boolean
 		} else {
 			cycleOption(field, 1)
 		}
 	case "backspace":
-		if (field.kind == fieldText || field.kind == fieldSecret) && field.value != "" {
-			runes := []rune(field.value)
-			field.value = string(runes[:len(runes)-1])
+		if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) && *field.text != "" {
+			runes := []rune(*field.text)
+			*field.text = string(runes[:len(runes)-1])
 		}
 	case "enter":
 		if m.form.cursor < len(m.form.fields)-1 {
 			m.form.cursor++
 			return m, nil
 		}
-		values := make(map[string]string, len(m.form.fields))
-		for _, f := range m.form.fields {
-			values[f.key] = f.value
-		}
-		command, err := m.form.submit(values)
+		command, err := m.form.submit()
 		if err != nil {
 			m.form.err = err
 			return m, nil
@@ -1206,31 +1295,34 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func cycleOption(field *formField, delta int) {
-	if field.kind != fieldSelect || len(field.options) == 0 {
+	if field.kind != fieldSelect || field.text == nil || len(field.options) == 0 {
 		return
 	}
 	index := 0
 	for i, option := range field.options {
-		if option == field.value {
+		if option == *field.text {
 			index = i
 			break
 		}
 	}
 	index = (index + delta + len(field.options)) % len(field.options)
-	field.value = field.options[index]
+	*field.text = field.options[index]
 }
 
 func (m *Model) openSourceIDForm() (tea.Model, tea.Cmd) {
+	id := ""
 	return m.openForm(formState{
 		title:  "Open source migration",
 		parent: screenSourceList,
-		fields: []formField{{key: "id", label: "Source migration UUID", kind: fieldText}},
-		submit: func(values map[string]string) (tea.Cmd, error) {
-			id := strings.TrimSpace(values["id"])
+		fields: []formField{textFormField("Source migration UUID", "", &id)},
+		submit: func() (tea.Cmd, error) {
+			id = strings.TrimSpace(id)
 			if id == "" {
 				return nil, errors.New("source migration UUID is required")
 			}
 			m.sourceID = workflow.SourceMigrationID(id)
+			m.sourceDetail = nil
+			m.targetID = 0
 			m.form.parent = screenSourceDetail
 			m.resetViewport()
 			return m.loadSourceDetailCmd(), nil
@@ -1248,12 +1340,11 @@ func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
 	m.pickerGeneration++
 	m.pickerInfoOpen = false
 	m.picker = pickerState{
-		kind:       pickerSourceRepository,
-		title:      "Select source repository",
-		parent:     parent,
-		input:      input,
-		loading:    true,
-		generation: m.pickerGeneration,
+		kind:    pickerSourceRepository,
+		title:   "Select source repository",
+		parent:  parent,
+		input:   input,
+		loading: true,
 	}
 	m.screen = screenPicker
 	command := m.loadPickerCatalogCmd(pickerSourceRepository, m.pickerGeneration)
@@ -1270,13 +1361,12 @@ func (m *Model) openTargetOrganizationPicker(parent screen, source string) (tea.
 	m.pickerGeneration++
 	m.pickerInfoOpen = false
 	m.picker = pickerState{
-		kind:       pickerTargetOrganization,
-		title:      "Select destination organization",
-		parent:     parent,
-		input:      input,
-		loading:    true,
-		source:     source,
-		generation: m.pickerGeneration,
+		kind:    pickerTargetOrganization,
+		title:   "Select destination organization",
+		parent:  parent,
+		input:   input,
+		loading: true,
+		source:  source,
 	}
 	m.screen = screenPicker
 	command := m.loadPickerCatalogCmd(pickerTargetOrganization, m.pickerGeneration)
@@ -1285,7 +1375,6 @@ func (m *Model) openTargetOrganizationPicker(parent screen, source string) (tea.
 
 func (m *Model) reloadPicker() (tea.Model, tea.Cmd) {
 	m.pickerGeneration++
-	m.picker.generation = m.pickerGeneration
 	m.picker.loading = true
 	m.picker.err = nil
 	m.picker.items = nil
@@ -1300,27 +1389,28 @@ func (m *Model) openDiscoveredSourceCreateForm(source, targetOrganization string
 		m.picker.err = err
 		return m, nil
 	}
+	targetRepository := sourceRepository
+	visibility := "internal"
+	start := false
 	return m.openForm(formState{
 		title:       "Create migration",
 		description: fmt.Sprintf("Source: %s\nDestination organization: %s", source, targetOrganization),
 		parent:      screenPicker,
 		fields: []formField{
-			{
-				key:         "targetRepo",
-				label:       "Destination repository name",
-				description: "Defaults to the source repository name; edit it if the destination should differ.",
-				kind:        fieldText,
-				value:       sourceRepository,
-			},
-			{key: "visibility", label: "Target visibility", kind: fieldSelect, value: "internal", options: []string{"internal", "private"}},
-			{key: "start", label: "Start after creation", kind: fieldBool, value: "false"},
+			textFormField(
+				"Destination repository name",
+				"Defaults to the source repository name; edit it if the destination should differ.",
+				&targetRepository,
+			),
+			selectFormField("Target visibility", &visibility, "internal", "private"),
+			boolFormField("Start after creation", &start),
 		},
-		submit: func(values map[string]string) (tea.Cmd, error) {
+		submit: func() (tea.Cmd, error) {
 			sourceOwner, sourceRepo, err := workflow.ParseRepositoryCoordinate(source)
 			if err != nil {
 				return nil, fmt.Errorf("invalid source repository: %w", err)
 			}
-			targetRepo := strings.TrimSpace(values["targetRepo"])
+			targetRepo := strings.TrimSpace(targetRepository)
 			if targetRepo == "" || strings.Contains(targetRepo, "/") {
 				return nil, errors.New("destination repository name must be non-empty and must not contain a slash")
 			}
@@ -1329,41 +1419,41 @@ func (m *Model) openDiscoveredSourceCreateForm(source, targetOrganization string
 				SourceRepo:  sourceRepo,
 				TargetOwner: targetOrganization,
 				TargetRepo:  targetRepo,
-				Visibility:  values["visibility"],
-				Start:       values["start"] == "true",
+				Visibility:  visibility,
+				Start:       start,
 			}), nil
 		},
 	})
 }
 
 func (m *Model) openManualSourceCreateForm(parent screen, source string) (tea.Model, tea.Cmd) {
+	target := ""
+	visibility := "internal"
+	start := false
 	return m.openForm(formState{
 		title:       "Create migration manually",
 		description: "Enter repositories directly when API discovery is unavailable.",
 		parent:      parent,
 		fields: []formField{
-			{
-				key:         "source",
-				label:       "Source repository",
-				description: "Format: org/repo (for example, source-org/source-repo)",
-				kind:        fieldText,
-				value:       source,
-			},
-			{
-				key:         "target",
-				label:       "Target repository",
-				description: "Format: org/repo (for example, target-org/target-repo)",
-				kind:        fieldText,
-			},
-			{key: "visibility", label: "Target visibility", kind: fieldSelect, value: "internal", options: []string{"internal", "private"}},
-			{key: "start", label: "Start after creation", kind: fieldBool, value: "false"},
+			textFormField(
+				"Source repository",
+				"Format: org/repo (for example, source-org/source-repo)",
+				&source,
+			),
+			textFormField(
+				"Target repository",
+				"Format: org/repo (for example, target-org/target-repo)",
+				&target,
+			),
+			selectFormField("Target visibility", &visibility, "internal", "private"),
+			boolFormField("Start after creation", &start),
 		},
-		submit: func(values map[string]string) (tea.Cmd, error) {
-			sourceOwner, sourceRepository, err := workflow.ParseRepositoryCoordinate(values["source"])
+		submit: func() (tea.Cmd, error) {
+			sourceOwner, sourceRepository, err := workflow.ParseRepositoryCoordinate(source)
 			if err != nil {
 				return nil, fmt.Errorf("invalid source repository: %w", err)
 			}
-			targetOwner, targetRepository, err := workflow.ParseRepositoryCoordinate(values["target"])
+			targetOwner, targetRepository, err := workflow.ParseRepositoryCoordinate(target)
 			if err != nil {
 				return nil, fmt.Errorf("invalid target repository: %w", err)
 			}
@@ -1372,8 +1462,8 @@ func (m *Model) openManualSourceCreateForm(parent screen, source string) (tea.Mo
 				SourceRepo:  sourceRepository,
 				TargetOwner: targetOwner,
 				TargetRepo:  targetRepository,
-				Visibility:  values["visibility"],
-				Start:       values["start"] == "true",
+				Visibility:  visibility,
+				Start:       start,
 			}
 			return m.createSourceMigrationCmd(input), nil
 		},
@@ -1386,26 +1476,35 @@ func (m *Model) createSourceMigrationCmd(input workflow.SourceCreateInput) tea.C
 		if err != nil {
 			return actionMsg{parent: screenSourceList, err: err}
 		}
-		m.sourceID = workflow.SourceMigrationID(result.Migration.MigrationID)
+		sourceID := workflow.SourceMigrationID(result.Migration.MigrationID)
 		body := render.MigrationCreate(result.Migration)
 		if result.Started {
 			body = fmt.Sprintf("Migration %s created and started.", result.Migration.MigrationID)
 		}
-		return actionMsg{title: "Migration created", body: body, parent: screenSourceDetail, refresh: true}
+		return actionMsg{
+			title:    "Migration created",
+			body:     body,
+			parent:   screenSourceDetail,
+			refresh:  true,
+			sourceID: sourceID,
+		}
 	}
 }
 
 func (m *Model) openTargetIDForm() (tea.Model, tea.Cmd) {
+	value := ""
 	return m.openForm(formState{
 		title:  "Open target migration",
 		parent: screenTargetList,
-		fields: []formField{{key: "id", label: "Numeric target migration ID", kind: fieldText}},
-		submit: func(values map[string]string) (tea.Cmd, error) {
-			id, err := workflow.ParseTargetMigrationID(values["id"])
+		fields: []formField{textFormField("Numeric target migration ID", "", &value)},
+		submit: func() (tea.Cmd, error) {
+			id, err := workflow.ParseTargetMigrationID(value)
 			if err != nil {
 				return nil, err
 			}
 			m.targetID = id
+			m.targetDetail = nil
+			m.repository = ""
 			m.targetParent = screenTargetList
 			m.form.parent = screenTargetDetail
 			m.resetViewport()
@@ -1415,21 +1514,25 @@ func (m *Model) openTargetIDForm() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openTargetCreateForm() (tea.Model, tea.Cmd) {
+	sourceURL := ""
+	repository := ""
+	description := ""
+	guid := ""
 	return m.openForm(formState{
 		title:  "Create target migration (advanced)",
 		parent: screenTargetList,
 		fields: []formField{
-			{key: "sourceURL", label: "Source repository URL", kind: fieldText},
-			{key: "repository", label: "Target owner/repository", kind: fieldText},
-			{key: "description", label: "Description", kind: fieldText},
-			{key: "guid", label: "Exporter migration GUID", kind: fieldText},
+			textFormField("Source repository URL", "", &sourceURL),
+			textFormField("Target owner/repository", "", &repository),
+			textFormField("Description", "", &description),
+			textFormField("Exporter migration GUID", "", &guid),
 		},
-		submit: func(values map[string]string) (tea.Cmd, error) {
+		submit: func() (tea.Cmd, error) {
 			input := workflow.TargetCreateInput{
-				SourceRepositoryURL: values["sourceURL"],
-				Repository:          values["repository"],
-				Description:         values["description"],
-				ExporterGUID:        values["guid"],
+				SourceRepositoryURL: sourceURL,
+				Repository:          repository,
+				Description:         description,
+				ExporterGUID:        guid,
 			}
 			return func() tea.Msg {
 				raw, err := m.service.CreateTargetMigration(m.ctx, input)
@@ -1440,37 +1543,40 @@ func (m *Model) openTargetCreateForm() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openResourcesForm() (tea.Model, tea.Cmd) {
-	defaultRepo := m.repository
+	repository := m.repository
+	origin := "all"
+	state := "all"
+	maximum := "100"
 	return m.openForm(formState{
 		title:  "List target resources",
 		parent: screenTargetDetail,
 		fields: []formField{
-			{key: "repository", label: "Repository owner/name", kind: fieldText, value: defaultRepo},
-			{key: "origin", label: "Origin", kind: fieldSelect, value: "all", options: []string{"all", "backfill", "live-update"}},
-			{key: "state", label: "State", kind: fieldSelect, value: "all", options: []string{"all", "pending", "processed", "failed", "eligible"}},
-			{key: "max", label: "Maximum results (0 = all)", kind: fieldText, value: "100"},
+			textFormField("Repository owner/name", "", &repository),
+			selectFormField("Origin", &origin, "all", "backfill", "live-update"),
+			selectFormField("State", &state, "all", "pending", "processed", "failed", "eligible"),
+			textFormField("Maximum results (0 = all)", "", &maximum),
 		},
-		submit: func(values map[string]string) (tea.Cmd, error) {
-			maxResults, err := strconv.Atoi(strings.TrimSpace(values["max"]))
+		submit: func() (tea.Cmd, error) {
+			maxResults, err := strconv.Atoi(strings.TrimSpace(maximum))
 			if err != nil || maxResults < 0 {
 				return nil, errors.New("maximum results must be zero or a positive integer")
 			}
-			origin := values["origin"]
-			if origin == "all" {
-				origin = ""
+			resourceOrigin := origin
+			if resourceOrigin == "all" {
+				resourceOrigin = ""
 			}
-			state := values["state"]
-			if state == "all" {
-				state = ""
+			resourceState := state
+			if resourceState == "all" {
+				resourceState = ""
 			}
 			input := workflow.ResourceInput{
 				MigrationID: m.targetID,
-				Repository:  values["repository"],
-				Origin:      origin,
-				State:       state,
+				Repository:  repository,
+				Origin:      resourceOrigin,
+				State:       resourceState,
 				MaxResults:  maxResults,
 			}
-			m.repository = strings.TrimSpace(values["repository"])
+			m.repository = strings.TrimSpace(repository)
 			return func() tea.Msg {
 				nodes, err := m.service.ListResources(m.ctx, input)
 				return actionMsg{title: "Target resources", body: renderNodes(nodes), parent: screenTargetDetail, err: err}
@@ -1480,18 +1586,21 @@ func (m *Model) openResourcesForm() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openReportForm(title, operation string) (tea.Model, tea.Cmd) {
+	stage := "backfill"
+	state := ""
 	fields := []formField{
-		{key: "stage", label: "Stage", kind: fieldSelect, value: "backfill", options: []string{"backfill", "live-update"}},
+		selectFormField("Stage", &stage, "backfill", "live-update"),
 	}
 	if operation == "request" {
-		fields = append(fields, formField{key: "state", label: "Node state", kind: fieldSelect, value: "all", options: []string{"all", "migrated", "unmigrated"}})
+		state = "all"
+		fields = append(fields, selectFormField("Node state", &state, "all", "migrated", "unmigrated"))
 	}
 	return m.openForm(formState{
 		title:  title,
 		parent: screenTargetDetail,
 		fields: fields,
-		submit: func(values map[string]string) (tea.Cmd, error) {
-			input := workflow.ReportInput{MigrationID: m.targetID, Stage: values["stage"], State: values["state"]}
+		submit: func() (tea.Cmd, error) {
+			input := workflow.ReportInput{MigrationID: m.targetID, Stage: stage, State: state}
 			return func() tea.Msg {
 				var (
 					raw json.RawMessage
@@ -1512,12 +1621,15 @@ func (m *Model) openReportForm(title, operation string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openMannequinListForm(export bool) (tea.Model, tea.Cmd) {
+	organization := ""
+	includeReclaimed := false
+	path := "mannequins.csv"
 	fields := []formField{
-		{key: "org", label: "Target organization", kind: fieldText},
-		{key: "include", label: "Include reclaimed mannequins", kind: fieldBool, value: "false"},
+		textFormField("Target organization", "", &organization),
+		boolFormField("Include reclaimed mannequins", &includeReclaimed),
 	}
 	if export {
-		fields = append(fields, formField{key: "path", label: "CSV output path", kind: fieldText, value: "mannequins.csv"})
+		fields = append(fields, textFormField("CSV output path", "", &path))
 	}
 	title := "List mannequins"
 	if export {
@@ -1527,15 +1639,13 @@ func (m *Model) openMannequinListForm(export bool) (tea.Model, tea.Cmd) {
 		title:  title,
 		parent: screenMannequins,
 		fields: fields,
-		submit: func(values map[string]string) (tea.Cmd, error) {
-			org := values["org"]
-			include := values["include"] == "true"
+		submit: func() (tea.Cmd, error) {
 			return func() tea.Msg {
 				if export {
-					err := m.service.ExportMannequins(m.ctx, org, values["path"], include)
-					return actionMsg{title: "Mannequins exported", body: fmt.Sprintf("Wrote mannequin CSV to %s.", values["path"]), parent: screenMannequins, err: err}
+					err := m.service.ExportMannequins(m.ctx, organization, path, includeReclaimed)
+					return actionMsg{title: "Mannequins exported", body: fmt.Sprintf("Wrote mannequin CSV to %s.", path), parent: screenMannequins, err: err}
 				}
-				records, err := m.service.ListMannequins(m.ctx, org, include)
+				records, err := m.service.ListMannequins(m.ctx, organization, includeReclaimed)
 				var buffer bytes.Buffer
 				if err == nil {
 					err = workflow.WriteMannequinCSV(&buffer, records)
@@ -1547,33 +1657,40 @@ func (m *Model) openMannequinListForm(export bool) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
-	fields := []formField{{key: "org", label: "Target organization", kind: fieldText}}
+	organization := ""
+	csvPath := ""
+	mannequin := ""
+	mannequinID := ""
+	targetUser := ""
+	force := false
+	skipInvitation := false
+	fields := []formField{textFormField("Target organization", "", &organization)}
 	if csvMode {
-		fields = append(fields, formField{key: "csv", label: "Mannequin CSV path", kind: fieldText})
+		fields = append(fields, textFormField("Mannequin CSV path", "", &csvPath))
 	} else {
 		fields = append(fields,
-			formField{key: "mannequin", label: "Mannequin login", kind: fieldText},
-			formField{key: "mannequinID", label: "Mannequin ID (optional)", kind: fieldText},
-			formField{key: "target", label: "Target user or app[bot]", kind: fieldText},
+			textFormField("Mannequin login", "", &mannequin),
+			textFormField("Mannequin ID (optional)", "", &mannequinID),
+			textFormField("Target user or app[bot]", "", &targetUser),
 		)
 	}
 	fields = append(fields,
-		formField{key: "force", label: "Force already-reclaimed mannequins", kind: fieldBool, value: "false"},
-		formField{key: "skip", label: "Immediate reattribution (EMU)", kind: fieldBool, value: "false"},
+		boolFormField("Force already-reclaimed mannequins", &force),
+		boolFormField("Immediate reattribution (EMU)", &skipInvitation),
 	)
 	return m.openForm(formState{
 		title:  "Reclaim mannequins",
 		parent: screenMannequins,
 		fields: fields,
-		submit: func(values map[string]string) (tea.Cmd, error) {
+		submit: func() (tea.Cmd, error) {
 			input := workflow.MannequinReclaimInput{
-				Organization:   values["org"],
-				CSVPath:        values["csv"],
-				Mannequin:      values["mannequin"],
-				MannequinID:    values["mannequinID"],
-				TargetUser:     values["target"],
-				Force:          values["force"] == "true",
-				SkipInvitation: values["skip"] == "true",
+				Organization:   organization,
+				CSVPath:        csvPath,
+				Mannequin:      mannequin,
+				MannequinID:    mannequinID,
+				TargetUser:     targetUser,
+				Force:          force,
+				SkipInvitation: skipInvitation,
 			}
 			if strings.HasSuffix(input.TargetUser, "[bot]") {
 				input.SkipInvitation = true
@@ -1607,7 +1724,7 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
-	sourceURL, targetURL := "", ""
+	sourceURL, sourceToken, targetURL, targetToken := "", "", "", ""
 	if m.configuration != nil {
 		sourceURL = m.configuration.SourceURL
 		targetURL = m.configuration.TargetURL
@@ -1616,21 +1733,28 @@ func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
 		title:  "Edit configuration",
 		parent: screenConfiguration,
 		fields: []formField{
-			{key: "sourceURL", label: "Source URL", kind: fieldText, value: sourceURL},
-			{key: "sourceToken", label: "Source token (blank preserves current)", kind: fieldSecret},
-			{key: "targetURL", label: "Target URL", kind: fieldText, value: targetURL},
-			{key: "targetToken", label: "Target token (blank preserves current)", kind: fieldSecret},
+			textFormField("Source URL", "", &sourceURL),
+			secretFormField("Source token (blank preserves current)", &sourceToken),
+			textFormField("Target URL", "", &targetURL),
+			secretFormField("Target token (blank preserves current)", &targetToken),
 		},
-		submit: func(values map[string]string) (tea.Cmd, error) {
+		submit: func() (tea.Cmd, error) {
 			input := workflow.ConfigurationInput{
-				SourceURL:   values["sourceURL"],
-				SourceToken: values["sourceToken"],
-				TargetURL:   values["targetURL"],
-				TargetToken: values["targetToken"],
+				SourceURL:   sourceURL,
+				SourceToken: sourceToken,
+				TargetURL:   targetURL,
+				TargetToken: targetToken,
 			}
 			return func() tea.Msg {
 				err := m.service.SaveConfiguration(m.ctx, input)
-				return actionMsg{title: "Configuration saved", body: "Stored gh elm configuration.", parent: screenConfiguration, refresh: true, err: err}
+				return actionMsg{
+					title:            "Configuration saved",
+					body:             "Stored gh elm configuration.",
+					parent:           screenConfiguration,
+					refresh:          true,
+					reloadSourceList: true,
+					err:              err,
+				}
 			}, nil
 		},
 	})
@@ -1674,6 +1798,7 @@ func (m *Model) revertCutoverCmd() tea.Cmd {
 
 type sourceListMsg struct {
 	migrations []elmapi.MigrationSummary
+	generation uint64
 	err        error
 }
 
@@ -1716,11 +1841,13 @@ type pickerCatalogMsg struct {
 }
 
 type actionMsg struct {
-	title   string
-	body    string
-	parent  screen
-	refresh bool
-	err     error
+	title            string
+	body             string
+	parent           screen
+	refresh          bool
+	reloadSourceList bool
+	sourceID         workflow.SourceMigrationID
+	err              error
 }
 
 type confirmRequestMsg struct {
@@ -1730,13 +1857,24 @@ type confirmRequestMsg struct {
 	command tea.Cmd
 }
 
-type watchTickMsg struct{}
+type watchTickMsg struct {
+	generation uint64
+}
 
-func (m *Model) loadSourceListCmd() tea.Cmd {
+func (m *Model) startSourceListLoad() tea.Cmd {
+	m.sourceListGen++
+	generation := m.sourceListGen
 	return func() tea.Msg {
 		migrations, err := m.service.ListSourceMigrations(m.ctx, "")
-		return sourceListMsg{migrations: migrations, err: err}
+		return sourceListMsg{migrations: migrations, generation: generation, err: err}
 	}
+}
+
+func (m *Model) scheduleWatchTick() tea.Cmd {
+	generation := m.sourceWatchGen
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return watchTickMsg{generation: generation}
+	})
 }
 
 func (m *Model) loadSourceDetailCmd() tea.Cmd {
