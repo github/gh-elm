@@ -152,8 +152,8 @@ func (s *Service) GetSourceMigration(ctx context.Context, id SourceMigrationID) 
 	return client.GetMigrationDetail(ctx, string(id))
 }
 
-// ListSourceRepositories lists repositories visible through the source credentials.
-func (s *Service) ListSourceRepositories(ctx context.Context) ([]string, error) {
+// ListSourceRepositories lists organization-owned repositories visible through the source credentials.
+func (s *Service) ListSourceRepositories(ctx context.Context) ([]elmapi.Repository, error) {
 	client, err := s.sourceClient()
 	if err != nil {
 		return nil, err
@@ -162,16 +162,16 @@ func (s *Service) ListSourceRepositories(ctx context.Context) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(repositories))
+	organizationRepositories := make([]elmapi.Repository, 0, len(repositories))
 	for _, repository := range repositories {
 		if !strings.EqualFold(repository.Owner.Type, "Organization") {
 			continue
 		}
-		if name := strings.TrimSpace(repository.FullName); name != "" {
-			names = append(names, name)
+		if repository.FullName = strings.TrimSpace(repository.FullName); repository.FullName != "" {
+			organizationRepositories = append(organizationRepositories, repository)
 		}
 	}
-	return names, nil
+	return organizationRepositories, nil
 }
 
 // ListTargetOrganizations lists organizations visible through the target credentials.
