@@ -48,11 +48,6 @@ run_scenario() {
     "$target_migration_id" \
     "Target migration ID validation"
 
-  record_result \
-    "Pause and resume" \
-    "⏭️ skip" \
-    "Not exercised because the GHES sandbox uses the database-backed work scheduler."
-
   wait_for_cutover_readiness \
     "$migration_id" \
     "$E2E_CUTOVER_TIMEOUT_SECONDS" \
