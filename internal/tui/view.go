@@ -75,6 +75,9 @@ func (m *Model) View() string {
 		title = m.form.title
 		body = m.formView()
 		help = "tab/↑/↓ fields • type edit • ←/→ choose • space toggle • enter continue • esc cancel"
+		if len(m.form.actions) > 0 {
+			help = "tab/↑/↓ fields/actions • type edit • ←/→ choose • space toggle • enter activate • esc cancel"
+		}
 	case screenResult:
 		title = m.result.title
 		body = m.result.body
@@ -461,7 +464,7 @@ func (m *Model) formView() string {
 		prefix.WriteString(m.styles.Muted.Render(m.form.description))
 		prefix.WriteString("\n\n")
 	}
-	blocks := make([]string, 0, len(m.form.fields))
+	blocks := make([]string, 0, len(m.form.fields)+1)
 	for index, field := range m.form.fields {
 		value := ""
 		if field.text != nil {
@@ -493,6 +496,9 @@ func (m *Model) formView() string {
 		}
 		blocks = append(blocks, m.selectorCard(content.String(), index == m.form.cursor, true))
 	}
+	if len(m.form.actions) > 0 {
+		blocks = append(blocks, m.actionButtons(m.form.actions, m.form.actionFocus, m.contentWidth()))
+	}
 
 	var suffix string
 	if m.form.err != nil {
@@ -508,14 +514,18 @@ func (m *Model) formView() string {
 	}
 	available := m.bodyHeight() - reserved
 	start, end := focusedBlockRange(blocks, m.form.cursor, max(1, available-2))
+	moreLabel := "field(s)"
+	if len(m.form.actions) > 0 {
+		moreLabel = "item(s)"
+	}
 	var builder strings.Builder
 	builder.WriteString(prefix.String())
 	if start > 0 {
-		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more field(s)", start)) + "\n")
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more %s", start, moreLabel)) + "\n")
 	}
 	builder.WriteString(strings.Join(blocks[start:end], "\n"))
 	if end < len(blocks) {
-		builder.WriteString("\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more field(s)", len(blocks)-end)))
+		builder.WriteString("\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more %s", len(blocks)-end, moreLabel)))
 	}
 	builder.WriteString(suffix)
 	return builder.String()

@@ -118,7 +118,9 @@ type formState struct {
 	title       string
 	description string
 	fields      []formField
+	actions     []actionItem
 	cursor      int
+	actionFocus int
 	parent      screen
 	submit      func() (tea.Cmd, error)
 	err         error
@@ -1246,8 +1248,10 @@ func (m *Model) openForm(form formState) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	field := &m.form.fields[m.form.cursor]
-	if msg.Type == tea.KeyRunes {
+	actionRow := len(m.form.fields)
+	onActions := len(m.form.actions) > 0 && m.form.cursor == actionRow
+	if msg.Type == tea.KeyRunes && !onActions {
+		field := &m.form.fields[m.form.cursor]
 		if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) {
 			*field.text += string(msg.Runes)
 			return m, nil
@@ -1261,18 +1265,38 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.form.cursor--
 		}
 	case "down", "tab":
-		if m.form.cursor < len(m.form.fields)-1 {
+		if m.form.cursor < len(m.form.fields)-1 || len(m.form.actions) > 0 && m.form.cursor < actionRow {
 			m.form.cursor++
 		}
 	case "left":
-		cycleOption(field, -1)
-	case "right", " ":
-		if field.boolean != nil {
-			*field.boolean = !*field.boolean
+		if onActions {
+			m.form.actionFocus = max(0, m.form.actionFocus-1)
 		} else {
-			cycleOption(field, 1)
+			cycleOption(&m.form.fields[m.form.cursor], -1)
+		}
+	case "right":
+		if onActions {
+			m.form.actionFocus = min(len(m.form.actions)-1, m.form.actionFocus+1)
+		} else {
+			field := &m.form.fields[m.form.cursor]
+			if field.boolean != nil {
+				*field.boolean = !*field.boolean
+			} else {
+				cycleOption(field, 1)
+			}
+		}
+	case " ":
+		if !onActions {
+			field := &m.form.fields[m.form.cursor]
+			if field.boolean != nil {
+				*field.boolean = !*field.boolean
+			}
 		}
 	case "backspace":
+		if onActions {
+			return m, nil
+		}
+		field := &m.form.fields[m.form.cursor]
 		if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) && *field.text != "" {
 			runes := []rune(*field.text)
 			*field.text = string(runes[:len(runes)-1])
@@ -1280,6 +1304,14 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.form.cursor < len(m.form.fields)-1 {
 			m.form.cursor++
+			return m, nil
+		}
+		if len(m.form.actions) > 0 && !onActions {
+			m.form.cursor = actionRow
+			return m, nil
+		}
+		if onActions && m.form.actions[m.form.actionFocus].id == "cancel" {
+			m.screen = m.form.parent
 			return m, nil
 		}
 		command, err := m.form.submit()
@@ -1737,6 +1769,10 @@ func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
 			secretFormField("Source token (blank preserves current)", &sourceToken),
 			textFormField("Target URL", "", &targetURL),
 			secretFormField("Target token (blank preserves current)", &targetToken),
+		},
+		actions: []actionItem{
+			{id: "save", label: "Save"},
+			{id: "cancel", label: "Cancel"},
 		},
 		submit: func() (tea.Cmd, error) {
 			input := workflow.ConfigurationInput{
