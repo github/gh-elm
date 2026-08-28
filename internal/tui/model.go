@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -490,11 +491,15 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.actionFocus++
 		}
 	case key.Matches(msg, keys.Up):
-		if !m.actionScreen() && m.cursor > 0 {
+		if m.screen == screenHome {
+			m.moveHomeCursor(-1)
+		} else if !m.actionScreen() && m.cursor > 0 {
 			m.cursor--
 		}
 	case key.Matches(msg, keys.Down):
-		if !m.actionScreen() && m.cursor < m.itemCount()-1 {
+		if m.screen == screenHome {
+			m.moveHomeCursor(1)
+		} else if !m.actionScreen() && m.cursor < m.itemCount()-1 {
 			m.cursor++
 		}
 	case key.Matches(msg, keys.Refresh):
@@ -661,10 +666,11 @@ func (m *Model) visiblePickerItems() []pickerItem {
 func (m *Model) activate() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenHome:
-		if m.cursor < 0 || m.cursor >= len(homeActions) {
+		actions := m.homeActionItems()
+		if m.cursor < 0 || m.cursor >= len(actions) || actions[m.cursor].disabled {
 			return m, nil
 		}
-		switch homeActions[m.cursor].id {
+		switch actions[m.cursor].id {
 		case "migrations":
 			m.screen, m.err = screenSourceList, m.sourceListErr
 			switch {
@@ -831,6 +837,7 @@ type actionItem struct {
 	id       string
 	label    string
 	shortcut string
+	disabled bool
 }
 
 var homeActions = []actionItem{
@@ -840,6 +847,47 @@ var homeActions = []actionItem{
 	{id: "configuration", label: "Configuration"},
 	{id: "target", label: "Advanced destination operations"},
 	{id: "quit", label: "Quit"},
+}
+
+func (m *Model) homeActionItems() []actionItem {
+	actions := slices.Clone(homeActions)
+	if m.configurationReady() {
+		return actions
+	}
+	for index := range actions {
+		switch actions[index].id {
+		case "configuration", "quit":
+		default:
+			actions[index].disabled = true
+		}
+	}
+	return actions
+}
+
+func (m *Model) configurationReady() bool {
+	if m.configuration == nil || m.configurationErr != nil {
+		return false
+	}
+	sourceURL, sourceTokenSet := effectiveSourceConfiguration(m.configuration)
+	targetURL, targetTokenSet := effectiveTargetConfiguration(m.configuration)
+	return validHTTPURL(sourceURL) &&
+		sourceTokenSet &&
+		validHTTPURL(targetURL) &&
+		targetTokenSet &&
+		m.sourceAuthChecked &&
+		m.sourceAuthErr == nil &&
+		m.targetAuthChecked &&
+		m.targetAuthErr == nil
+}
+
+func (m *Model) moveHomeCursor(delta int) {
+	actions := m.homeActionItems()
+	for index := m.cursor + delta; index >= 0 && index < len(actions); index += delta {
+		if !actions[index].disabled {
+			m.cursor = index
+			return
+		}
+	}
 }
 
 func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {

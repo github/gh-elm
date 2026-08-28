@@ -18,8 +18,43 @@ import (
 )
 
 func TestModelUpdate(t *testing.T) {
+	t.Run("home disables configuration-dependent actions until preflight passes", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		actions := model.homeActionItems()
+		for _, action := range actions {
+			if action.id == "configuration" || action.id == "quit" {
+				assert.False(t, action.disabled)
+			} else {
+				assert.True(t, action.disabled)
+			}
+		}
+		assert.Equal(t, 4, strings.Count(model.View(), "(disabled)"))
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		assert.Nil(t, command)
+		assert.Equal(t, screenHome, model.screen)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*Model)
+		assert.Equal(t, 3, model.cursor)
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*Model)
+		assert.Equal(t, 5, model.cursor)
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model = updated.(*Model)
+		assert.Equal(t, 3, model.cursor)
+
+		setConfigurationReady(model)
+		for _, action := range model.homeActionItems() {
+			assert.False(t, action.disabled)
+		}
+	})
+
 	t.Run("background prefetch errors stay off the home screen", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
+		setConfigurationReady(model)
 		updated, _ := model.Update(sourceListMsg{err: assert.AnError})
 		model = updated.(*Model)
 
@@ -33,6 +68,7 @@ func TestModelUpdate(t *testing.T) {
 
 	t.Run("uses prefetched migrations without another request", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
+		setConfigurationReady(model)
 		updated, _ := model.Update(sourceListMsg{migrations: []elmapi.MigrationSummary{{MigrationID: "source-1"}}})
 		model = updated.(*Model)
 
@@ -62,6 +98,7 @@ func TestModelUpdate(t *testing.T) {
 
 	t.Run("configuration response does not unlock a pending migration list", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
+		setConfigurationReady(model)
 		model.sourceListLoading = true
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
@@ -156,6 +193,7 @@ func TestModelUpdate(t *testing.T) {
 			},
 		}
 		model := New(t.Context(), service)
+		setConfigurationReady(model)
 		model.cursor = 4
 
 		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -424,6 +462,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 			},
 		}
 		model := New(t.Context(), svc)
+		setConfigurationReady(model)
 		_, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
 
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -679,6 +718,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 func TestMigrationCreation(t *testing.T) {
 	t.Run("home exposes migration creation", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
+		setConfigurationReady(model)
 		assert.Contains(t, model.View(), "Create migration")
 
 		model.cursor = 1
@@ -1092,6 +1132,17 @@ func setSourceStatus(model *Model, status string) {
 	model.sourceDetail = &elmapi.MigrationDetail{
 		Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &status},
 	}
+}
+
+func setConfigurationReady(model *Model) {
+	model.configuration = &workflow.Configuration{
+		SourceURL:      "https://source.example",
+		SourceTokenSet: true,
+		TargetURL:      "https://target.example",
+		TargetTokenSet: true,
+	}
+	model.sourceAuthChecked = true
+	model.targetAuthChecked = true
 }
 
 func actionIDs(actions []actionItem) []string {
