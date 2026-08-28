@@ -185,16 +185,21 @@ Repository states
 
 func TestProgressBar(t *testing.T) {
 	t.Run("renders proportional progress", func(t *testing.T) {
-		assert.Equal(t, "████████░░", ProgressBar(8, 10, 10))
+		styles := theme.New()
+		assert.Equal(t,
+			styles.ProgressBarFill.Render("━━━━━━━━")+styles.ProgressBarTrack.Render("━━"),
+			ProgressBar(8, 10, 10),
+		)
 	})
 
 	t.Run("clamps values to the bar bounds", func(t *testing.T) {
-		assert.Equal(t, "░░░░", ProgressBar(-1, 10, 4))
-		assert.Equal(t, "████", ProgressBar(12, 10, 4))
+		styles := theme.New()
+		assert.Equal(t, styles.ProgressBarTrack.Render("━━━━"), ProgressBar(-1, 10, 4))
+		assert.Equal(t, styles.ProgressBarFill.Render("━━━━"), ProgressBar(12, 10, 4))
 	})
 
 	t.Run("renders an empty bar without a total", func(t *testing.T) {
-		assert.Equal(t, "░░░░", ProgressBar(4, 0, 4))
+		assert.Equal(t, theme.New().ProgressBarTrack.Render("━━━━"), ProgressBar(4, 0, 4))
 	})
 }
 

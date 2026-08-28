@@ -1985,7 +1985,7 @@ func (m *Model) startSourceListLoad() tea.Cmd {
 	m.sourceListGen++
 	generation := m.sourceListGen
 	return func() tea.Msg {
-		migrations, err := m.service.ListSourceMigrations(m.ctx, "")
+		migrations, err := m.service.ListSourceMigrations(m.ctx, elmapi.StatusAll)
 		return sourceListMsg{migrations: migrations, generation: generation, err: err}
 	}
 }

@@ -71,6 +71,20 @@ func TestModelUpdate(t *testing.T) {
 		assert.Contains(t, model.View(), assert.AnError.Error())
 	})
 
+	t.Run("migration list requests every status", func(t *testing.T) {
+		service := &fakeService{
+			listSourceMigrations: func(_ context.Context, status string) ([]elmapi.MigrationSummary, error) {
+				assert.Equal(t, elmapi.StatusAll, status)
+				return nil, nil
+			},
+		}
+		model := New(t.Context(), service)
+
+		message := model.startSourceListLoad()()
+
+		require.IsType(t, sourceListMsg{}, message)
+	})
+
 	t.Run("uses prefetched migrations without another request", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		setConfigurationReady(model)

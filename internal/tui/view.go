@@ -356,10 +356,10 @@ func (m *Model) targetDetailView() string {
 				&detail,
 				"%s\n  Resources %s %d/%d\n  Events    %s %d/%d\n  Acknowledged: %d backfill · %d live updates\n  Sent: %s resources · %s live updates\n",
 				progress.RepositoryNWO,
-				render.ProgressBar(progress.ResourcesProcessed, progress.ResourcesAdded, 12),
+				render.ProgressBar(progress.ResourcesProcessed, progress.ResourcesAdded, 20),
 				progress.ResourcesProcessed,
 				progress.ResourcesAdded,
-				render.ProgressBar(progress.EventsProcessed, progress.EventsAdded, 12),
+				render.ProgressBar(progress.EventsProcessed, progress.EventsAdded, 20),
 				progress.EventsProcessed,
 				progress.EventsAdded,
 				progress.BackfillResourcesAcknowledged,
@@ -762,7 +762,7 @@ func (m *Model) statusDisplay(status string) (glyph, label string) {
 	case "in progress", "processing":
 		return m.styles.Active.Render("●"), m.styles.Active.Bold(true).Render("In progress")
 	case "created":
-		return m.styles.Info.Render("●"), m.styles.Bold.Render("Created")
+		return m.styles.Muted.Render("○"), m.styles.Muted.Render("Created")
 	case "queued":
 		return m.styles.Muted.Render("○"), m.styles.Muted.Render("Queued")
 	case "paused":

@@ -39,6 +39,14 @@ var warningColor = lipgloss.AdaptiveColor{
 }
 
 var (
+	progressBarFill = lipgloss.AdaptiveColor{
+		Light: "#1a7f37",
+		Dark:  "#3fb950",
+	}
+	progressBarTrack = lipgloss.AdaptiveColor{
+		Light: "#9be4ab",
+		Dark:  "#2f4a37",
+	}
 	buttonIdleBackground = lipgloss.AdaptiveColor{
 		Light: "#eaeef2",
 		Dark:  "#141b22",
@@ -66,6 +74,9 @@ type Styles struct {
 	Disabled lipgloss.Style
 	// Placeholder de-emphasises example input beneath surrounding help text.
 	Placeholder lipgloss.Style
+	// ProgressBarFill and ProgressBarTrack distinguish completed and remaining work.
+	ProgressBarFill  lipgloss.Style
+	ProgressBarTrack lipgloss.Style
 	// Success marks a completed or passing item.
 	Success lipgloss.Style
 	// Active marks work currently in progress.
@@ -87,18 +98,20 @@ type Styles struct {
 // New returns the `gh elm` styles.
 func New() Styles {
 	return Styles{
-		Primary:     lipgloss.NewStyle(),
-		Bold:        lipgloss.NewStyle().Bold(true),
-		Info:        lipgloss.NewStyle().Foreground(colorBlue),
-		Secondary:   lipgloss.NewStyle().Foreground(colorSecondary),
-		Muted:       lipgloss.NewStyle().Foreground(colorMuted),
-		Disabled:    lipgloss.NewStyle().Foreground(colorDisabled),
-		Placeholder: lipgloss.NewStyle().Foreground(colorPlaceholder),
-		Success:     lipgloss.NewStyle().Foreground(colorGreen),
-		Active:      lipgloss.NewStyle().Foreground(colorGreen),
-		Warning:     lipgloss.NewStyle().Foreground(warningColor),
-		Paused:      lipgloss.NewStyle().Foreground(warningColor),
-		Failure:     lipgloss.NewStyle().Foreground(githubRed),
+		Primary:          lipgloss.NewStyle(),
+		Bold:             lipgloss.NewStyle().Bold(true),
+		Info:             lipgloss.NewStyle().Foreground(colorBlue),
+		Secondary:        lipgloss.NewStyle().Foreground(colorSecondary),
+		Muted:            lipgloss.NewStyle().Foreground(colorMuted),
+		Disabled:         lipgloss.NewStyle().Foreground(colorDisabled),
+		Placeholder:      lipgloss.NewStyle().Foreground(colorPlaceholder),
+		ProgressBarFill:  lipgloss.NewStyle().Foreground(progressBarFill),
+		ProgressBarTrack: lipgloss.NewStyle().Foreground(progressBarTrack),
+		Success:          lipgloss.NewStyle().Foreground(colorGreen),
+		Active:           lipgloss.NewStyle().Foreground(colorGreen),
+		Warning:          lipgloss.NewStyle().Foreground(warningColor),
+		Paused:           lipgloss.NewStyle().Foreground(warningColor),
+		Failure:          lipgloss.NewStyle().Foreground(githubRed),
 		FocusedButton: lipgloss.NewStyle().
 			Foreground(colorButtonText).
 			Background(colorBlue).
