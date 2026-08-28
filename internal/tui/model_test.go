@@ -317,7 +317,7 @@ func TestModelUpdate(t *testing.T) {
 		model.sourceMigrations = []elmapi.MigrationSummary{{MigrationID: "old-source"}}
 		updated, _ := model.openConfigurationForm()
 		model = updated.(*Model)
-		model.form.cursor = len(model.form.fields) - 1
+		model.form.cursor = len(model.form.fields)
 
 		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
@@ -343,6 +343,31 @@ func TestModelUpdate(t *testing.T) {
 		require.Len(t, model.sourceMigrations, 1)
 		assert.Equal(t, "new-source", model.sourceMigrations[0].MigrationID)
 		assert.True(t, model.sourceListLoaded)
+	})
+
+	t.Run("configuration form offers save and cancel buttons", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenConfiguration
+		updated, _ := model.openConfigurationForm()
+		model = updated.(*Model)
+
+		view := model.formView()
+		assert.Contains(t, view, "Save")
+		assert.Contains(t, view, "Cancel")
+
+		model.form.cursor = len(model.form.fields) - 1
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		assert.Nil(t, command)
+		assert.Equal(t, len(model.form.fields), model.form.cursor)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+		model = updated.(*Model)
+		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+
+		assert.Nil(t, command)
+		assert.Equal(t, screenConfiguration, model.screen)
 	})
 
 	t.Run("configuration reset invalidates source migrations", func(t *testing.T) {
