@@ -29,13 +29,17 @@ func TestModelUpdate(t *testing.T) {
 				assert.True(t, action.disabled)
 			}
 		}
-		assert.Equal(t, 4, strings.Count(model.View(), "(disabled)"))
+		assert.NotContains(t, model.View(), "(disabled)")
+		assert.Contains(t, model.View(), model.styles.Disabled.Render("Migrations"))
+		assert.Equal(t, 3, model.cursor)
 
+		model.cursor = 0
 		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
 		assert.Nil(t, command)
 		assert.Equal(t, screenHome, model.screen)
 
+		model.cursor = 0
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(*Model)
 		assert.Equal(t, 3, model.cursor)
@@ -47,6 +51,7 @@ func TestModelUpdate(t *testing.T) {
 		assert.Equal(t, 3, model.cursor)
 
 		setConfigurationReady(model)
+		assert.Zero(t, model.cursor)
 		for _, action := range model.homeActionItems() {
 			assert.False(t, action.disabled)
 		}
@@ -104,7 +109,10 @@ func TestModelUpdate(t *testing.T) {
 		model = updated.(*Model)
 		require.True(t, model.loading)
 
-		updated, _ = model.Update(configMsg{configuration: &workflow.Configuration{}})
+		updated, _ = model.Update(configMsg{
+			configuration: &workflow.Configuration{},
+			generation:    model.configGeneration,
+		})
 		model = updated.(*Model)
 
 		assert.True(t, model.loading)
@@ -228,10 +236,14 @@ func TestModelUpdate(t *testing.T) {
 
 		view := model.configurationView()
 
-		assert.NotContains(t, view, "Source authentication")
-		assert.NotContains(t, view, "Destination authentication")
-		assert.Contains(t, view, "Source token")
-		assert.Contains(t, view, "Destination token")
+		assert.NotContains(t, view, "Source auth")
+		assert.NotContains(t, view, "Destination auth")
+		assert.NotContains(t, view, "Preflight")
+		assert.NotContains(t, view, "Stored configuration")
+		assert.Contains(t, view, "Source URL:         https://source.example")
+		assert.Contains(t, view, "Source token:       not set")
+		assert.Contains(t, view, "Destination URL:    https://target.example")
+		assert.Contains(t, view, "Destination token:  not set")
 	})
 
 	t.Run("shows authentication rows when prerequisites are configured", func(t *testing.T) {
@@ -242,11 +254,14 @@ func TestModelUpdate(t *testing.T) {
 			TargetURL:      "https://target.example",
 			TargetTokenSet: true,
 		}
+		model.sourceAuthChecked = true
+		model.targetAuthChecked = true
 
 		view := model.configurationView()
 
-		assert.Contains(t, view, "Source authentication")
-		assert.Contains(t, view, "Destination authentication")
+		assert.Contains(t, view, "Source auth")
+		assert.Contains(t, view, "Destination auth")
+		assert.Equal(t, 2, strings.Count(view, "successful"))
 	})
 
 	t.Run("hides warning when configuration is ready", func(t *testing.T) {
@@ -275,6 +290,23 @@ func TestModelUpdate(t *testing.T) {
 		model = updated.(*Model)
 
 		assert.Contains(t, model.View(), "Failed source authentication")
+	})
+
+	t.Run("hides warning on configuration screen", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenConfiguration
+		model.configuration = &workflow.Configuration{
+			SourceURL:      "https://source.example",
+			SourceTokenSet: true,
+		}
+		model.sourceAuthChecked = true
+		model.sourceAuthErr = assert.AnError
+
+		view := model.View()
+
+		assert.NotContains(t, view, "Configuration not ready")
+		assert.NotContains(t, view, "Open Configuration to finish setup")
+		assert.Contains(t, view, "Source auth")
 	})
 
 	t.Run("failed source detail load clears previous migration state", func(t *testing.T) {
@@ -386,18 +418,28 @@ func TestModelUpdate(t *testing.T) {
 	t.Run("configuration form offers save and cancel buttons", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenConfiguration
+		model.configuration = &workflow.Configuration{
+			SourceTokenSet: true,
+			TargetTokenSet: true,
+		}
 		updated, _ := model.openConfigurationForm()
 		model = updated.(*Model)
 
 		view := model.formView()
+		assert.NotContains(t, view, "blank preserves current")
+		assert.Equal(t, 2, strings.Count(view, "••••••••"))
+		assert.Empty(t, *model.form.fields[1].text)
+		assert.Empty(t, *model.form.fields[3].text)
 		assert.Contains(t, view, "Save")
 		assert.Contains(t, view, "Cancel")
+		assert.Equal(t, -1, model.focusedFormAction())
 
 		model.form.cursor = len(model.form.fields) - 1
 		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
 		assert.Nil(t, command)
 		assert.Equal(t, len(model.form.fields), model.form.cursor)
+		assert.Zero(t, model.focusedFormAction())
 
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
 		model = updated.(*Model)
@@ -588,7 +630,10 @@ func TestModelNavigationAndLayout(t *testing.T) {
 
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
-		updated, _ = model.Update(configMsg{configuration: &workflow.Configuration{}})
+		updated, _ = model.Update(configMsg{
+			configuration: &workflow.Configuration{},
+			generation:    model.configGeneration,
+		})
 		model = updated.(*Model)
 
 		assert.Equal(t, screenConfiguration, model.screen)
@@ -596,8 +641,14 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.Contains(
 			t,
 			model.actionButtons(configurationActions, model.actionFocus, model.contentWidth()),
-			model.styles.FocusedButton.Padding(0, 2).Render("Refresh configuration  r"),
+			model.styles.FocusedButton.Padding(0, 2).Render("Edit configuration  e"),
 		)
+		assert.NotContains(t, actionIDs(configurationActions), "refresh")
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model = updated.(*Model)
+		assert.NotNil(t, command)
+		assert.True(t, model.loading)
 	})
 
 	t.Run("action shortcuts focus and activate the matching button", func(t *testing.T) {
@@ -1143,6 +1194,8 @@ func setConfigurationReady(model *Model) {
 	}
 	model.sourceAuthChecked = true
 	model.targetAuthChecked = true
+	model.homeCursorSet = false
+	model.syncHomeCursor()
 }
 
 func actionIDs(actions []actionItem) []string {

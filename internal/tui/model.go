@@ -109,6 +109,7 @@ const (
 type formField struct {
 	label       string
 	description string
+	emptyValue  string
 	kind        fieldKind
 	text        *string
 	boolean     *bool
@@ -131,8 +132,12 @@ func textFormField(label, description string, value *string) formField {
 	return formField{label: label, description: description, kind: fieldText, text: value}
 }
 
-func secretFormField(label string, value *string) formField {
-	return formField{label: label, kind: fieldSecret, text: value}
+func secretFormField(label string, value *string, present bool) formField {
+	field := formField{label: label, kind: fieldSecret, text: value}
+	if present {
+		field.emptyValue = "••••••••"
+	}
+	return field
 }
 
 func boolFormField(label string, value *bool) formField {
@@ -188,6 +193,7 @@ type Model struct {
 	width         int
 	height        int
 	cursor        int
+	homeCursorSet bool
 	actionFocus   int
 	loading       bool
 	err           error
@@ -239,7 +245,7 @@ func New(ctx context.Context, svc service) *Model {
 	searchInput.Placeholder = "migration ID or repository"
 	searchInput.CharLimit = 160
 
-	return &Model{
+	model := &Model{
 		ctx:          ctx,
 		service:      svc,
 		styles:       theme.New(),
@@ -247,6 +253,8 @@ func New(ctx context.Context, svc service) *Model {
 		targetParent: screenTargetList,
 		searchInput:  searchInput,
 	}
+	model.syncHomeCursor()
+	return model
 }
 
 // Init implements tea.Model.
@@ -364,9 +372,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if validHTTPURL(targetURL) && targetTokenSet {
 				commands = append(commands, m.checkTargetAuthenticationCmd(msg.generation))
 			}
+			m.syncHomeCursor()
 			m.syncViewportSize()
 			return m, tea.Batch(commands...)
 		}
+		m.syncHomeCursor()
 		m.syncViewportSize()
 	case sourceAuthenticationMsg:
 		if msg.generation != m.configGeneration {
@@ -374,6 +384,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sourceAuthChecked = true
 		m.sourceAuthErr = msg.err
+		m.syncHomeCursor()
 		m.syncViewportSize()
 	case targetAuthenticationMsg:
 		if msg.generation != m.configGeneration {
@@ -381,6 +392,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.targetAuthChecked = true
 		m.targetAuthErr = msg.err
+		m.syncHomeCursor()
 		m.syncViewportSize()
 	case pickerCatalogMsg:
 		if msg.generation != m.pickerGeneration {
@@ -765,6 +777,10 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 	case screenTargetDetail:
 		m.screen = m.targetParent
 	}
+	if m.screen == screenHome {
+		m.homeCursorSet = false
+		m.syncHomeCursor()
+	}
 	return m, nil
 }
 
@@ -884,6 +900,26 @@ func (m *Model) moveHomeCursor(delta int) {
 	actions := m.homeActionItems()
 	for index := m.cursor + delta; index >= 0 && index < len(actions); index += delta {
 		if !actions[index].disabled {
+			m.cursor = index
+			m.homeCursorSet = true
+			return
+		}
+	}
+}
+
+func (m *Model) syncHomeCursor() {
+	if m.screen != screenHome {
+		return
+	}
+	actions := m.homeActionItems()
+	if m.homeCursorSet &&
+		m.cursor >= 0 &&
+		m.cursor < len(actions) &&
+		!actions[m.cursor].disabled {
+		return
+	}
+	for index, action := range actions {
+		if !action.disabled {
 			m.cursor = index
 			return
 		}
@@ -1091,7 +1127,6 @@ func (m *Model) activateMannequinAction() (tea.Model, tea.Cmd) {
 }
 
 var configurationActions = []actionItem{
-	{id: "refresh", label: "Refresh configuration", shortcut: "r"},
 	{id: "edit", label: "Edit configuration", shortcut: "e"},
 	{id: "reset", label: "Reset configuration", shortcut: "x"},
 }
@@ -1101,8 +1136,6 @@ func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch configurationActions[m.actionFocus].id {
-	case "refresh":
-		return m.refresh()
 	case "edit":
 		return m.openConfigurationForm()
 	case "reset":
@@ -1805,18 +1838,21 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 
 func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
 	sourceURL, sourceToken, targetURL, targetToken := "", "", "", ""
+	sourceTokenSet, targetTokenSet := false, false
 	if m.configuration != nil {
 		sourceURL = m.configuration.SourceURL
+		sourceTokenSet = m.configuration.SourceTokenSet
 		targetURL = m.configuration.TargetURL
+		targetTokenSet = m.configuration.TargetTokenSet
 	}
 	return m.openForm(formState{
 		title:  "Edit configuration",
 		parent: screenConfiguration,
 		fields: []formField{
 			textFormField("Source URL", "", &sourceURL),
-			secretFormField("Source token (blank preserves current)", &sourceToken),
+			secretFormField("Source token", &sourceToken, sourceTokenSet),
 			textFormField("Target URL", "", &targetURL),
-			secretFormField("Target token (blank preserves current)", &targetToken),
+			secretFormField("Target token", &targetToken, targetTokenSet),
 		},
 		actions: []actionItem{
 			{id: "save", label: "Save"},

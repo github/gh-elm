@@ -44,7 +44,7 @@ func (m *Model) actionButtons(items []actionItem, focus, width int) string {
 	if len(items) == 0 {
 		return ""
 	}
-	if focus < 0 || focus >= len(items) {
+	if focus >= len(items) {
 		focus = 0
 	}
 

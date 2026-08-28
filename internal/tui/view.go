@@ -168,6 +168,13 @@ func (m *Model) bodyHeight() int {
 }
 
 func (m *Model) configurationWarning() string {
+	current := m.screen
+	if current == screenConfirm {
+		current = m.confirm.parent
+	}
+	if current == screenConfiguration {
+		return ""
+	}
 	if m.configurationErr != nil {
 		return "Unable to load configuration: " + m.configurationErr.Error()
 	}
@@ -224,7 +231,7 @@ func (m *Model) menu(items []actionItem) string {
 		}
 		label := item.label
 		if item.disabled {
-			label = m.styles.Muted.Render(label + " (disabled)")
+			label = m.styles.Disabled.Render(label)
 		}
 		builder.WriteString(m.selectorCard(label, index == m.cursor, true))
 	}
@@ -393,26 +400,38 @@ func (m *Model) configurationView() string {
 	if configuration := m.configuration; configuration != nil {
 		sourceURL, sourceTokenSet := effectiveSourceConfiguration(configuration)
 		targetURL, targetTokenSet := effectiveTargetConfiguration(configuration)
-		builder.WriteString(m.styles.Bold.Render("Preflight") + "\n")
-		fmt.Fprintf(&builder, "  %s Source URL\n", m.checkMark(sourceURL != "" && validHTTPURL(sourceURL)))
-		fmt.Fprintf(&builder, "  %s Source token\n", m.checkMark(sourceTokenSet))
+		row := func(mark, label, value string) {
+			fmt.Fprintf(&builder, "  %s %-18s  %s\n", mark, label+":", value)
+		}
+		builder.WriteString(m.styles.Bold.Render("Configuration") + "\n")
+		row(
+			m.checkMark(sourceURL != "" && validHTTPURL(sourceURL)),
+			"Source URL",
+			orUnset(sourceURL),
+		)
+		row(m.checkMark(sourceTokenSet), "Source token", setStatus(sourceTokenSet))
 		if validHTTPURL(sourceURL) && sourceTokenSet {
-			fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
+			row(
+				m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr),
+				"Source auth",
+				m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr),
+			)
 		}
-		fmt.Fprintf(&builder, "  %s Destination URL\n", m.checkMark(targetURL != "" && validHTTPURL(targetURL)))
-		fmt.Fprintf(&builder, "  %s Destination token\n", m.checkMark(targetTokenSet))
+		row(
+			m.checkMark(targetURL != "" && validHTTPURL(targetURL)),
+			"Destination URL",
+			orUnset(targetURL),
+		)
+		row(m.checkMark(targetTokenSet), "Destination token", setStatus(targetTokenSet))
 		if validHTTPURL(targetURL) && targetTokenSet {
-			fmt.Fprintf(&builder, "  %s Destination authentication%s\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
+			row(
+				m.authenticationMark(m.targetAuthChecked, m.targetAuthErr),
+				"Destination auth",
+				m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr),
+			)
 		}
-		builder.WriteString("\n")
-
-		builder.WriteString("Stored configuration\n")
-		fmt.Fprintf(&builder, "Source URL:   %s\n", orUnset(configuration.SourceURL))
-		fmt.Fprintf(&builder, "Source token: %s\n", setStatus(configuration.SourceTokenSet))
-		fmt.Fprintf(&builder, "Target URL:   %s\n", orUnset(configuration.TargetURL))
-		fmt.Fprintf(&builder, "Target token: %s\n", setStatus(configuration.TargetTokenSet))
-		fmt.Fprintf(&builder, "Config:       %s\n", configuration.ConfigPath)
-		fmt.Fprintf(&builder, "Credentials:  %s\n", configuration.CredentialStore)
+		row(" ", "Config", configuration.ConfigPath)
+		row(" ", "Credentials", configuration.CredentialStore)
 	}
 	builder.WriteString("\n" + m.styles.Bold.Render("Actions") + "\n\n")
 	builder.WriteString(m.actionButtons(configurationActions, m.actionFocus, m.contentWidth()))
@@ -454,12 +473,12 @@ func (m *Model) authenticationMark(checked bool, err error) string {
 
 func (m *Model) authenticationDetail(checked bool, err error) string {
 	if !checked {
-		return m.styles.Muted.Render(" (checking)")
+		return m.styles.Muted.Render("checking")
 	}
 	if err != nil {
-		return m.styles.Failure.Render(" (" + err.Error() + ")")
+		return m.styles.Failure.Render(err.Error())
 	}
-	return ""
+	return m.styles.Success.Render("successful")
 }
 
 func (m *Model) formView() string {
@@ -471,6 +490,7 @@ func (m *Model) formView() string {
 	blocks := make([]string, 0, len(m.form.fields)+1)
 	for index, field := range m.form.fields {
 		value := ""
+		placeholder := false
 		if field.text != nil {
 			value = *field.text
 		}
@@ -487,21 +507,34 @@ func (m *Model) formView() string {
 			value = "‹ " + value + " ›"
 		}
 		if value == "" {
-			value = m.styles.Placeholder.Render("(empty)")
+			if field.emptyValue != "" {
+				value = field.emptyValue
+			} else {
+				value = "(empty)"
+				placeholder = true
+			}
 		}
 		label := field.label
-		if index == m.form.cursor {
+		focused := index == m.form.cursor
+		if focused {
 			label = m.styles.Info.Bold(true).Render(label)
+			if placeholder {
+				value = m.styles.Placeholder.Render(value)
+			}
 		}
 		var content strings.Builder
 		fmt.Fprintf(&content, "%s\n  %s", label, value)
 		if field.description != "" {
 			fmt.Fprintf(&content, "\n  %s", m.styles.Muted.Render(field.description))
 		}
-		blocks = append(blocks, m.selectorCard(content.String(), index == m.form.cursor, true))
+		rendered := content.String()
+		if !focused {
+			rendered = m.styles.Muted.Render(rendered)
+		}
+		blocks = append(blocks, m.selectorCard(rendered, focused, true))
 	}
 	if len(m.form.actions) > 0 {
-		blocks = append(blocks, m.actionButtons(m.form.actions, m.form.actionFocus, m.contentWidth()))
+		blocks = append(blocks, m.actionButtons(m.form.actions, m.focusedFormAction(), m.contentWidth()))
 	}
 
 	var suffix string
@@ -533,6 +566,13 @@ func (m *Model) formView() string {
 	}
 	builder.WriteString(suffix)
 	return builder.String()
+}
+
+func (m *Model) focusedFormAction() int {
+	if m.form.cursor == len(m.form.fields) {
+		return m.form.actionFocus
+	}
+	return -1
 }
 
 func focusedBlockRange(blocks []string, focus, height int) (start, end int) {

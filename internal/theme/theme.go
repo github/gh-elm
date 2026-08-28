@@ -14,6 +14,7 @@ const (
 	colorBlue        = lipgloss.Color("4")
 	colorPlaceholder = lipgloss.Color("238")
 	colorMuted       = lipgloss.Color("242")
+	colorDisabled    = lipgloss.Color("244")
 	colorSecondary   = lipgloss.Color("245")
 
 	// githubBlue is GitHub's accent blue.
@@ -61,6 +62,8 @@ type Styles struct {
 	Secondary lipgloss.Style
 	// Muted de-emphasises secondary text: timestamps, hints, pending items.
 	Muted lipgloss.Style
+	// Disabled marks unavailable controls.
+	Disabled lipgloss.Style
 	// Placeholder de-emphasises example input beneath surrounding help text.
 	Placeholder lipgloss.Style
 	// Success marks a completed or passing item.
@@ -89,6 +92,7 @@ func New() Styles {
 		Info:        lipgloss.NewStyle().Foreground(colorBlue),
 		Secondary:   lipgloss.NewStyle().Foreground(colorSecondary),
 		Muted:       lipgloss.NewStyle().Foreground(colorMuted),
+		Disabled:    lipgloss.NewStyle().Foreground(colorDisabled),
 		Placeholder: lipgloss.NewStyle().Foreground(colorPlaceholder),
 		Success:     lipgloss.NewStyle().Foreground(colorGreen),
 		Active:      lipgloss.NewStyle().Foreground(colorGreen),
