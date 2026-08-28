@@ -31,7 +31,7 @@ func (m *Model) View() string {
 	switch current {
 	case screenHome:
 		title = homeTitle
-		body = m.menu(homeActions)
+		body = m.menu(m.homeActionItems())
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Help, keys.Quit)
 	case screenSourceList:
 		title = "Migrations"
@@ -222,7 +222,11 @@ func (m *Model) menu(items []actionItem) string {
 		if index > 0 {
 			builder.WriteString("\n")
 		}
-		builder.WriteString(m.selectorCard(item.label, index == m.cursor, true))
+		label := item.label
+		if item.disabled {
+			label = m.styles.Muted.Render(label + " (disabled)")
+		}
+		builder.WriteString(m.selectorCard(label, index == m.cursor, true))
 	}
 	return builder.String()
 }
