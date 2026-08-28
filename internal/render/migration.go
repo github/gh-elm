@@ -310,7 +310,7 @@ func MigrationRevertCutover(v elmapi.RevertCutoverResponse) string {
 func progressLine(label string, processed, added, failed int64) string {
 	styles := theme.New()
 	counts := fmt.Sprintf("%s  %s / %s processed",
-		ProgressBar(processed, added, 14),
+		ProgressBar(processed, added, 20),
 		styles.Bold.Render(strconv.FormatInt(processed, 10)),
 		strconv.FormatInt(added, 10),
 	)
@@ -331,7 +331,9 @@ func ProgressBar(processed, total int64, width int) string {
 	if total > 0 {
 		filled = int(min(max(processed, 0), total) * int64(width) / total)
 	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	styles := theme.New()
+	return styles.ProgressBarFill.Render(strings.Repeat("━", filled)) +
+		styles.ProgressBarTrack.Render(strings.Repeat("━", width-filled))
 }
 
 type state struct {

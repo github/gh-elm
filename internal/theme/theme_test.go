@@ -22,6 +22,8 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
 		assert.Equal(t, colorDisabled, s.Disabled.GetForeground())
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
+		assert.Equal(t, progressBarFill, s.ProgressBarFill.GetForeground())
+		assert.Equal(t, progressBarTrack, s.ProgressBarTrack.GetForeground())
 		assert.Equal(t, colorBlue, s.FocusedButton.GetBackground())
 		assert.Equal(t, colorButtonText, s.FocusedButton.GetForeground())
 		assert.Equal(t, buttonIdleBackground, s.BlurredButton.GetBackground())
