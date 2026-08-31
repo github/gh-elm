@@ -80,6 +80,8 @@ type service interface {
 	configurationService
 }
 
+const targetListLimit = 100
+
 type screen int
 
 const (
@@ -2060,7 +2062,7 @@ func (m *Model) startTargetListLoad() tea.Cmd {
 	m.targetListCancel = cancel
 	generation := m.targetListGen
 	return func() tea.Msg {
-		migrations, err := m.service.ListTargetMigrations(ctx, "", 0)
+		migrations, err := m.service.ListTargetMigrations(ctx, "", targetListLimit)
 		return targetListMsg{migrations: migrations, generation: generation, err: err}
 	}
 }

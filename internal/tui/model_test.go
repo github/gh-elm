@@ -214,10 +214,10 @@ func TestModelUpdate(t *testing.T) {
 	})
 
 	t.Run("cancels a destination migration load and returns home", func(t *testing.T) {
-		started := make(chan struct{})
+		started := make(chan int)
 		service := &fakeService{
-			listTargetMigrations: func(ctx context.Context, _ string, _ int) ([]elmapi.TargetMigration, error) {
-				close(started)
+			listTargetMigrations: func(ctx context.Context, _ string, maxResults int) ([]elmapi.TargetMigration, error) {
+				started <- maxResults
 				<-ctx.Done()
 				return nil, ctx.Err()
 			},
@@ -236,7 +236,7 @@ func TestModelUpdate(t *testing.T) {
 		go func() {
 			response <- command()
 		}()
-		<-started
+		assert.Equal(t, targetListLimit, <-started)
 
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
 		model = updated.(*Model)
