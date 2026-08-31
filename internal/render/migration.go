@@ -144,7 +144,8 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	terminated := terminatedStatus(status)
 	var lines, renderedValues []string
 	normalizedStatus := normalizedValue(status)
-	if !terminated && normalizedStatus != "" && normalizedStatus != "created" && normalizedStatus != "queued" {
+	notStarted := normalizedStatus == "created" || normalizedStatus == "queued"
+	if !terminated && !notStarted && normalizedStatus != "" {
 		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
 		renderedValues = append(renderedValues, status)
 	}
@@ -158,11 +159,11 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 		renderedValues = append(renderedValues, readinessText)
 	}
 	if displayMessage := strings.TrimSpace(combined.DisplayMessage); displayMessage != "" &&
-		!terminated && !containsEquivalentValue(renderedValues, displayMessage) {
+		!terminated && !notStarted && !containsEquivalentValue(renderedValues, displayMessage) {
 		lines = append(lines, detail(displayMessage))
 		renderedValues = append(renderedValues, displayMessage)
 	}
-	if !completed && !terminated {
+	if !completed && !terminated && !notStarted {
 		for _, blocker := range combined.CutoverBlockers {
 			blocker = strings.TrimSpace(blocker)
 			if blocker == "" || containsEquivalentValue(renderedValues, blocker) {
