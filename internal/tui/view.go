@@ -55,7 +55,7 @@ func (m *Model) View() string {
 	case screenSourceDetail:
 		title = fmt.Sprintf("Migration %s", m.sourceID)
 		body = m.sourceDetailView()
-		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenTargetList:
 		title = "Advanced destination migrations"
 		body = m.targetListView()
@@ -71,7 +71,7 @@ func (m *Model) View() string {
 	case screenConfiguration:
 		title = "Configuration"
 		body = m.configurationView()
-		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenPicker:
 		title = m.picker.title
 		if m.picker.search {
@@ -185,7 +185,7 @@ func (m *Model) frame(title, body, help string) string {
 	content := lipgloss.NewStyle().Width(contentWidth).Height(m.bodyHeight()).Render(body)
 	footer := m.styles.Muted.Render(help)
 	return lipgloss.NewStyle().Padding(0, 1).Render(
-		header + warningBlock + "\n\n" + content + "\n\n" + footer,
+		header + warningBlock + "\n\n" + content + "\n" + footer,
 	)
 }
 
@@ -201,7 +201,7 @@ func (m *Model) contentWidth() int {
 }
 
 func (m *Model) bodyHeight() int {
-	height := displayHeight(m.height) - 6
+	height := displayHeight(m.height) - 5
 	if warning := m.configurationWarning(); warning != "" {
 		height -= lipgloss.Height(lipgloss.NewStyle().Width(m.contentWidth()).Render(warning)) + 1
 	}
@@ -358,9 +358,18 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 
 func (m *Model) sourceDetailView() string {
 	if m.sourceDetail != nil {
-		return render.MigrationStatus(*m.sourceDetail)
+		detail := *m.sourceDetail
+		detail.Messages = nil
+		return render.MigrationStatus(detail)
 	}
 	return ""
+}
+
+func (m *Model) sourceMessagesView() string {
+	if m.sourceDetail == nil || len(m.sourceDetail.Messages) == 0 {
+		return "No messages reported."
+	}
+	return render.MigrationStatus(elmapi.MigrationDetail{Messages: m.sourceDetail.Messages})
 }
 
 func (m *Model) targetListView() string {
@@ -902,8 +911,12 @@ func (m *Model) viewportView(body string, height int) string {
 	}
 	view.Width = width
 	view.Height = height
-	view.SetContent(body)
+	view.SetContent(m.wrapViewportContent(body))
 	return view.View()
+}
+
+func (m *Model) wrapViewportContent(body string) string {
+	return lipgloss.NewStyle().Width(m.contentWidth()).Render(body)
 }
 
 func (m *Model) fullHelpView() string {
@@ -918,7 +931,7 @@ func (m *Model) fullHelpView() string {
 		"  " + helpLine(keys.New, keys.Manual, keys.Search, keys.Density, keys.Refresh),
 		"",
 		"Scrollable views",
-		"  " + helpLine(keys.PageUp, keys.PageDown),
+		"  " + helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown),
 	}, "\n")
 }
 

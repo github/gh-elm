@@ -592,22 +592,104 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.NotContains(t, model.View(), "Actions")
 	})
 
-	t.Run("narrow detail preserves all scrollable content", func(t *testing.T) {
+	t.Run("messages render only on their dedicated page", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.width = 80
 		model.height = 24
 		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
 		status := elmapi.StatusInProgress
 		model.sourceDetail = &elmapi.MigrationDetail{
 			Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &status},
 			Messages: []elmapi.MigrationMessage{
-				{Message: strings.Repeat("detail ", 30) + "tail marker"},
+				{Message: "tail marker"},
 			},
 		}
 
 		content := model.sourceDetailView()
-		assert.Contains(t, content, "tail marker")
+		assert.NotContains(t, content, "tail marker")
 		assert.NotContains(t, content, "Actions")
+
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		model = updated.(*Model)
+		assert.Equal(t, screenResult, model.screen)
+		assert.Contains(t, model.View(), "tail marker")
+	})
+
+	t.Run("arrow and page keys scroll message content", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
+		messages := make([]elmapi.MigrationMessage, 0, 30)
+		for index := range 30 {
+			messages = append(messages, elmapi.MigrationMessage{Message: fmt.Sprintf("message-%02d", index)})
+		}
+		model.sourceDetail = &elmapi.MigrationDetail{Messages: messages}
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		model = updated.(*Model)
+		require.Equal(t, screenResult, model.screen)
+		updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+		model = updated.(*Model)
+
+		assert.Contains(t, model.View(), "message-00")
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*Model)
+		assert.Equal(t, 1, model.viewport.YOffset)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model = updated.(*Model)
+		assert.Zero(t, model.viewport.YOffset)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+		model = updated.(*Model)
+
+		assert.Positive(t, model.viewport.YOffset)
+		assert.NotContains(t, model.View(), "message-00")
+	})
+
+	t.Run("scrollable errors and messages wrap without truncation", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 48
+		model.height = 24
+		model.screen = screenResult
+		model.result = resultState{
+			title: "Action failed",
+			body:  "The migration could not be started. Check the migration status for complete error details.",
+		}
+
+		assert.Contains(t, model.View(), "complete error details.")
+
+		model.screen = screenSourceDetail
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Messages: []elmapi.MigrationMessage{{
+				Message: "The migration message remains visible through its final wrapped words.",
+			}},
+		}
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		model = updated.(*Model)
+
+		assert.Contains(t, model.View(), "final wrapped words.")
+	})
+
+	t.Run("arrow keys scroll source migration details", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		repositories := make([]elmapi.CombinedRepositoryState, 30)
+		for index := range repositories {
+			repositories[index].RepositoryNWO = fmt.Sprintf("acme/repo-%02d", index)
+		}
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Migration:     &elmapi.MigrationSummary{MigrationID: "source-1"},
+			CombinedState: &elmapi.CombinedState{Repositories: repositories},
+		}
+		updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+		model = updated.(*Model)
+
+		assert.Zero(t, model.viewport.YOffset)
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*Model)
+
+		assert.Equal(t, 1, model.viewport.YOffset)
 	})
 
 	t.Run("detail actions use horizontal focus", func(t *testing.T) {
@@ -1154,12 +1236,12 @@ func TestModelActions(t *testing.T) {
 
 		t.Run("created can start or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusCreated)
-			assert.ElementsMatch(t, []string{"refresh", "start", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "messages", "start", "cancel"}, actionIDs(model.sourceActionItems()))
 		})
 
 		t.Run("in progress can pause force cutover or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusInProgress)
-			assert.ElementsMatch(t, []string{"refresh", "pause", "force-cutover", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "messages", "pause", "force-cutover", "cancel"}, actionIDs(model.sourceActionItems()))
 		})
 
 		t.Run("ready migration offers normal cutover", func(t *testing.T) {
@@ -1171,12 +1253,12 @@ func TestModelActions(t *testing.T) {
 
 		t.Run("paused can resume or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusPaused)
-			assert.ElementsMatch(t, []string{"refresh", "resume", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "messages", "resume", "cancel"}, actionIDs(model.sourceActionItems()))
 		})
 
 		t.Run("completed can revert", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusCompleted)
-			assert.ElementsMatch(t, []string{"refresh", "revert"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "messages", "revert"}, actionIDs(model.sourceActionItems()))
 		})
 	})
 
