@@ -517,22 +517,26 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.back()
 		}
 	case key.Matches(msg, keys.Left):
-		if m.actionScreen() && m.actionFocus > 0 {
+		if m.actionScreen() && !m.verticalActionScreen() && m.actionFocus > 0 {
 			m.actionFocus--
 		}
 	case key.Matches(msg, keys.Right):
-		if m.actionScreen() && m.actionFocus < m.itemCount()-1 {
+		if m.actionScreen() && !m.verticalActionScreen() && m.actionFocus < m.itemCount()-1 {
 			m.actionFocus++
 		}
 	case key.Matches(msg, keys.Up):
 		if m.screen == screenHome {
 			m.moveHomeCursor(-1)
+		} else if m.verticalActionScreen() && m.actionFocus > 0 {
+			m.actionFocus--
 		} else if !m.actionScreen() && m.cursor > 0 {
 			m.cursor--
 		}
 	case key.Matches(msg, keys.Down):
 		if m.screen == screenHome {
 			m.moveHomeCursor(1)
+		} else if m.verticalActionScreen() && m.actionFocus < m.itemCount()-1 {
+			m.actionFocus++
 		} else if !m.actionScreen() && m.cursor < m.itemCount()-1 {
 			m.cursor++
 		}
@@ -860,6 +864,10 @@ func (m *Model) actionScreen() bool {
 	}
 }
 
+func (m *Model) verticalActionScreen() bool {
+	return m.screen == screenTargetDetail
+}
+
 func (m *Model) clampActionFocus() {
 	m.actionFocus = min(max(0, m.actionFocus), max(0, m.itemCount()-1))
 }
@@ -967,14 +975,6 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 	case "force-cutover":
 		return m.confirmAction("Force cutover", "Bypass readiness checks and force cutover?", screenSourceDetail,
 			m.cutoverCmd(true))
-	case "cutover-status":
-		body := "No combined cutover state is available."
-		if m.sourceDetail != nil {
-			body = render.CutoverStatus(*m.sourceDetail)
-		}
-		m.result = resultState{title: "Cutover status", body: body, parent: screenSourceDetail}
-		m.screen = screenResult
-		m.resetViewport()
 	case "revert":
 		return m.confirmAction("Revert cutover", "Revert cutover effects and terminate work still in progress?", screenSourceDetail,
 			m.revertCutoverCmd())
@@ -996,7 +996,7 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) sourceActionItems() []actionItem {
-	actions := []actionItem{{id: "refresh", label: "Refresh status", shortcut: "r"}}
+	actions := []actionItem{{id: "refresh", label: "Refresh", shortcut: "r"}}
 
 	status := ""
 	if m.sourceDetail != nil && m.sourceDetail.Migration != nil && m.sourceDetail.Migration.Status != nil {
@@ -1028,11 +1028,8 @@ func (m *Model) sourceActionItems() []actionItem {
 	case "completed":
 		actions = append(actions, actionItem{id: "revert", label: "Revert cutover", shortcut: "v"})
 	}
-	if m.sourceDetail != nil && m.sourceDetail.CombinedState != nil {
-		actions = append(actions, actionItem{id: "cutover-status", label: "Show cutover status", shortcut: "i"})
-	}
 	if m.targetID > 0 {
-		actions = append(actions, actionItem{id: "destination", label: "Open destination details", shortcut: "d"})
+		actions = append(actions, actionItem{id: "destination", label: "Details", shortcut: "d"})
 	}
 	return actions
 }
@@ -1068,7 +1065,7 @@ func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
 
 func (m *Model) targetActionItems() []actionItem {
 	actions := []actionItem{
-		{id: "refresh", label: "Refresh status", shortcut: "r"},
+		{id: "refresh", label: "Refresh", shortcut: "r"},
 		{id: "resources", label: "List repository resources", shortcut: "o"},
 		{id: "report-request", label: "Request node report", shortcut: "n"},
 		{id: "report-status", label: "Check report status", shortcut: "s"},
