@@ -805,14 +805,15 @@ func (m *Model) repositoryInfoPanel(repository elmapi.Repository, closeButton bo
 
 func (m *Model) confirmationOverlay() string {
 	width := min(60, max(24, m.contentWidth()-8))
+	contentWidth := width - 8
 	content := m.styles.Bold.Render(m.confirm.title) + "\n\n" +
-		m.styles.Warning.Render(m.confirm.body) + "\n\n" +
+		m.styles.Warning.Width(contentWidth).Render(m.confirm.body) + "\n\n" +
 		m.actionButtons(
 			[]actionItem{{id: "confirm", label: "Confirm"}, {id: "cancel", label: "Cancel"}},
 			m.confirm.focus,
-			width-6,
+			contentWidth,
 		)
-	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
+	return m.panel(lipgloss.NewStyle().Width(contentWidth).Render(content))
 }
 
 func (m *Model) alertOverlay() string {
@@ -825,10 +826,11 @@ func (m *Model) resultPopupOverlay() string {
 
 func (m *Model) messageOverlay(title, body string) string {
 	width := min(60, max(24, m.contentWidth()-8))
+	contentWidth := width - 8
 	content := m.styles.Bold.Render(title) + "\n\n" +
 		body + "\n\n" +
-		m.actionButtons([]actionItem{{id: "close", label: "Close"}}, 0, width-6)
-	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
+		m.actionButtons([]actionItem{{id: "close", label: "Close"}}, 0, contentWidth)
+	return m.panel(lipgloss.NewStyle().Width(contentWidth).Render(content))
 }
 
 func pickerBounds(cursor, total, capacity int) (start, end int) {
