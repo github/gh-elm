@@ -130,9 +130,13 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	styles := theme.New()
 	status := pointerString(combined.Status)
 	readiness := positiveState(combined.ReadyForCutover, "Ready for cutover", "Not ready for cutover")
+	if !combined.ReadyForCutover {
+		readiness.glyph = styles.Muted.Render("✗")
+	}
 	terminated := terminatedStatus(status)
 	var lines, renderedValues []string
-	if !terminated {
+	normalizedStatus := normalizedValue(status)
+	if !terminated && normalizedStatus != "" && normalizedStatus != "created" && normalizedStatus != "queued" {
 		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
 		renderedValues = append(renderedValues, status)
 	}
@@ -326,6 +330,9 @@ func MigrationRevertCutover(v elmapi.RevertCutoverResponse) string {
 
 func progressLine(label string, processed, added, failed int64) string {
 	styles := theme.New()
+	if processed == 0 && added == 0 && failed == 0 {
+		return field(label, styles.Muted.Render("○ Not started"))
+	}
 	counts := fmt.Sprintf("%s  %s / %s processed",
 		ProgressBar(processed, added, 20),
 		styles.Bold.Render(strconv.FormatInt(processed, 10)),

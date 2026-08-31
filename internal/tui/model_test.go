@@ -524,7 +524,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		model = updated.(*Model)
 		assert.Equal(t, workflow.SourceMigrationID("source-1"), model.sourceID)
 		assert.Equal(t, workflow.TargetMigrationID(42), model.targetID)
-		assert.Contains(t, model.View(), "Open destination details")
+		assert.Contains(t, model.View(), "Details")
 
 		model.actionFocus = len(model.sourceActionItems()) - 1
 		updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -586,7 +586,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		model.height = 24
 		model.actionFocus = len(model.sourceActionItems()) - 1
 
-		assert.Contains(t, model.View(), "Open destination details")
+		assert.Contains(t, model.View(), "Details")
 		assert.NotContains(t, model.View(), "Actions")
 	})
 
@@ -625,6 +625,25 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		model = updated.(*Model)
 		assert.Zero(t, model.actionFocus)
 		assert.Contains(t, model.View(), "←/→ select action")
+	})
+
+	t.Run("advanced destination actions use a vertical menu", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenTargetDetail
+		model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusInProgress}
+
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*Model)
+		assert.Equal(t, 1, model.actionFocus)
+
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+		model = updated.(*Model)
+		assert.Equal(t, 1, model.actionFocus)
+
+		view := model.detailActionView(screenTargetDetail)
+		assert.GreaterOrEqual(t, strings.Count(view, "\n"), len(model.targetActionItems())-1)
+		assert.Contains(t, view, "List repository resources")
+		assert.Contains(t, model.View(), "↑/k up")
 	})
 
 	t.Run("action screens always select their first action", func(t *testing.T) {
@@ -750,6 +769,14 @@ func TestModelNavigationAndLayout(t *testing.T) {
 
 		assert.Less(t, model.viewport.Height, heightWithoutWarning)
 		assert.Equal(t, model.bodyHeight(), model.viewport.Height)
+	})
+
+	t.Run("footer stays on the final terminal row", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 80
+		model.height = 24
+
+		assert.Equal(t, model.height, lipgloss.Height(model.View()))
 	})
 
 	t.Run("state changes clamp detail action focus", func(t *testing.T) {

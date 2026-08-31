@@ -63,7 +63,7 @@ func (m *Model) View() string {
 	case screenTargetDetail:
 		title = fmt.Sprintf("Destination migration %d (advanced)", m.targetID)
 		body = m.targetDetailView()
-		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
 		title = "Target mannequins"
 		body = m.actionButtons(mannequinActions, m.actionFocus, m.contentWidth())
@@ -182,7 +182,7 @@ func (m *Model) frame(title, body, help string) string {
 		warningBlock = "\n" + m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
 			warning
 	}
-	content := lipgloss.NewStyle().Width(contentWidth).Render(body)
+	content := lipgloss.NewStyle().Width(contentWidth).Height(m.bodyHeight()).Render(body)
 	footer := m.styles.Muted.Render(help)
 	return lipgloss.NewStyle().Padding(0, 1).Render(
 		header + warningBlock + "\n\n" + content + "\n\n" + footer,
@@ -276,6 +276,14 @@ func (m *Model) inConfigurationFlow() bool {
 }
 
 func (m *Model) menu(items []actionItem) string {
+	return m.verticalMenu(items, m.cursor, false)
+}
+
+func (m *Model) actionMenu(items []actionItem, focus int) string {
+	return m.verticalMenu(items, focus, true)
+}
+
+func (m *Model) verticalMenu(items []actionItem, focus int, showShortcuts bool) string {
 	var builder strings.Builder
 	for index, item := range items {
 		if index > 0 {
@@ -285,7 +293,10 @@ func (m *Model) menu(items []actionItem) string {
 		if item.disabled {
 			label = m.styles.Disabled.Render(label)
 		}
-		builder.WriteString(m.selectorCard(label, index == m.cursor, true))
+		if showShortcuts && item.shortcut != "" {
+			label += m.styles.Muted.Render("  " + item.shortcut)
+		}
+		builder.WriteString(m.selectorCard(label, index == focus, true))
 	}
 	return builder.String()
 }
@@ -441,7 +452,7 @@ func (m *Model) detailActionView(current screen) string {
 	case screenSourceDetail:
 		actions = m.sourceActionItems()
 	case screenTargetDetail:
-		actions = m.targetActionItems()
+		return m.actionMenu(m.targetActionItems(), m.actionFocus)
 	default:
 		return ""
 	}

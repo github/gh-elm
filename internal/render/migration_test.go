@@ -108,7 +108,7 @@ func TestMigrationStatus(t *testing.T) {
 
 		for _, want := range []string{
 			"Migration", "mig-1", "Progress · octo/repo",
-			"✓ Target available", "○ Not ready for cutover", "backfill incomplete",
+			"✓ Target available", "✗ Not ready for cutover", "backfill incomplete",
 			"Repository states", "Messages", "Migration is running",
 		} {
 			assert.Contains(t, output, want)
@@ -175,7 +175,19 @@ Repository states
 		})
 
 		assert.Equal(t, `Cutover
-  ○ Not ready for cutover
+  ✗ Not ready for cutover
+`, output)
+	})
+
+	t.Run("shows only cutover readiness for created migrations", func(t *testing.T) {
+		status := "created"
+
+		output := MigrationStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{Status: &status},
+		})
+
+		assert.Equal(t, `Cutover
+  ✗ Not ready for cutover
 `, output)
 	})
 
@@ -222,7 +234,7 @@ Repository states
 		})
 
 		assert.Contains(t, output, "acme/web · Backfill · In progress")
-		assert.Contains(t, output, "○ Not ready for cutover")
+		assert.Contains(t, output, "✗ Not ready for cutover")
 	})
 }
 
@@ -243,6 +255,16 @@ func TestProgressBar(t *testing.T) {
 
 	t.Run("renders an empty bar without a total", func(t *testing.T) {
 		assert.Equal(t, theme.New().ProgressBarTrack.Render("━━━━"), ProgressBar(4, 0, 4))
+	})
+}
+
+func TestProgressLine(t *testing.T) {
+	t.Run("renders zero work as not started", func(t *testing.T) {
+		output := progressLine("Backfill", 0, 0, 0)
+
+		assert.Contains(t, output, "○ Not started")
+		assert.NotContains(t, output, "0 / 0")
+		assert.NotContains(t, output, "no failures")
 	})
 }
 
