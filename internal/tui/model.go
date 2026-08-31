@@ -95,6 +95,7 @@ const (
 	screenPicker
 	screenForm
 	screenConfirm
+	screenAlert
 	screenResult
 )
 
@@ -163,6 +164,7 @@ type pickerState struct {
 	items   []pickerItem
 	cursor  int
 	input   textinput.Model
+	search  bool
 	loading bool
 	err     error
 	source  string
@@ -174,6 +176,12 @@ type confirmState struct {
 	parent  screen
 	command tea.Cmd
 	focus   int
+}
+
+type alertState struct {
+	title  string
+	body   string
+	parent screen
 }
 
 type resultState struct {
@@ -202,19 +210,16 @@ type Model struct {
 	viewportReady bool
 	showHelp      bool
 
-	sourceMigrations  []elmapi.MigrationSummary
-	sourceListLoaded  bool
-	sourceListLoading bool
-	sourceListErr     error
-	sourceListGen     uint64
-	sourceID          workflow.SourceMigrationID
-	sourceDetail      *elmapi.MigrationDetail
-	sourceWatching    bool
-	sourceWatchGen    uint64
-	sourceSearch      bool
-	searchInput       textinput.Model
-	compact           bool
-	densityUserSet    bool
+	sourceMigrations []elmapi.MigrationSummary
+	sourceListGen    uint64
+	sourceID         workflow.SourceMigrationID
+	sourceDetail     *elmapi.MigrationDetail
+	sourceWatching   bool
+	sourceWatchGen   uint64
+	sourceSearch     bool
+	searchInput      textinput.Model
+	compact          bool
+	densityUserSet   bool
 
 	targetMigrations []elmapi.TargetMigration
 	targetID         workflow.TargetMigrationID
@@ -236,6 +241,7 @@ type Model struct {
 	pickerInfoOpen    bool
 	form              formState
 	confirm           confirmState
+	alert             alertState
 	result            resultState
 }
 
@@ -260,8 +266,7 @@ func New(ctx context.Context, svc service) *Model {
 
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	m.sourceListLoading = true
-	return tea.Batch(m.startConfigurationLoad(), m.startSourceListLoad())
+	return m.startConfigurationLoad()
 }
 
 // Update implements tea.Model.
@@ -294,9 +299,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.sourceListGen {
 			return m, nil
 		}
-		m.sourceListLoading = false
-		m.sourceListLoaded = true
-		m.sourceListErr = msg.err
+		if m.showConfigurationAlert(msg.err) {
+			return m, nil
+		}
 		if m.screen == screenSourceList {
 			m.loading = false
 			m.err = msg.err
@@ -308,6 +313,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case sourceDetailMsg:
+		if m.showConfigurationAlert(msg.err) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.err
 		if msg.err == nil {
@@ -328,6 +336,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.targetListGen {
 			return m, nil
 		}
+		if m.showConfigurationAlert(msg.err) {
+			return m, nil
+		}
 		m.targetListCancel = nil
 		m.loading = false
 		m.err = msg.err
@@ -336,6 +347,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 		}
 	case targetDetailMsg:
+		if m.showConfigurationAlert(msg.err) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.err
 		if msg.err == nil {
@@ -407,11 +421,13 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenConfiguration
 		m.actionFocus = 0
 		m.invalidateSourceList()
-		m.sourceListLoading = true
 		model, command := m.refresh()
 		return model, tea.Batch(command, m.startSourceListLoad())
 	case pickerCatalogMsg:
 		if msg.generation != m.pickerGeneration {
+			return m, nil
+		}
+		if m.showConfigurationAlert(msg.err) {
 			return m, nil
 		}
 		m.picker.loading = false
@@ -421,6 +437,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.cursor = 0
 		}
 	case actionMsg:
+		if m.showConfigurationAlert(msg.err) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = nil
 		if msg.err != nil {
@@ -474,6 +493,8 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateForm(msg)
 	case screenConfirm:
 		return m.updateConfirm(msg)
+	case screenAlert:
+		return m.updateAlert(msg)
 	case screenResult:
 		return m.updateResult(msg)
 	}
@@ -613,6 +634,12 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if !m.picker.search && key.Matches(msg, keys.Search) {
+		m.picker.search = true
+		m.picker.cursor = 0
+		m.picker.input.Focus()
+		return m, textinput.Blink
+	}
 	switch msg.String() {
 	case "ctrl+e":
 		source := ""
@@ -631,8 +658,10 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "esc":
-		if m.picker.input.Value() != "" {
+		if m.picker.search {
+			m.picker.search = false
 			m.picker.input.SetValue("")
+			m.picker.input.Blur()
 			m.picker.cursor = 0
 			return m, nil
 		}
@@ -669,6 +698,9 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.picker.loading || m.picker.err != nil {
 		return m, nil
 	}
+	if !m.picker.search {
+		return m, nil
+	}
 	var command tea.Cmd
 	m.picker.input, command = m.picker.input.Update(msg)
 	if m.picker.cursor >= len(m.visiblePickerItems()) {
@@ -700,20 +732,8 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		}
 		switch actions[m.cursor].id {
 		case "migrations":
-			m.screen, m.err = screenSourceList, m.sourceListErr
-			switch {
-			case m.sourceListLoading:
-				m.loading = true
-				return m, nil
-			case m.sourceListLoaded:
-				m.loading = false
-				return m, nil
-			default:
-				m.loading = true
-				m.sourceListLoading = true
-				command := m.startSourceListLoad()
-				return m, command
-			}
+			m.screen, m.loading, m.err = screenSourceList, true, nil
+			return m, m.startSourceListLoad()
 		case "create":
 			return m.openSourceCreateForm(screenHome)
 		case "mannequins":
@@ -805,7 +825,6 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenSourceList:
 		m.loading = true
-		m.sourceListLoading = true
 		command := m.startSourceListLoad()
 		return m, command
 	case screenSourceDetail:
@@ -1147,6 +1166,11 @@ var configurationActions = []actionItem{
 	{id: "reset", label: "Reset configuration", shortcut: "x"},
 }
 
+var createMigrationActions = []actionItem{
+	{id: "create", label: "Create"},
+	{id: "cancel", label: "Cancel"},
+}
+
 func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
 	if m.actionFocus < 0 || m.actionFocus >= len(configurationActions) {
 		return m, nil
@@ -1201,6 +1225,51 @@ func (m *Model) confirmAction(title, body string, parent screen, command tea.Cmd
 	return m, nil
 }
 
+func (m *Model) showConfigurationAlert(err error) bool {
+	if err == nil || m.screen == screenHome || m.inConfigurationFlow() {
+		return false
+	}
+	var body string
+	switch {
+	case errors.Is(err, workflow.ErrSourceConfigurationMissing):
+		body = "The source URL or token is no longer configured."
+	case errors.Is(err, workflow.ErrTargetConfigurationMissing):
+		body = "The destination URL or token is no longer configured."
+	default:
+		return false
+	}
+	m.alert = alertState{
+		title:  "Configuration unavailable",
+		body:   body,
+		parent: m.screen,
+	}
+	m.loading = false
+	m.err = nil
+	m.sourceWatching = false
+	m.sourceWatchGen++
+	m.pickerInfoOpen = false
+	m.screen = screenAlert
+	return true
+}
+
+func (m *Model) updateAlert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !key.Matches(msg, keys.Open) && !key.Matches(msg, keys.Back) && !key.Matches(msg, keys.Quit) {
+		return m, nil
+	}
+	m.configuration = nil
+	m.configurationErr = nil
+	m.sourceAuthChecked = false
+	m.sourceAuthErr = nil
+	m.targetAuthChecked = false
+	m.targetAuthErr = nil
+	m.invalidateSourceList()
+	m.screen = screenHome
+	m.cursor = 0
+	m.homeCursorSet = false
+	m.syncHomeCursor()
+	return m, m.startConfigurationLoad()
+}
+
 func (m *Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Left):
@@ -1237,13 +1306,11 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if refresh {
 			model, command := m.refresh()
 			if reloadSourceList {
-				m.sourceListLoading = true
 				return model, tea.Batch(command, m.startSourceListLoad())
 			}
 			return model, command
 		}
 		if reloadSourceList {
-			m.sourceListLoading = true
 			return m, m.startSourceListLoad()
 		}
 	}
@@ -1253,9 +1320,6 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) invalidateSourceList() {
 	m.sourceListGen++
 	m.sourceMigrations = nil
-	m.sourceListLoaded = false
-	m.sourceListLoading = false
-	m.sourceListErr = nil
 }
 
 func (m *Model) visibleSourceMigrations() []elmapi.MigrationSummary {
@@ -1310,7 +1374,7 @@ func (m *Model) syncViewportSize() {
 		return
 	}
 	m.viewport.Width = m.contentWidth()
-	m.viewport.Height = m.bodyHeight()
+	m.viewport.Height = m.viewportBodyHeight(m.screen)
 }
 
 func (m *Model) resetViewport() {
@@ -1464,7 +1528,6 @@ func (m *Model) openSourceCreateForm(parent screen) (tea.Model, tea.Cmd) {
 	input.Prompt = ""
 	input.Placeholder = "filter source repositories"
 	input.CharLimit = 160
-	input.Focus()
 
 	m.pickerGeneration++
 	m.pickerInfoOpen = false
@@ -1485,7 +1548,6 @@ func (m *Model) openTargetOrganizationPicker(parent screen, source string) (tea.
 	input.Prompt = ""
 	input.Placeholder = "filter destination organizations"
 	input.CharLimit = 160
-	input.Focus()
 
 	m.pickerGeneration++
 	m.pickerInfoOpen = false
@@ -1534,6 +1596,7 @@ func (m *Model) openDiscoveredSourceCreateForm(source, targetOrganization string
 			selectFormField("Target visibility", &visibility, "internal", "private"),
 			boolFormField("Start after creation", &start),
 		},
+		actions: createMigrationActions,
 		submit: func() (tea.Cmd, error) {
 			sourceOwner, sourceRepo, err := workflow.ParseRepositoryCoordinate(source)
 			if err != nil {
@@ -1577,6 +1640,7 @@ func (m *Model) openManualSourceCreateForm(parent screen, source string) (tea.Mo
 			selectFormField("Target visibility", &visibility, "internal", "private"),
 			boolFormField("Start after creation", &start),
 		},
+		actions: createMigrationActions,
 		submit: func() (tea.Cmd, error) {
 			sourceOwner, sourceRepository, err := workflow.ParseRepositoryCoordinate(source)
 			if err != nil {

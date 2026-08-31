@@ -23,8 +23,12 @@ func (m *Model) View() string {
 
 	current := m.screen
 	confirming := current == screenConfirm
+	alerting := current == screenAlert
 	if confirming {
 		current = m.confirm.parent
+	}
+	if alerting {
+		current = m.alert.parent
 	}
 
 	var title, body, help string
@@ -66,10 +70,20 @@ func (m *Model) View() string {
 		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenPicker:
 		title = m.picker.title
+		if m.picker.search {
+			title += " · filter  " + m.picker.input.View()
+		}
 		body = m.pickerView()
-		help = "type to search • ↑/↓ select • enter continue • ctrl+e manual entry • esc cancel"
-		if m.picker.kind == pickerSourceRepository {
-			help = "type to search • ↑/↓ select • enter continue • ? repository details • ctrl+e manual entry • esc cancel"
+		if m.picker.search {
+			help = "type to filter • ↑/↓ select • enter continue • esc close search"
+			if m.picker.kind == pickerSourceRepository {
+				help = "type to filter • ↑/↓ select • enter continue • ? repository details • esc close search"
+			}
+		} else {
+			help = "↑/↓ select • enter continue • f search • ctrl+e manual entry • esc cancel"
+			if m.picker.kind == pickerSourceRepository {
+				help = "↑/↓ select • enter continue • f search • ? repository details • ctrl+e manual entry • esc cancel"
+			}
 		}
 	case screenForm:
 		title = m.form.title
@@ -84,7 +98,7 @@ func (m *Model) View() string {
 		help = helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown, keys.Back)
 	}
 
-	if m.showHelp && !confirming {
+	if m.showHelp && !confirming && !alerting {
 		title = "Keyboard help"
 		body = m.fullHelpView()
 		help = "? close • q quit"
@@ -95,20 +109,36 @@ func (m *Model) View() string {
 	if m.err != nil {
 		body += "\n\n" + m.styles.Failure.Render("Error: "+m.err.Error())
 	}
-	bodyHeight := m.bodyHeight()
+	detailActions := ""
+	if !m.showHelp {
+		detailActions = m.detailActionView(current)
+	}
+	bodyHeight := m.viewportBodyHeight(current)
 	if isScrollableScreen(current) || m.showHelp {
 		body = m.viewportView(body, bodyHeight)
 	} else {
 		body = clip(body, bodyHeight)
 	}
+	if detailActions != "" {
+		body = m.detailLayout(body, detailActions)
+	}
 	if confirming {
 		help = "←/→ select action • enter activate • y confirm • n/esc cancel"
+	} else if alerting {
+		help = "enter/esc close"
 	}
 	rendered := m.frame(title, body, help)
 	if confirming {
 		rendered = overlayCenter(
 			rendered,
 			m.confirmationOverlay(),
+			m.displayWidth(),
+			displayHeight(m.height),
+		)
+	} else if alerting {
+		rendered = overlayCenter(
+			rendered,
+			m.alertOverlay(),
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
@@ -314,10 +344,7 @@ func (m *Model) sourceDetailView() string {
 		status.WriteString(m.styles.Active.Render("● Live watch enabled (2s refresh)"))
 		status.WriteString("\n")
 	}
-	var actions strings.Builder
-	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
-	actions.WriteString(m.actionButtons(m.sourceActionItems(), m.actionFocus, m.contentWidth()))
-	return m.detailLayout(status.String(), actions.String())
+	return status.String()
 }
 
 func (m *Model) targetListView() string {
@@ -383,10 +410,7 @@ func (m *Model) targetDetailView() string {
 			}
 		}
 	}
-	var actions strings.Builder
-	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
-	actions.WriteString(m.actionButtons(m.targetActionItems(), m.actionFocus, m.contentWidth()))
-	return m.detailLayout(detail.String(), actions.String())
+	return detail.String()
 }
 
 func yesNo(value bool) string {
@@ -404,6 +428,31 @@ func (m *Model) detailLayout(detail, actions string) string {
 		return detail
 	}
 	return detail + "\n\n" + actions
+}
+
+func (m *Model) detailActionView(current screen) string {
+	var actions []actionItem
+	switch current {
+	case screenSourceDetail:
+		actions = m.sourceActionItems()
+	case screenTargetDetail:
+		actions = m.targetActionItems()
+	default:
+		return ""
+	}
+	return m.styles.Bold.Render("Actions") + "\n\n" +
+		m.actionButtons(actions, m.actionFocus, m.contentWidth())
+}
+
+func (m *Model) viewportBodyHeight(current screen) int {
+	height := m.bodyHeight()
+	if m.showHelp {
+		return height
+	}
+	if actions := m.detailActionView(current); actions != "" {
+		height -= lipgloss.Height(actions) + 2
+	}
+	return max(3, height)
 }
 
 func (m *Model) configurationView() string {
@@ -624,12 +673,11 @@ func (m *Model) pickerView() string {
 
 	items := m.visiblePickerItems()
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "Search: %s\n\n", m.picker.input.View())
 	if len(items) == 0 {
 		fmt.Fprintf(&builder, "%s\n", m.styles.Muted.Render("No matching options."))
 		return builder.String()
 	}
-	start, end := pickerBounds(m.picker.cursor, len(items), max(3, m.bodyHeight()-3))
+	start, end := pickerBounds(m.picker.cursor, len(items), max(3, m.bodyHeight()-1))
 	for index := start; index < end; index++ {
 		if index > start {
 			builder.WriteString("\n")
@@ -749,6 +797,14 @@ func (m *Model) confirmationOverlay() string {
 			m.confirm.focus,
 			width-6,
 		)
+	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
+}
+
+func (m *Model) alertOverlay() string {
+	width := min(60, max(24, m.contentWidth()-8))
+	content := m.styles.Bold.Render(m.alert.title) + "\n\n" +
+		m.alert.body + "\n\n" +
+		m.actionButtons([]actionItem{{id: "close", label: "Close"}}, 0, width-6)
 	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
 }
 
