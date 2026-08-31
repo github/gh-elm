@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -187,6 +186,7 @@ type resultState struct {
 	title            string
 	body             string
 	parent           screen
+	popup            bool
 	refresh          bool
 	reloadSourceList bool
 }
@@ -213,8 +213,6 @@ type Model struct {
 	sourceListGen    uint64
 	sourceID         workflow.SourceMigrationID
 	sourceDetail     *elmapi.MigrationDetail
-	sourceWatching   bool
-	sourceWatchGen   uint64
 	sourceSearch     bool
 	searchInput      textinput.Model
 	compact          bool
@@ -327,9 +325,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.sourceDetail = nil
 			m.targetID = 0
-		}
-		if m.sourceWatching {
-			return m, m.scheduleWatchTick()
 		}
 	case targetListMsg:
 		if msg.generation != m.targetListGen {
@@ -454,6 +449,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				title:            msg.title,
 				body:             msg.body,
 				parent:           msg.parent,
+				popup:            msg.popup,
 				refresh:          msg.refresh,
 				reloadSourceList: msg.reloadSourceList,
 			}
@@ -470,16 +466,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			command: msg.command,
 		}
 		m.screen = screenConfirm
-	case watchTickMsg:
-		if msg.generation == m.sourceWatchGen &&
-			m.sourceWatching &&
-			m.screen == screenSourceDetail &&
-			!m.loading {
-			m.sourceWatchGen++
-			m.loading = true
-			command := m.loadSourceDetailCmd()
-			return m, command
-		}
 	}
 	return m, nil
 }
@@ -806,8 +792,6 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 	case screenTargetList, screenMannequins, screenConfiguration, screenHome:
 		m.screen = screenHome
 	case screenSourceDetail:
-		m.sourceWatching = false
-		m.sourceWatchGen++
 		m.screen = screenSourceList
 	case screenTargetDetail:
 		m.screen = m.targetParent
@@ -827,9 +811,6 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 		command := m.startSourceListLoad()
 		return m, command
 	case screenSourceDetail:
-		if m.sourceWatching {
-			m.sourceWatchGen++
-		}
 		m.loading = true
 		command := m.loadSourceDetailCmd()
 		return m, command
@@ -968,14 +949,6 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 	switch actions[m.actionFocus].id {
 	case "refresh":
 		return m.refresh()
-	case "watch":
-		m.sourceWatching = !m.sourceWatching
-		m.sourceWatchGen++
-		if m.sourceWatching {
-			m.loading = true
-			command := m.loadSourceDetailCmd()
-			return m, command
-		}
 	case "start":
 		return m.confirmAction("Start migration", "Start this migration?", screenSourceDetail,
 			m.sourceMutationCmd("Migration started", m.service.StartSourceMigration))
@@ -1023,10 +996,7 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) sourceActionItems() []actionItem {
-	actions := []actionItem{
-		{id: "refresh", label: "Refresh status", shortcut: "r"},
-		{id: "watch", label: watchLabel(m.sourceWatching), shortcut: "w"},
-	}
+	actions := []actionItem{{id: "refresh", label: "Refresh status", shortcut: "r"}}
 
 	status := ""
 	if m.sourceDetail != nil && m.sourceDetail.Migration != nil && m.sourceDetail.Migration.Status != nil {
@@ -1123,13 +1093,6 @@ func (m *Model) targetActionItems() []actionItem {
 	return actions
 }
 
-func watchLabel(watching bool) string {
-	if watching {
-		return "Stop live watch"
-	}
-	return "Start live watch"
-}
-
 func normalizedStatus(status string) string {
 	status = strings.TrimPrefix(status, "STATUS_TYPE_")
 	status = strings.ReplaceAll(status, "_", " ")
@@ -1185,6 +1148,7 @@ func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
 					title:            "Configuration reset",
 					body:             "Stored configuration and credentials were cleared.",
 					parent:           screenConfiguration,
+					popup:            true,
 					refresh:          true,
 					reloadSourceList: true,
 					err:              err,
@@ -1244,8 +1208,6 @@ func (m *Model) showConfigurationAlert(err error) bool {
 	}
 	m.loading = false
 	m.err = nil
-	m.sourceWatching = false
-	m.sourceWatchGen++
 	m.pickerInfoOpen = false
 	m.screen = screenAlert
 	return true
@@ -1677,6 +1639,7 @@ func (m *Model) createSourceMigrationCmd(input workflow.SourceCreateInput) tea.C
 			title:    "Migration created",
 			body:     body,
 			parent:   screenSourceDetail,
+			popup:    true,
 			refresh:  true,
 			sourceID: sourceID,
 		}
@@ -1728,7 +1691,7 @@ func (m *Model) openTargetCreateForm() (tea.Model, tea.Cmd) {
 			}
 			return func() tea.Msg {
 				raw, err := m.service.CreateTargetMigration(m.ctx, input)
-				return actionMsg{title: "Target migration created", body: prettyJSON(raw), parent: screenTargetList, refresh: true, err: err}
+				return actionMsg{title: "Target migration created", body: prettyJSON(raw), parent: screenTargetList, popup: true, refresh: true, err: err}
 			}, nil
 		},
 	})
@@ -1956,7 +1919,7 @@ func (m *Model) sourceMutationCmd(title string, action func(context.Context, wor
 	id := m.sourceID
 	return func() tea.Msg {
 		err := action(m.ctx, id)
-		return actionMsg{title: title, body: fmt.Sprintf("%s (%s).", title, id), parent: screenSourceDetail, refresh: true, err: err}
+		return actionMsg{title: title, body: fmt.Sprintf("%s (%s).", title, id), parent: screenSourceDetail, popup: true, refresh: true, err: err}
 	}
 }
 
@@ -1964,7 +1927,7 @@ func (m *Model) targetMutationCmd(title string, action func(context.Context, wor
 	id := m.targetID
 	return func() tea.Msg {
 		err := action(m.ctx, id)
-		return actionMsg{title: title, body: fmt.Sprintf("%s (%d).", title, id), parent: screenTargetDetail, refresh: true, err: err}
+		return actionMsg{title: title, body: fmt.Sprintf("%s (%d).", title, id), parent: screenTargetDetail, popup: true, refresh: true, err: err}
 	}
 }
 
@@ -1972,7 +1935,7 @@ func (m *Model) cutoverCmd(force bool) tea.Cmd {
 	id := m.sourceID
 	return func() tea.Msg {
 		err := m.service.CutoverSourceMigration(m.ctx, id, force)
-		return actionMsg{title: "Cutover initiated", body: fmt.Sprintf("Cutover initiated for migration %s.", id), parent: screenSourceDetail, refresh: true, err: err}
+		return actionMsg{title: "Cutover initiated", body: fmt.Sprintf("Cutover initiated for migration %s.", id), parent: screenSourceDetail, popup: true, refresh: true, err: err}
 	}
 }
 
@@ -1984,7 +1947,7 @@ func (m *Model) revertCutoverCmd() tea.Cmd {
 		if result != nil {
 			body = render.MigrationRevertCutover(*result)
 		}
-		return actionMsg{title: "Cutover reverted", body: body, parent: screenSourceDetail, refresh: true, err: err}
+		return actionMsg{title: "Cutover reverted", body: body, parent: screenSourceDetail, popup: true, refresh: true, err: err}
 	}
 }
 
@@ -2040,6 +2003,7 @@ type actionMsg struct {
 	title            string
 	body             string
 	parent           screen
+	popup            bool
 	refresh          bool
 	reloadSourceList bool
 	sourceID         workflow.SourceMigrationID
@@ -2053,10 +2017,6 @@ type confirmRequestMsg struct {
 	command tea.Cmd
 }
 
-type watchTickMsg struct {
-	generation uint64
-}
-
 func (m *Model) startSourceListLoad() tea.Cmd {
 	m.sourceListGen++
 	generation := m.sourceListGen
@@ -2064,13 +2024,6 @@ func (m *Model) startSourceListLoad() tea.Cmd {
 		migrations, err := m.service.ListSourceMigrations(m.ctx, elmapi.StatusAll)
 		return sourceListMsg{migrations: migrations, generation: generation, err: err}
 	}
-}
-
-func (m *Model) scheduleWatchTick() tea.Cmd {
-	generation := m.sourceWatchGen
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-		return watchTickMsg{generation: generation}
-	})
 }
 
 func (m *Model) loadSourceDetailCmd() tea.Cmd {

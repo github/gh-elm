@@ -73,6 +73,52 @@ type TargetRepositoryProgress struct {
 	LiveUpdateResourcesAcknowledged int64  `json:"liveUpdateResourcesAcknowledged"`
 }
 
+// UnmarshalJSON accepts the quoted int64 values returned by the status endpoint
+// while remaining compatible with the numeric values documented by its schema.
+func (p *TargetRepositoryProgress) UnmarshalJSON(data []byte) error {
+	type progressFields TargetRepositoryProgress
+	var fields struct {
+		progressFields
+		ResourcesAdded                  wireInt64 `json:"resourcesAdded"`
+		ResourcesProcessed              wireInt64 `json:"resourcesProcessed"`
+		EventsAdded                     wireInt64 `json:"eventsAdded"`
+		EventsProcessed                 wireInt64 `json:"eventsProcessed"`
+		BackfillResourcesAcknowledged   wireInt64 `json:"backfillResourcesAcknowledged"`
+		LiveUpdateResourcesAcknowledged wireInt64 `json:"liveUpdateResourcesAcknowledged"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*p = TargetRepositoryProgress(fields.progressFields)
+	p.ResourcesAdded = int64(fields.ResourcesAdded)
+	p.ResourcesProcessed = int64(fields.ResourcesProcessed)
+	p.EventsAdded = int64(fields.EventsAdded)
+	p.EventsProcessed = int64(fields.EventsProcessed)
+	p.BackfillResourcesAcknowledged = int64(fields.BackfillResourcesAcknowledged)
+	p.LiveUpdateResourcesAcknowledged = int64(fields.LiveUpdateResourcesAcknowledged)
+	return nil
+}
+
+type wireInt64 int64
+
+func (v *wireInt64) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	value := string(data)
+	if len(data) > 0 && data[0] == '"' {
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid integer %q: %w", value, err)
+	}
+	*v = wireInt64(parsed)
+	return nil
+}
+
 // TargetMigration is a target-side migration record, as returned by the list
 // and status endpoints. Raw holds the exact JSON object the API returned for
 // this migration, so callers rendering JSON can echo the API's response

@@ -285,6 +285,37 @@ func TestGetTargetMigrationStatus(t *testing.T) {
 		assert.Equal(t, int64(10), resp.Migration.RepositoryProgress[0].ResourcesAdded)
 	})
 
+	t.Run("decodes string-encoded progress counts", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"migration":{"migrationId":"42","status":"STATUS_TYPE_IN_PROGRESS","expiresAt":"2024-01-01T00:00:00Z","repositoryProgress":[{"repositoryNwo":"octo/repo","resourcesAdded":"10","resourcesProcessed":"5","eventsAdded":"4","eventsProcessed":"3","backfillResourcesAcknowledged":"2","liveUpdateResourcesAcknowledged":"1"}]}}`))
+		}))
+		defer srv.Close()
+
+		resp, err := NewClient(srv.URL, "tok").GetTargetMigrationStatus(t.Context(), 42)
+
+		require.NoError(t, err)
+		require.Len(t, resp.Migration.RepositoryProgress, 1)
+		progress := resp.Migration.RepositoryProgress[0]
+		assert.Equal(t, int64(10), progress.ResourcesAdded)
+		assert.Equal(t, int64(5), progress.ResourcesProcessed)
+		assert.Equal(t, int64(4), progress.EventsAdded)
+		assert.Equal(t, int64(3), progress.EventsProcessed)
+		assert.Equal(t, int64(2), progress.BackfillResourcesAcknowledged)
+		assert.Equal(t, int64(1), progress.LiveUpdateResourcesAcknowledged)
+	})
+
+	t.Run("rejects malformed progress counts", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"migration":{"migrationId":"42","status":"STATUS_TYPE_IN_PROGRESS","expiresAt":"2024-01-01T00:00:00Z","repositoryProgress":[{"resourcesAdded":"many"}]}}`))
+		}))
+		defer srv.Close()
+
+		_, err := NewClient(srv.URL, "tok").GetTargetMigrationStatus(t.Context(), 42)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `invalid integer "many"`)
+	})
+
 	t.Run("returns HTTPError on non-200", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "not found", http.StatusNotFound)
