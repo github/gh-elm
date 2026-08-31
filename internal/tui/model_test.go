@@ -1126,7 +1126,7 @@ func TestModelActions(t *testing.T) {
 		setSourceStatus(model, elmapi.StatusCreated)
 		updated, _ := model.confirmAction(
 			"Cancel migration",
-			"This cannot be undone.",
+			"This permanently terminates the source migration and cannot be undone.",
 			screenSourceDetail,
 			func() tea.Msg { return nil },
 		)
@@ -1136,6 +1136,8 @@ func TestModelActions(t *testing.T) {
 		assert.Contains(t, view, "Migration source-1")
 		assert.Contains(t, view, "Cancel migration")
 		assert.Contains(t, view, "Confirm")
+		assert.Equal(t, 60, lipgloss.Width(model.confirmationOverlay()))
+		assert.LessOrEqual(t, lipgloss.Height(model.confirmationOverlay()), 12)
 
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
 		model = updated.(*Model)
