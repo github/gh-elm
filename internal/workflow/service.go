@@ -25,6 +25,12 @@ type SourceMigrationID string
 // TargetMigrationID is a target-side numeric migration ID.
 type TargetMigrationID int64
 
+// ErrSourceConfigurationMissing means the source endpoint cannot be used.
+var ErrSourceConfigurationMissing = errors.New("source URL and token are not configured")
+
+// ErrTargetConfigurationMissing means the target endpoint cannot be used.
+var ErrTargetConfigurationMissing = errors.New("target URL and token are not configured")
+
 // Service executes ELM workflows using configured endpoints.
 type Service struct{}
 
@@ -623,7 +629,7 @@ func (s *Service) sourceClient() (*elmapi.Client, error) {
 		return nil, err
 	}
 	if ep.URL == "" || ep.Token == "" {
-		return nil, errors.New("source URL and token are not configured")
+		return nil, ErrSourceConfigurationMissing
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), nil
 }
@@ -638,7 +644,7 @@ func (s *Service) targetClient() (*elmapi.Client, error) {
 		return nil, err
 	}
 	if ep.URL == "" || ep.Token == "" {
-		return nil, errors.New("target URL and token are not configured")
+		return nil, ErrTargetConfigurationMissing
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), nil
 }
@@ -653,7 +659,7 @@ func (s *Service) mannequinClient() (*ghapi.Client, error) {
 		return nil, err
 	}
 	if ep.URL == "" || ep.Token == "" {
-		return nil, errors.New("target URL and token are not configured")
+		return nil, ErrTargetConfigurationMissing
 	}
 	return ghapi.NewClient(ep.URL, ep.Token), nil
 }
