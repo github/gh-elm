@@ -137,6 +137,20 @@ func TestReattributeMannequinToUser(t *testing.T) {
 	})
 }
 
+func TestGraphQLOperationName(t *testing.T) {
+	t.Run("named query", func(t *testing.T) {
+		assert.Equal(t, "GetUser", graphQLOperationName("query GetUser($login: String!) { user(login: $login) { id } }"))
+	})
+
+	t.Run("named mutation with leading whitespace", func(t *testing.T) {
+		assert.Equal(t, "ReattributeMannequinToBot", graphQLOperationName("\n  mutation ReattributeMannequinToBot($orgId: ID!) { x }"))
+	})
+
+	t.Run("anonymous operation", func(t *testing.T) {
+		assert.Empty(t, graphQLOperationName("query { viewer { login } }"))
+	})
+}
+
 func TestBotID(t *testing.T) {
 	t.Run("returns the node id for a bot", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

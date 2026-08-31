@@ -293,26 +293,25 @@ func botCSVServer(t *testing.T) (srv *httptest.Server, botCalled, invited *bool)
 			_, _ = io.WriteString(w, `{"type":"Bot","node_id":"BOT1"}`)
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Query string `json:"query"`
+			OperationName string `json:"operationName"`
 		}
-		_ = json.Unmarshal(body, &req)
-		switch {
-		case strings.Contains(req.Query, "organization(login"):
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		switch req.OperationName {
+		case "GetOrganization":
 			_, _ = io.WriteString(w, `{"data":{"organization":{"id":"ORG"}}}`)
-		case strings.Contains(req.Query, "mannequins"):
+		case "ListMannequins":
 			_, _ = io.WriteString(w, `{"data":{"node":{"mannequins":{"pageInfo":{"endCursor":"","hasNextPage":false},"nodes":[{"id":"m1","login":"legacy-ci[bot]","claimant":null},{"id":"m2","login":"alice","claimant":null}]}}}}`)
-		case strings.Contains(req.Query, "user(login"):
+		case "GetUser":
 			_, _ = io.WriteString(w, `{"data":{"user":{"id":"u2"}}}`)
-		case strings.Contains(req.Query, "reattributeMannequinToBot"):
+		case "ReattributeMannequinToBot":
 			*botCalled = true
 			_, _ = io.WriteString(w, `{"data":{"reattributeMannequinToBot":{"source":{"id":"m1","login":"legacy-ci[bot]"},"target":{"id":"BOT1","login":"example-ci[bot]"}}}}`)
-		case strings.Contains(req.Query, "createAttributionInvitation"):
+		case "CreateAttributionInvitation":
 			*invited = true
 			_, _ = io.WriteString(w, `{"data":{"createAttributionInvitation":{"source":{"id":"m2","login":"alice"},"target":{"id":"u2","login":"alice-t"}}}}`)
 		default:
-			assert.Failf(t, "unexpected query", "%s", req.Query)
+			require.Failf(t, "unexpected GraphQL operation", "operation: %q", req.OperationName)
 		}
 	}))
 	return srv, botCalled, invited
@@ -334,21 +333,20 @@ func botClaimServer(t *testing.T, mannequinLogin string) (*httptest.Server, *boo
 			_, _ = fmt.Fprintf(w, `{"type":"Bot","node_id":%q}`, botNodeID)
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Query string `json:"query"`
+			OperationName string `json:"operationName"`
 		}
-		_ = json.Unmarshal(body, &req)
-		switch {
-		case strings.Contains(req.Query, "organization(login"):
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		switch req.OperationName {
+		case "GetOrganization":
 			_, _ = io.WriteString(w, `{"data":{"organization":{"id":"ORG"}}}`)
-		case strings.Contains(req.Query, "mannequins"):
+		case "ListMannequinsByLogin":
 			_, _ = fmt.Fprintf(w, `{"data":{"node":{"mannequins":{"pageInfo":{"endCursor":"","hasNextPage":false},"nodes":[{"id":%q,"login":%q,"claimant":null}]}}}}`, mannequinID, mannequinLogin)
-		case strings.Contains(req.Query, "reattributeMannequinToBot"):
+		case "ReattributeMannequinToBot":
 			*called = true
 			_, _ = fmt.Fprintf(w, `{"data":{"reattributeMannequinToBot":{"source":{"id":%q,"login":%q},"target":{"id":%q,"login":%q}}}}`, mannequinID, mannequinLogin, botNodeID, botLogin)
 		default:
-			assert.Failf(t, "unexpected query", "%s", req.Query)
+			require.Failf(t, "unexpected GraphQL operation", "operation: %q", req.OperationName)
 		}
 	}))
 	return srv, called
