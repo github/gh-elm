@@ -162,6 +162,49 @@ Repository states
 `, output)
 	})
 
+	t.Run("shows only cutover readiness for terminated migrations", func(t *testing.T) {
+		status := "terminated"
+
+		output := MigrationStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:          &status,
+				DisplayMessage:  "Migration terminated",
+				ReadyForCutover: false,
+				CutoverBlockers: []string{"Migration terminated"},
+			},
+		})
+
+		assert.Equal(t, `Cutover
+  ○ Not ready for cutover
+`, output)
+	})
+
+	t.Run("shows only target availability for aborted targets", func(t *testing.T) {
+		status := "aborted"
+
+		output := MigrationStatus(elmapi.MigrationDetail{
+			TargetState: &elmapi.TargetState{Status: &status},
+		})
+
+		assert.Equal(t, `Target
+  ✓ Target available
+`, output)
+	})
+
+	t.Run("hides target progress before a migration starts", func(t *testing.T) {
+		created := "created"
+		inProgress := "in_progress"
+
+		output := MigrationStatus(elmapi.MigrationDetail{
+			Migration:   &elmapi.MigrationSummary{Status: &created},
+			TargetState: &elmapi.TargetState{Status: &inProgress},
+		})
+
+		assert.Contains(t, output, "○ Created")
+		assert.Contains(t, output, "✓ Target available")
+		assert.NotContains(t, output, "In progress")
+	})
+
 	t.Run("preserves distinct repository phase and status", func(t *testing.T) {
 		status := "backfilling"
 		phase := "backfill"

@@ -394,6 +394,21 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.targetAuthErr = msg.err
 		m.syncHomeCursor()
 		m.syncViewportSize()
+	case configurationSavedMsg:
+		m.loading = false
+		m.err = nil
+		if msg.err != nil {
+			m.result = resultState{title: "Action failed", body: msg.err.Error(), parent: screenConfiguration}
+			m.screen = screenResult
+			m.resetViewport()
+			break
+		}
+		m.screen = screenConfiguration
+		m.actionFocus = 0
+		m.invalidateSourceList()
+		m.sourceListLoading = true
+		model, command := m.refresh()
+		return model, tea.Batch(command, m.startSourceListLoad())
 	case pickerCatalogMsg:
 		if msg.generation != m.pickerGeneration {
 			return m, nil
@@ -1867,14 +1882,7 @@ func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
 			}
 			return func() tea.Msg {
 				err := m.service.SaveConfiguration(m.ctx, input)
-				return actionMsg{
-					title:            "Configuration saved",
-					body:             "Stored gh elm configuration.",
-					parent:           screenConfiguration,
-					refresh:          true,
-					reloadSourceList: true,
-					err:              err,
-				}
+				return configurationSavedMsg{err: err}
 			}, nil
 		},
 	})
@@ -1942,6 +1950,10 @@ type configMsg struct {
 	configuration *workflow.Configuration
 	generation    uint64
 	err           error
+}
+
+type configurationSavedMsg struct {
+	err error
 }
 
 type sourceAuthenticationMsg struct {

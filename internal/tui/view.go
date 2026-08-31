@@ -168,11 +168,7 @@ func (m *Model) bodyHeight() int {
 }
 
 func (m *Model) configurationWarning() string {
-	current := m.screen
-	if current == screenConfirm {
-		current = m.confirm.parent
-	}
-	if current == screenConfiguration {
+	if m.inConfigurationFlow() {
 		return ""
 	}
 	if m.configurationErr != nil {
@@ -221,6 +217,21 @@ func (m *Model) configurationWarning() string {
 		issues = append(issues, "Failed "+strings.Join(unavailable, ", "))
 	}
 	return strings.Join(issues, ". ") + ". Open Configuration to finish setup."
+}
+
+func (m *Model) inConfigurationFlow() bool {
+	switch m.screen {
+	case screenConfiguration:
+		return true
+	case screenForm:
+		return m.form.parent == screenConfiguration
+	case screenConfirm:
+		return m.confirm.parent == screenConfiguration
+	case screenResult:
+		return m.result.parent == screenConfiguration
+	default:
+		return false
+	}
 }
 
 func (m *Model) menu(items []actionItem) string {
