@@ -529,6 +529,8 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveHomeCursor(-1)
 		} else if m.verticalActionScreen() && m.actionFocus > 0 {
 			m.actionFocus--
+		} else if m.scrollableScreen() {
+			return m.updateViewport(msg)
 		} else if !m.actionScreen() && m.cursor > 0 {
 			m.cursor--
 		}
@@ -537,6 +539,8 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveHomeCursor(1)
 		} else if m.verticalActionScreen() && m.actionFocus < m.itemCount()-1 {
 			m.actionFocus++
+		} else if m.scrollableScreen() {
+			return m.updateViewport(msg)
 		} else if !m.actionScreen() && m.cursor < m.itemCount()-1 {
 			m.cursor++
 		}
@@ -957,6 +961,14 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 	switch actions[m.actionFocus].id {
 	case "refresh":
 		return m.refresh()
+	case "messages":
+		m.result = resultState{
+			title:  fmt.Sprintf("Migration %s", m.sourceID),
+			body:   m.sourceMessagesView(),
+			parent: screenSourceDetail,
+		}
+		m.screen = screenResult
+		m.resetViewport()
 	case "start":
 		return m.confirmAction("Start migration", "Start this migration?", screenSourceDetail,
 			m.sourceMutationCmd("Migration started", m.service.StartSourceMigration))
@@ -996,7 +1008,10 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) sourceActionItems() []actionItem {
-	actions := []actionItem{{id: "refresh", label: "Refresh", shortcut: "r"}}
+	actions := []actionItem{
+		{id: "refresh", label: "Refresh", shortcut: "r"},
+		{id: "messages", label: "Messages", shortcut: "m"},
+	}
 
 	status := ""
 	if m.sourceDetail != nil && m.sourceDetail.Migration != nil && m.sourceDetail.Migration.Status != nil {
@@ -1321,10 +1336,18 @@ func (m *Model) updateViewport(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewportReady = true
 	}
 	m.syncViewportSize()
-	m.viewport.SetContent(m.scrollableContent())
-	var command tea.Cmd
-	m.viewport, command = m.viewport.Update(msg)
-	return m, command
+	m.viewport.SetContent(m.wrapViewportContent(m.scrollableContent()))
+	switch {
+	case key.Matches(msg, keys.PageUp):
+		m.viewport.PageUp()
+	case key.Matches(msg, keys.PageDown):
+		m.viewport.PageDown()
+	default:
+		var command tea.Cmd
+		m.viewport, command = m.viewport.Update(msg)
+		return m, command
+	}
+	return m, nil
 }
 
 func (m *Model) syncViewportSize() {
