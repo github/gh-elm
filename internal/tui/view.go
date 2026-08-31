@@ -13,7 +13,10 @@ import (
 	"github.com/github/gh-elm/internal/workflow"
 )
 
-const homeTitle = "Live migrations"
+const (
+	appTitle  = "GHE Live Migrations"
+	homeTitle = "Main menu"
+)
 
 // View implements tea.Model.
 func (m *Model) View() string {
@@ -168,11 +171,8 @@ func (m *Model) View() string {
 
 func (m *Model) frame(title, body, help string) string {
 	contentWidth := m.contentWidth()
-	brand := m.styles.Primary.Bold(true).Render("GitHub Enterprise")
-	subtitle := m.styles.Info.Bold(true).Render(title)
-	if title == homeTitle {
-		subtitle = m.styles.Success.Render(title)
-	}
+	brand := m.styles.Primary.Bold(true).Render(appTitle)
+	subtitle := m.styles.Muted.Bold(false).Render(title)
 	header := brand + "\n" + subtitle + "\n" +
 		m.styles.Muted.Render(strings.Repeat("─", contentWidth))
 
