@@ -306,7 +306,7 @@ func TestModelUpdate(t *testing.T) {
 		assert.Contains(t, model.View(), "Failed source authentication")
 	})
 
-	t.Run("hides warning on configuration screen", func(t *testing.T) {
+	t.Run("hides warning throughout the configuration flow", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenConfiguration
 		model.configuration = &workflow.Configuration{
@@ -321,6 +321,18 @@ func TestModelUpdate(t *testing.T) {
 		assert.NotContains(t, view, "Configuration not ready")
 		assert.NotContains(t, view, "Open Configuration to finish setup")
 		assert.Contains(t, view, "Source auth")
+
+		model.screen = screenForm
+		model.form.parent = screenConfiguration
+		assert.Empty(t, model.configurationWarning())
+
+		model.screen = screenConfirm
+		model.confirm.parent = screenConfiguration
+		assert.Empty(t, model.configurationWarning())
+
+		model.screen = screenResult
+		model.result.parent = screenConfiguration
+		assert.Empty(t, model.configurationWarning())
 	})
 
 	t.Run("failed source detail load clears previous migration state", func(t *testing.T) {
@@ -406,17 +418,15 @@ func TestModelUpdate(t *testing.T) {
 		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
 		require.NotNil(t, command)
-		updated, _ = model.Update(command())
+		updated, command = model.Update(command())
 		model = updated.(*Model)
 
-		assert.Equal(t, screenResult, model.screen)
+		assert.Equal(t, screenConfiguration, model.screen)
+		require.NotNil(t, command)
 		assert.False(t, model.sourceListLoaded)
 		assert.Empty(t, model.sourceMigrations)
 		assert.NoError(t, model.sourceListErr)
 
-		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model = updated.(*Model)
-		require.NotNil(t, command)
 		batch, ok := command().(tea.BatchMsg)
 		require.True(t, ok)
 		for _, batchCommand := range batch {
@@ -427,6 +437,7 @@ func TestModelUpdate(t *testing.T) {
 		require.Len(t, model.sourceMigrations, 1)
 		assert.Equal(t, "new-source", model.sourceMigrations[0].MigrationID)
 		assert.True(t, model.sourceListLoaded)
+		assert.Equal(t, screenConfiguration, model.screen)
 	})
 
 	t.Run("configuration form offers save and cancel buttons", func(t *testing.T) {
