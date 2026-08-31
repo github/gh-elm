@@ -421,6 +421,7 @@ func TestModelUpdate(t *testing.T) {
 		model.screen = screenConfiguration
 		model.configuration = &workflow.Configuration{
 			SourceTokenSet: true,
+			TargetURL:      "https://api.staffship-01.ghe.com",
 			TargetTokenSet: true,
 		}
 		updated, _ := model.openConfigurationForm()
@@ -430,6 +431,7 @@ func TestModelUpdate(t *testing.T) {
 		assert.NotContains(t, view, "blank preserves current")
 		assert.Equal(t, 2, strings.Count(view, "••••••••"))
 		assert.Empty(t, *model.form.fields[1].text)
+		assert.Equal(t, "https://api.staffship-01.ghe.com", *model.form.fields[2].text)
 		assert.Empty(t, *model.form.fields[3].text)
 		assert.Contains(t, view, "Save")
 		assert.Contains(t, view, "Cancel")

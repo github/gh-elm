@@ -137,7 +137,7 @@ func ensureGHESRESTBase(raw string) string {
 // NormalizeTargetAPIURL turns a target web hostname into its API hostname.
 // Existing API hostnames and local development endpoints are left unchanged.
 func NormalizeTargetAPIURL(raw string) string {
-	raw = strings.TrimSpace(raw)
+	raw = normalizeBaseURL(raw)
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return raw

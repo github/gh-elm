@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -108,11 +109,13 @@ func TestMigrationStatus(t *testing.T) {
 
 		for _, want := range []string{
 			"Migration", "mig-1", "Progress · octo/repo",
-			"✓ Target available", "✗ Not ready for cutover", "backfill incomplete",
+			"Target", "✓ Available", "✗ Not ready for cutover", "backfill incomplete",
 			"Repository states", "Messages", "Migration is running",
 		} {
 			assert.Contains(t, output, want)
 		}
+		assert.Less(t, strings.Index(output, "Visibility"), strings.Index(output, "Target"))
+		assert.Less(t, strings.Index(output, "Target"), strings.Index(output, "Created"))
 	})
 
 	t.Run("renders empty response explicitly", func(t *testing.T) {
@@ -213,7 +216,9 @@ Repository states
 		})
 
 		assert.Contains(t, output, "○ Created")
-		assert.Contains(t, output, "✓ Target available")
+		assert.Contains(t, output, "Target")
+		assert.Contains(t, output, "✓ Available")
+		assert.NotContains(t, output, "\nTarget\n")
 		assert.NotContains(t, output, "In progress")
 	})
 

@@ -550,7 +550,7 @@ func (s *Service) GetConfiguration(context.Context) (*Configuration, error) {
 	return &Configuration{
 		SourceURL:              cfg.SourceURL,
 		SourceTokenSet:         sourceToken != "",
-		TargetURL:              cfg.TargetURL,
+		TargetURL:              endpoints.NormalizeTargetAPIURL(cfg.TargetURL),
 		TargetTokenSet:         targetToken != "",
 		ResolvedSourceURL:      source.URL,
 		ResolvedSourceTokenSet: source.Token != "",
@@ -590,7 +590,7 @@ func (s *Service) SaveConfiguration(ctx context.Context, in ConfigurationInput) 
 		return err
 	}
 	cfg.SourceURL = strings.TrimSpace(in.SourceURL)
-	cfg.TargetURL = strings.TrimSpace(in.TargetURL)
+	cfg.TargetURL = endpoints.NormalizeTargetAPIURL(in.TargetURL)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
