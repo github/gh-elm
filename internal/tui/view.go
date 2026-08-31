@@ -24,11 +24,15 @@ func (m *Model) View() string {
 	current := m.screen
 	confirming := current == screenConfirm
 	alerting := current == screenAlert
+	resultPopup := current == screenResult && m.result.popup
 	if confirming {
 		current = m.confirm.parent
 	}
 	if alerting {
 		current = m.alert.parent
+	}
+	if resultPopup {
+		current = m.result.parent
 	}
 
 	var title, body, help string
@@ -98,7 +102,7 @@ func (m *Model) View() string {
 		help = helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown, keys.Back)
 	}
 
-	if m.showHelp && !confirming && !alerting {
+	if m.showHelp && !confirming && !alerting && !resultPopup {
 		title = "Keyboard help"
 		body = m.fullHelpView()
 		help = "? close • q quit"
@@ -124,7 +128,7 @@ func (m *Model) View() string {
 	}
 	if confirming {
 		help = "←/→ select action • enter activate • y confirm • n/esc cancel"
-	} else if alerting {
+	} else if alerting || resultPopup {
 		help = "enter/esc close"
 	}
 	rendered := m.frame(title, body, help)
@@ -139,6 +143,13 @@ func (m *Model) View() string {
 		rendered = overlayCenter(
 			rendered,
 			m.alertOverlay(),
+			m.displayWidth(),
+			displayHeight(m.height),
+		)
+	} else if resultPopup {
+		rendered = overlayCenter(
+			rendered,
+			m.resultPopupOverlay(),
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
@@ -335,16 +346,10 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 }
 
 func (m *Model) sourceDetailView() string {
-	var status strings.Builder
 	if m.sourceDetail != nil {
-		status.WriteString(render.MigrationStatus(*m.sourceDetail))
+		return render.MigrationStatus(*m.sourceDetail)
 	}
-	if m.sourceWatching {
-		status.WriteString("\n")
-		status.WriteString(m.styles.Active.Render("● Live watch enabled (2s refresh)"))
-		status.WriteString("\n")
-	}
-	return status.String()
+	return ""
 }
 
 func (m *Model) targetListView() string {
@@ -440,8 +445,7 @@ func (m *Model) detailActionView(current screen) string {
 	default:
 		return ""
 	}
-	return m.styles.Bold.Render("Actions") + "\n\n" +
-		m.actionButtons(actions, m.actionFocus, m.contentWidth())
+	return m.actionButtons(actions, m.actionFocus, m.contentWidth())
 }
 
 func (m *Model) viewportBodyHeight(current screen) int {
@@ -801,9 +805,17 @@ func (m *Model) confirmationOverlay() string {
 }
 
 func (m *Model) alertOverlay() string {
+	return m.messageOverlay(m.alert.title, m.alert.body)
+}
+
+func (m *Model) resultPopupOverlay() string {
+	return m.messageOverlay(m.result.title, m.result.body)
+}
+
+func (m *Model) messageOverlay(title, body string) string {
 	width := min(60, max(24, m.contentWidth()-8))
-	content := m.styles.Bold.Render(m.alert.title) + "\n\n" +
-		m.alert.body + "\n\n" +
+	content := m.styles.Bold.Render(title) + "\n\n" +
+		body + "\n\n" +
 		m.actionButtons([]actionItem{{id: "close", label: "Close"}}, 0, width-6)
 	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
 }

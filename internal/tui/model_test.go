@@ -359,33 +359,6 @@ func TestModelUpdate(t *testing.T) {
 		assert.NotContains(t, actionIDs(model.sourceActionItems()), "cancel")
 	})
 
-	t.Run("watch ticks do not overlap source detail loads", func(t *testing.T) {
-		svc := &fakeService{
-			getSourceMigration: func(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
-				return &elmapi.MigrationDetail{}, nil
-			},
-		}
-		model := New(t.Context(), svc)
-		model.screen = screenSourceDetail
-		model.sourceWatching = true
-		model.sourceWatchGen = 1
-
-		updated, command := model.Update(watchTickMsg{generation: 1})
-		model = updated.(*Model)
-		require.NotNil(t, command)
-		assert.True(t, model.loading)
-		assert.Equal(t, uint64(2), model.sourceWatchGen)
-
-		updated, duplicate := model.Update(watchTickMsg{generation: 1})
-		model = updated.(*Model)
-		assert.Nil(t, duplicate)
-
-		updated, nextTick := model.Update(command())
-		model = updated.(*Model)
-		assert.False(t, model.loading)
-		require.NotNil(t, nextTick)
-	})
-
 	t.Run("target detail load clears previous repository", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.repository = "old/repository"
@@ -614,6 +587,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		model.actionFocus = len(model.sourceActionItems()) - 1
 
 		assert.Contains(t, model.View(), "Open destination details")
+		assert.NotContains(t, model.View(), "Actions")
 	})
 
 	t.Run("narrow detail preserves all scrollable content", func(t *testing.T) {
@@ -864,6 +838,9 @@ func TestMigrationCreation(t *testing.T) {
 		model = updated.(*Model)
 
 		assert.Equal(t, screenResult, model.screen)
+		assert.True(t, model.result.popup)
+		assert.Contains(t, model.View(), "Migration created")
+		assert.Contains(t, model.View(), "Close")
 		assert.Equal(t, workflow.SourceMigrationID("created-1"), model.sourceID)
 		assert.Equal(t, workflow.SourceCreateInput{
 			SourceOwner: "acme",
@@ -873,6 +850,11 @@ func TestMigrationCreation(t *testing.T) {
 			Visibility:  "private",
 			Start:       true,
 		}, sourceCreateInput)
+
+		updated, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		assert.Equal(t, screenSourceDetail, model.screen)
+		assert.NotNil(t, command)
 	})
 
 	t.Run("repository picker presents real metadata", func(t *testing.T) {
@@ -1053,6 +1035,7 @@ func TestMigrationCreation(t *testing.T) {
 		model = updated.(*Model)
 
 		assert.Equal(t, screenResult, model.screen)
+		assert.True(t, model.result.popup)
 		assert.Equal(t, workflow.SourceMigrationID("created-1"), model.sourceID)
 		assert.Equal(t, workflow.SourceCreateInput{
 			SourceOwner: "source-org",
@@ -1140,12 +1123,12 @@ func TestModelActions(t *testing.T) {
 
 		t.Run("created can start or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusCreated)
-			assert.ElementsMatch(t, []string{"refresh", "watch", "start", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "start", "cancel"}, actionIDs(model.sourceActionItems()))
 		})
 
 		t.Run("in progress can pause force cutover or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusInProgress)
-			assert.ElementsMatch(t, []string{"refresh", "watch", "pause", "force-cutover", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "pause", "force-cutover", "cancel"}, actionIDs(model.sourceActionItems()))
 		})
 
 		t.Run("ready migration offers normal cutover", func(t *testing.T) {
@@ -1157,12 +1140,12 @@ func TestModelActions(t *testing.T) {
 
 		t.Run("paused can resume or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusPaused)
-			assert.ElementsMatch(t, []string{"refresh", "watch", "resume", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "resume", "cancel"}, actionIDs(model.sourceActionItems()))
 		})
 
 		t.Run("completed can revert", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusCompleted)
-			assert.ElementsMatch(t, []string{"refresh", "watch", "revert"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"refresh", "revert"}, actionIDs(model.sourceActionItems()))
 		})
 	})
 
