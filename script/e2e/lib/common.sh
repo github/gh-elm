@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Shared defaults, state, logging, and validation primitives for the gh-elm
-# control-plane E2E harness.
+# E2E harness.
 #
 # This file is sourced by script/e2e/test-elm-ghes.sh and is not intended to
 # be executed directly.
@@ -19,6 +19,10 @@ fi
 
 OUTDIR="${OUTDIR:-./elm-results}"
 E2E_MODE="${E2E_MODE:-control-plane}"
+
+E2E_POLL_INTERVAL_SECONDS="${E2E_POLL_INTERVAL_SECONDS:-10}"
+E2E_STATE_TIMEOUT_SECONDS="${E2E_STATE_TIMEOUT_SECONDS:-900}"
+E2E_CUTOVER_TIMEOUT_SECONDS="${E2E_CUTOVER_TIMEOUT_SECONDS:-1800}"
 
 # ---------------------------------------------------------------------------
 # Evidence paths
@@ -96,4 +100,19 @@ require_command() {
       "Dependencies" \
       "Required command $name was not found on PATH."
   fi
+}
+
+require_positive_integer() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || ((10#$value <= 0)); then
+    fail \
+      "Configuration" \
+      "$name must be a positive integer, not ${value:-<empty>}."
+  fi
+
+  # Normalize decimal-looking values such as 08 so subsequent Bash arithmetic
+  # cannot interpret them as octal.
+  printf -v "$name" '%d' "$((10#$value))"
 }

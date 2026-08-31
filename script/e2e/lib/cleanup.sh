@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Run-scoped cleanup and final result reporting for the gh-elm control-plane
-# E2E harness.
+# Run-scoped cleanup and final result reporting for the gh-elm E2E harness.
 #
 # Cleanup operates exclusively on migration IDs recorded by ownership.sh:
 #
 #   - migrations already marked cleanup-complete are skipped;
-#   - other run-owned migrations are cancelled;
+#   - migrations that may have entered cutover must be successfully reverted;
+#   - other active migrations are cancelled;
 #   - rejected cancellation operations are accepted only when status confirms
-#     that the migration is already terminal.
+#     that a non-cutover migration is already terminal.
 #
 # The cleanup function is installed as an EXIT trap by test-elm-ghes.sh. It
 # preserves the scenario's original exit status unless cleanup itself fails.
@@ -52,6 +52,7 @@ cleanup_get_migration_status() {
   local -n response_ref="$2"
   local fetched_response
   local artifact_id
+  local invalid_status_file
   local status_file
   local temporary_file
 
@@ -96,8 +97,12 @@ cleanup_get_migration_status() {
     cleanup_log \
       "Migration $migration_id returned an unexpected status response during cleanup."
 
-    printf '%s\n' "$fetched_response" \
-      >"$OUTDIR/cleanup-invalid-status-${artifact_id}.json"
+    invalid_status_file="$OUTDIR/cleanup-invalid-status-${artifact_id}.json"
+
+    if ! printf '%s\n' "$fetched_response" >"$invalid_status_file"; then
+      cleanup_log \
+        "Failed to save the invalid cleanup status response for migration $migration_id."
+    fi
 
     return 1
   fi
@@ -172,12 +177,169 @@ cleanup_migration_is_terminal() {
   return 1
 }
 
+cleanup_revert_cutover() {
+  local migration_id="$1"
+  local response
+  local artifact_id
+  local evidence_file
+  local invalid_evidence_file
+  local temporary_file
+  local source_unarchived
+  local cutover_terminated
+  local migration_terminated
+
+  if ! migration_is_owned "$migration_id"; then
+    cleanup_log \
+      "Refusing to revert cutover for unowned migration $migration_id."
+
+    return 1
+  fi
+
+  if ! migration_started_cutover "$migration_id"; then
+    cleanup_log \
+      "Refusing to revert cutover for migration $migration_id because this run did not record a cutover attempt."
+
+    return 1
+  fi
+
+  if migration_cleanup_is_complete "$migration_id"; then
+    cleanup_log \
+      "Refusing to revert cutover for migration $migration_id because cleanup is already complete."
+
+    return 1
+  fi
+
+  artifact_id="$(migration_artifact_id "$migration_id")"
+  evidence_file="$OUTDIR/cleanup-revert-cutover-${artifact_id}.json"
+  invalid_evidence_file="$OUTDIR/cleanup-revert-cutover-invalid-${artifact_id}.json"
+  temporary_file="${evidence_file}.tmp"
+
+  cleanup_log \
+    "Attempting cutover revert for run-owned migration $migration_id."
+
+  # revert-cutover is the canonical command in older candidates and a retained
+  # compatibility alias in newer candidates. Use the flag form because older
+  # candidates do not accept the migration ID positionally.
+  if ! response="$(
+    gh elm migration revert-cutover \
+      --migration-id "$migration_id" \
+      --json 2>>"$CLEANUP_LOG"
+  )"; then
+    cleanup_log \
+      "Cutover revert command failed for migration $migration_id."
+
+    return 1
+  fi
+
+  # A successful cleanup must confirm that the source repository was
+  # unarchived. Terminal migration status alone is not proof that cutover was
+  # safely reversed.
+  if ! jq -e '
+    (type == "object") and
+    (.success | type == "boolean") and
+    .success == true and
+    (.unarchived_source_repository | type == "boolean") and
+    (
+      (has("in_progress_cutover_terminated") | not) or
+      (.in_progress_cutover_terminated | type == "boolean")
+    ) and
+    (
+      (has("in_progress_migration_terminated") | not) or
+      (.in_progress_migration_terminated | type == "boolean")
+    )
+  ' >/dev/null <<<"$response" 2>>"$CLEANUP_LOG"; then
+    cleanup_log \
+      "Cutover revert returned an invalid or unsuccessful response for migration $migration_id."
+
+    if ! printf '%s\n' "$response" >"$invalid_evidence_file"; then
+      cleanup_log \
+        "Failed to save the invalid cleanup revert response for migration $migration_id."
+    fi
+
+    return 1
+  fi
+
+  # A false value means the source repository was already unarchived. Operation
+  # success is determined by the validated success field above.
+  if ! source_unarchived="$(
+    jq -r '.unarchived_source_repository' \
+      <<<"$response" 2>>"$CLEANUP_LOG"
+  )"; then
+    cleanup_log \
+      "Failed to read source restoration state for migration $migration_id."
+
+    return 1
+  fi
+
+  # These optional fields default to false, matching the typed CLI response.
+  # The validation above rejects any present non-boolean value.
+  if ! cutover_terminated="$(
+    jq -r '.in_progress_cutover_terminated // false' \
+      <<<"$response" 2>>"$CLEANUP_LOG"
+  )"; then
+    cleanup_log \
+      "Failed to read cutover termination state for migration $migration_id."
+
+    return 1
+  fi
+
+  if ! migration_terminated="$(
+    jq -r '.in_progress_migration_terminated // false' \
+      <<<"$response" 2>>"$CLEANUP_LOG"
+  )"; then
+    cleanup_log \
+      "Failed to read migration termination state for migration $migration_id."
+
+    return 1
+  fi
+
+  # The remote revert has succeeded and explicitly confirmed that the source
+  # repository was restored. Mark cleanup complete before writing evidence so
+  # an evidence failure cannot cause a second revert attempt.
+  if ! mark_cleanup_complete "$migration_id"; then
+    cleanup_log \
+      "Cutover was reverted, but migration $migration_id could not be marked cleanup-complete."
+
+    return 1
+  fi
+
+  if ! printf '%s\n' "$response" >"$temporary_file"; then
+    rm -f "$temporary_file"
+
+    cleanup_log \
+      "Cutover was reverted, but cleanup evidence could not be saved for migration $migration_id."
+
+    return 1
+  fi
+
+  if ! mv "$temporary_file" "$evidence_file"; then
+    rm -f "$temporary_file"
+
+    cleanup_log \
+      "Cutover was reverted, but cleanup evidence could not be finalized for migration $migration_id."
+
+    return 1
+  fi
+
+  cleanup_log \
+    "Cutover reverted successfully for migration $migration_id: source_unarchived=$source_unarchived, cutover_terminated=$cutover_terminated, migration_terminated=$migration_terminated."
+
+  return 0
+}
+
 cleanup_cancel_migration() {
   local migration_id="$1"
 
   if ! migration_is_owned "$migration_id"; then
     cleanup_log \
       "Refusing to cancel unowned migration $migration_id."
+
+    return 1
+  fi
+
+  if migration_started_cutover "$migration_id"; then
+    cleanup_log \
+      "Refusing to use cancellation as cleanup for migration $migration_id because this run recorded a cutover attempt."
 
     return 1
   fi
@@ -230,6 +392,9 @@ cleanup_one_migration() {
     if migration_was_cancelled "$migration_id"; then
       cleanup_log \
         "Skipping migration $migration_id: already cancelled."
+    elif migration_started_cutover "$migration_id"; then
+      cleanup_log \
+        "Skipping migration $migration_id: cutover cleanup already complete."
     else
       cleanup_log \
         "Skipping migration $migration_id: cleanup already complete."
@@ -238,13 +403,32 @@ cleanup_one_migration() {
     return 0
   fi
 
+  # initiate_cutover records this state before sending its API request. This
+  # closes the interruption window where the server accepts cutover but the
+  # client exits before observing success.
+  #
+  # Once cutover may have started, cancellation or terminal migration status
+  # cannot prove that the source repository was restored. Cleanup must therefore
+  # require a successful revert that explicitly confirms the source was
+  # unarchived.
+  if migration_started_cutover "$migration_id"; then
+    if cleanup_revert_cutover "$migration_id"; then
+      return 0
+    fi
+
+    cleanup_log \
+      "Cutover cleanup did not complete successfully for migration $migration_id. Refusing to downgrade this failure to cancellation or terminal-state cleanup."
+
+    return 1
+  fi
+
   if cleanup_cancel_migration "$migration_id"; then
     return 0
   fi
 
-  # Cancellation can be rejected when the migration has already settled into a
-  # terminal state. In that case, terminal status is sufficient evidence that
-  # no further control-plane cleanup is required.
+  # Cancellation can be rejected when a migration that never entered cutover
+  # has already settled into a terminal state. Only non-cutover migrations may
+  # use terminal status as evidence that no further cleanup is required.
   if cleanup_migration_is_terminal "$migration_id"; then
     if ! mark_cleanup_complete "$migration_id"; then
       cleanup_log \
@@ -254,13 +438,13 @@ cleanup_one_migration() {
     fi
 
     cleanup_log \
-      "Migration $migration_id is already terminal; no further cleanup is required."
+      "Non-cutover migration $migration_id is already terminal; no further cleanup is required."
 
     return 0
   fi
 
   cleanup_log \
-    "Failed to cancel or confirm a terminal state for migration $migration_id."
+    "Failed to cancel or confirm a terminal state for non-cutover migration $migration_id."
 
   return 1
 }
@@ -272,7 +456,7 @@ record_cleanup_result() {
     if ! record_result \
       "Cleanup" \
       "❌ fail" \
-      "One or more run-owned migrations could not be cancelled or confirmed terminal. See cleanup.log."; then
+      "One or more run-owned migrations could not be safely reverted, cancelled, or confirmed terminal before cutover. See cleanup.log."; then
       cleanup_log \
         "Failed to record the cleanup failure result."
     fi
@@ -283,7 +467,7 @@ record_cleanup_result() {
   if ! record_result \
     "Cleanup" \
     "✅ pass" \
-    "All run-owned migrations were cancelled or confirmed terminal."; then
+    "All run-owned migrations were safely reverted, cancelled, or confirmed terminal before cutover."; then
     cleanup_log \
       "Failed to record the successful cleanup result."
 
@@ -300,7 +484,7 @@ record_overall_result() {
     if ! record_result \
       "Overall result" \
       "✅ pass" \
-      "The GHES control-plane E2E scenario completed successfully."; then
+      "The GHES $E2E_MODE E2E scenario completed successfully."; then
       cleanup_log \
         "Failed to record the successful overall result."
 
@@ -313,7 +497,7 @@ record_overall_result() {
   if ! record_result \
     "Overall result" \
     "❌ fail" \
-    "The GHES control-plane E2E scenario failed. Run-scoped cleanup was attempted."; then
+    "The GHES $E2E_MODE E2E scenario failed. Run-scoped cleanup was attempted."; then
     cleanup_log \
       "Failed to record the failed overall result."
 
@@ -370,7 +554,7 @@ cleanup() {
     record_result \
       "Overall result" \
       "❌ fail" \
-      "The GHES control-plane E2E scenario could not finalize its evidence. See cleanup.log." \
+      "The GHES $E2E_MODE E2E scenario could not finalize its evidence. See cleanup.log." \
       >/dev/null 2>&1 || true
   fi
 
