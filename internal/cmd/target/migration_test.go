@@ -8,8 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/github/gh-elm/internal/elmapi"
 )
 
 func TestMigrationList(t *testing.T) {
@@ -131,6 +134,7 @@ func TestMigrationCreate(t *testing.T) {
 		assert.Equal(t, "https://source.example/octo/repo", gotBody["source_url"])
 		assert.Equal(t, []any{"octo/repo"}, gotBody["repositories"])
 		assert.Equal(t, "test migration", gotBody["description"])
+		assertCustomerTransition(t, gotBody)
 		assert.Contains(t, out, "Migration 42 created.")
 		assert.Contains(t, out, "Expires at:")
 	})
@@ -250,8 +254,10 @@ func TestMigrationStatus(t *testing.T) {
 func TestMigrationPauseResumeAbort(t *testing.T) {
 	t.Run("pause posts to the pause endpoint and prints confirmation", func(t *testing.T) {
 		var gotPath string
+		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer srv.Close()
@@ -260,13 +266,17 @@ func TestMigrationPauseResumeAbort(t *testing.T) {
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, "/enterprise/migration/42/pause", gotPath)
+		assert.Len(t, gotBody, 2)
+		assertCustomerTransition(t, gotBody)
 		assert.Contains(t, out, "Migration 42 paused.")
 	})
 
 	t.Run("resume posts to the resume endpoint and prints confirmation", func(t *testing.T) {
 		var gotPath string
+		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer srv.Close()
@@ -275,13 +285,17 @@ func TestMigrationPauseResumeAbort(t *testing.T) {
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, "/enterprise/migration/42/resume", gotPath)
+		assert.Len(t, gotBody, 2)
+		assertCustomerTransition(t, gotBody)
 		assert.Contains(t, out, "Migration 42 resumed.")
 	})
 
 	t.Run("abort posts to the abort endpoint and prints confirmation", func(t *testing.T) {
 		var gotPath string
+		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer srv.Close()
@@ -290,7 +304,28 @@ func TestMigrationPauseResumeAbort(t *testing.T) {
 			"--target-url", srv.URL, "--target-token", "tok")
 
 		assert.Equal(t, "/enterprise/migration/42/abort", gotPath)
+		assert.Len(t, gotBody, 2)
+		assertCustomerTransition(t, gotBody)
 		assert.Contains(t, out, "Migration 42 aborted.")
+	})
+
+	t.Run("each command invocation generates a fresh operation ID", func(t *testing.T) {
+		var operationIDs []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			operationIDs = append(operationIDs, assertCustomerTransition(t, body))
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		runMigration(t, "migration", "pause", "--migration-id", "42",
+			"--target-url", srv.URL, "--target-token", "tok")
+		runMigration(t, "migration", "pause", "--migration-id", "42",
+			"--target-url", srv.URL, "--target-token", "tok")
+
+		require.Len(t, operationIDs, 2)
+		assert.NotEqual(t, operationIDs[0], operationIDs[1])
 	})
 
 	t.Run("requires --migration-id", func(t *testing.T) {
@@ -376,4 +411,15 @@ func execMigration(t *testing.T, args ...string) (string, error) {
 
 	err := cmd.Execute()
 	return buf.String(), err
+}
+
+func assertCustomerTransition(t *testing.T, body map[string]any) string {
+	t.Helper()
+
+	assert.Equal(t, elmapi.TargetMigrationInitiatorCustomer, body["initiator"])
+	assert.NotContains(t, body, "actor")
+	operationID, ok := body["operation_id"].(string)
+	require.True(t, ok, "operation_id must be a string")
+	require.NoError(t, uuid.Validate(operationID))
+	return operationID
 }

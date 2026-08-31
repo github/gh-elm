@@ -8,9 +8,22 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const testTargetOperationID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+func TestNewCustomerTargetMigrationTransitionRequest(t *testing.T) {
+	first := NewCustomerTargetMigrationTransitionRequest()
+	second := NewCustomerTargetMigrationTransitionRequest()
+
+	assert.Equal(t, TargetMigrationInitiatorCustomer, first.Initiator)
+	require.NoError(t, uuid.Validate(first.OperationID))
+	require.NoError(t, uuid.Validate(second.OperationID))
+	assert.NotEqual(t, first.OperationID, second.OperationID)
+}
 
 func TestCreateTargetMigration(t *testing.T) {
 	t.Run("sends the request body and decodes the raw response", func(t *testing.T) {
@@ -31,6 +44,8 @@ func TestCreateTargetMigration(t *testing.T) {
 			Repositories:          []string{"octo/repo"},
 			Description:           "test migration",
 			ExporterMigrationGUID: "11111111-1111-1111-1111-111111111111",
+			Initiator:             TargetMigrationInitiatorCustomer,
+			OperationID:           testTargetOperationID,
 		})
 		require.NoError(t, err, "CreateTargetMigration")
 
@@ -39,6 +54,9 @@ func TestCreateTargetMigration(t *testing.T) {
 		assert.Equal(t, "https://source.example/octo/repo", gotBody["source_url"])
 		assert.Equal(t, []any{"octo/repo"}, gotBody["repositories"])
 		assert.Equal(t, "test migration", gotBody["description"])
+		assert.Equal(t, TargetMigrationInitiatorCustomer, gotBody["initiator"])
+		assert.Equal(t, testTargetOperationID, gotBody["operation_id"])
+		assert.NotContains(t, gotBody, "actor")
 		assert.JSONEq(t, `{"migrationId":"42","expiresAt":"2024-01-01T00:00:00Z"}`, string(raw))
 	})
 
@@ -303,46 +321,64 @@ func TestGetTargetMigrationStatus(t *testing.T) {
 func TestPauseResumeAbortTargetMigration(t *testing.T) {
 	t.Run("pause posts to the pause path and expects 204", func(t *testing.T) {
 		var gotPath, gotMethod string
+		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
 			gotMethod = r.Method
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer srv.Close()
 
 		c := NewClient(srv.URL, "tok")
-		err := c.PauseTargetMigration(t.Context(), 42)
+		err := c.PauseTargetMigration(t.Context(), 42, targetTransitionRequestForTest())
 		require.NoError(t, err, "PauseTargetMigration")
 		assert.Equal(t, http.MethodPost, gotMethod)
 		assert.Equal(t, "/enterprise/migration/42/pause", gotPath)
+		assert.Equal(t, map[string]any{
+			"initiator":    TargetMigrationInitiatorCustomer,
+			"operation_id": testTargetOperationID,
+		}, gotBody)
 	})
 
 	t.Run("resume posts to the resume path and expects 204", func(t *testing.T) {
 		var gotPath string
+		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer srv.Close()
 
 		c := NewClient(srv.URL, "tok")
-		err := c.ResumeTargetMigration(t.Context(), 42)
+		err := c.ResumeTargetMigration(t.Context(), 42, targetTransitionRequestForTest())
 		require.NoError(t, err, "ResumeTargetMigration")
 		assert.Equal(t, "/enterprise/migration/42/resume", gotPath)
+		assert.Equal(t, map[string]any{
+			"initiator":    TargetMigrationInitiatorCustomer,
+			"operation_id": testTargetOperationID,
+		}, gotBody)
 	})
 
 	t.Run("abort posts to the abort path and expects 204", func(t *testing.T) {
 		var gotPath string
+		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer srv.Close()
 
 		c := NewClient(srv.URL, "tok")
-		err := c.AbortTargetMigration(t.Context(), 42)
+		err := c.AbortTargetMigration(t.Context(), 42, targetTransitionRequestForTest())
 		require.NoError(t, err, "AbortTargetMigration")
 		assert.Equal(t, "/enterprise/migration/42/abort", gotPath)
+		assert.Equal(t, map[string]any{
+			"initiator":    TargetMigrationInitiatorCustomer,
+			"operation_id": testTargetOperationID,
+		}, gotBody)
 	})
 
 	t.Run("returns HTTPError with 412 on precondition failed", func(t *testing.T) {
@@ -352,10 +388,17 @@ func TestPauseResumeAbortTargetMigration(t *testing.T) {
 		defer srv.Close()
 
 		c := NewClient(srv.URL, "tok")
-		err := c.PauseTargetMigration(t.Context(), 1)
+		err := c.PauseTargetMigration(t.Context(), 1, targetTransitionRequestForTest())
 		require.Error(t, err)
 		var httpErr *HTTPError
 		require.ErrorAs(t, err, &httpErr)
 		assert.Equal(t, http.StatusPreconditionFailed, httpErr.StatusCode)
 	})
+}
+
+func targetTransitionRequestForTest() TargetMigrationTransitionRequest {
+	return TargetMigrationTransitionRequest{
+		Initiator:   TargetMigrationInitiatorCustomer,
+		OperationID: testTargetOperationID,
+	}
 }

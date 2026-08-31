@@ -146,6 +146,9 @@ func newMigrationCreateCmd() *cobra.Command {
 				Description:           description,
 				ExporterMigrationGUID: exporterGUID,
 			}
+			transition := elmapi.NewCustomerTargetMigrationTransitionRequest()
+			req.Initiator = transition.Initiator
+			req.OperationID = transition.OperationID
 			raw, err := client.CreateTargetMigration(cmd.Context(), req)
 			if err != nil {
 				return annotateAuthError(err, targetURLResolved)
@@ -240,7 +243,8 @@ func newMigrationPauseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := client.PauseTargetMigration(cmd.Context(), migrationID); err != nil {
+			req := elmapi.NewCustomerTargetMigrationTransitionRequest()
+			if err := client.PauseTargetMigration(cmd.Context(), migrationID, req); err != nil {
 				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %d paused.\n", migrationID)
@@ -280,7 +284,8 @@ func newMigrationResumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := client.ResumeTargetMigration(cmd.Context(), migrationID); err != nil {
+			req := elmapi.NewCustomerTargetMigrationTransitionRequest()
+			if err := client.ResumeTargetMigration(cmd.Context(), migrationID, req); err != nil {
 				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %d resumed.\n", migrationID)
@@ -323,7 +328,8 @@ func newMigrationAbortCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := client.AbortTargetMigration(cmd.Context(), migrationID); err != nil {
+			req := elmapi.NewCustomerTargetMigrationTransitionRequest()
+			if err := client.AbortTargetMigration(cmd.Context(), migrationID, req); err != nil {
 				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Migration %d aborted.\n", migrationID)

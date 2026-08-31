@@ -327,11 +327,14 @@ func (s *Service) CreateTargetMigration(ctx context.Context, in TargetCreateInpu
 	if err != nil {
 		return nil, err
 	}
+	transition := elmapi.NewCustomerTargetMigrationTransitionRequest()
 	return client.CreateTargetMigration(ctx, elmapi.CreateTargetMigrationRequest{
 		SourceURL:             strings.TrimSpace(in.SourceRepositoryURL),
 		Repositories:          []string{strings.TrimSpace(in.Repository)},
 		Description:           strings.TrimSpace(in.Description),
 		ExporterMigrationGUID: strings.TrimSpace(in.ExporterGUID),
+		Initiator:             transition.Initiator,
+		OperationID:           transition.OperationID,
 	})
 }
 
@@ -669,7 +672,11 @@ func (s *Service) sourceAction(ctx context.Context, id SourceMigrationID, action
 	return action(client, ctx, string(id))
 }
 
-func (s *Service) targetAction(ctx context.Context, id TargetMigrationID, action func(*elmapi.Client, context.Context, int64) error) error {
+func (s *Service) targetAction(
+	ctx context.Context,
+	id TargetMigrationID,
+	action func(*elmapi.Client, context.Context, int64, elmapi.TargetMigrationTransitionRequest) error,
+) error {
 	if err := requireTargetID(id); err != nil {
 		return err
 	}
@@ -677,7 +684,8 @@ func (s *Service) targetAction(ctx context.Context, id TargetMigrationID, action
 	if err != nil {
 		return err
 	}
-	return action(client, ctx, int64(id))
+	req := elmapi.NewCustomerTargetMigrationTransitionRequest()
+	return action(client, ctx, int64(id), req)
 }
 
 func (s *Service) reportClient(in ReportInput) (*elmapi.Client, string, error) {

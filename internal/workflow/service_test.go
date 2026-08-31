@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -137,6 +138,67 @@ func TestCheckAuthentication(t *testing.T) {
 	assert.NoError(t, service.CheckTargetAuthentication(t.Context()))
 }
 
+func TestTargetLifecycleRequests(t *testing.T) {
+	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
+
+	bodies := make(map[string]map[string]any)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		bodies[r.URL.Path] = body
+		if r.URL.Path == "/enterprise/migration/create" {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"migrationId":"42"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	service := New()
+	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
+		SourceURL:   "https://source.example",
+		TargetURL:   server.URL,
+		TargetToken: "target-token",
+	}))
+
+	_, err := service.CreateTargetMigration(t.Context(), TargetCreateInput{
+		SourceRepositoryURL: "https://source.example/octo/repo",
+		Repository:          "octo/repo",
+		Description:         "test migration",
+		ExporterGUID:        "11111111-1111-1111-1111-111111111111",
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.PauseTargetMigration(t.Context(), 42))
+	require.NoError(t, service.ResumeTargetMigration(t.Context(), 42))
+	require.NoError(t, service.AbortTargetMigration(t.Context(), 42))
+
+	createBody := bodies["/enterprise/migration/create"]
+	assert.Equal(t, "https://source.example/octo/repo", createBody["source_url"])
+	assert.Equal(t, []any{"octo/repo"}, createBody["repositories"])
+	assert.Equal(t, "test migration", createBody["description"])
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", createBody["exporter_migration_guid"])
+
+	operationIDs := make([]string, 0, 4)
+	for _, path := range []string{
+		"/enterprise/migration/create",
+		"/enterprise/migration/42/pause",
+		"/enterprise/migration/42/resume",
+		"/enterprise/migration/42/abort",
+	} {
+		body, ok := bodies[path]
+		require.True(t, ok, "missing request to %s", path)
+		operationIDs = append(operationIDs, assertWorkflowCustomerTransition(t, body))
+	}
+	assert.Len(t, map[string]struct{}{
+		operationIDs[0]: {},
+		operationIDs[1]: {},
+		operationIDs[2]: {},
+		operationIDs[3]: {},
+	}, 4, "each TUI action must use a fresh operation ID")
+}
+
 func TestRepositoryCatalog(t *testing.T) {
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
@@ -208,4 +270,15 @@ func TestListSourceMigrations(t *testing.T) {
 	require.Len(t, migrations, 1)
 	assert.Equal(t, "created-1", migrations[0].MigrationID)
 	assert.Equal(t, []string{"", "created"}, statuses)
+}
+
+func assertWorkflowCustomerTransition(t *testing.T, body map[string]any) string {
+	t.Helper()
+
+	assert.Equal(t, elmapi.TargetMigrationInitiatorCustomer, body["initiator"])
+	assert.NotContains(t, body, "actor")
+	operationID, ok := body["operation_id"].(string)
+	require.True(t, ok, "operation_id must be a string")
+	require.NoError(t, uuid.Validate(operationID))
+	return operationID
 }
