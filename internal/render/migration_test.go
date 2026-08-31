@@ -186,7 +186,11 @@ Repository states
 		status := "created"
 
 		output := MigrationStatus(elmapi.MigrationDetail{
-			CombinedState: &elmapi.CombinedState{Status: &status},
+			CombinedState: &elmapi.CombinedState{
+				Status:          &status,
+				DisplayMessage:  "Migration created - call StartMigration to begin",
+				CutoverBlockers: []string{"Migration not started"},
+			},
 		})
 
 		assert.Equal(t, `Cutover
