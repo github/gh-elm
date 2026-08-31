@@ -206,10 +206,11 @@ func TestModelUpdate(t *testing.T) {
 
 		view := model.View()
 		warningIndex := strings.Index(view, "Configuration not ready")
-		titleIndex := strings.Index(view, "GitHub Enterprise")
+		titleIndex := strings.Index(view, appTitle)
 		require.NotEqual(t, -1, warningIndex)
 		require.NotEqual(t, -1, titleIndex)
 		assert.Less(t, titleIndex, warningIndex)
+		assert.Contains(t, view, homeTitle)
 		assert.Contains(t, view, "destination URL, destination token")
 	})
 
