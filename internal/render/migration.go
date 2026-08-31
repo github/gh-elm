@@ -38,8 +38,8 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 	}
 
 	return joinSections(
-		renderMigrationSummary(v.Migration),
-		renderTargetState(v.TargetState, sourceStatus),
+		renderMigrationSummary(v.Migration, v.TargetState),
+		renderTargetState(v.TargetState, sourceStatus, v.Migration == nil),
 		renderCombinedState(v.CombinedState),
 		renderMessages(v.Messages),
 	)
@@ -53,17 +53,17 @@ func CutoverStatus(v elmapi.MigrationDetail) string {
 	return renderCombinedState(v.CombinedState)
 }
 
-func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
+func renderMigrationSummary(migration *elmapi.MigrationSummary, target *elmapi.TargetState) string {
 	if migration == nil {
 		return ""
 	}
 
 	styles := theme.New()
 	source := repositoryName(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
-	target := repositoryName(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
+	targetRepository := repositoryName(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
 	title := "Migration"
-	if source != emptyValue || target != emptyValue {
-		title = source + " → " + target
+	if source != emptyValue || targetRepository != emptyValue {
+		title = source + " → " + targetRepository
 	}
 
 	lines := []string{
@@ -73,8 +73,12 @@ func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
 	if migration.TargetMigrationID != 0 {
 		lines = append(lines, field("Target migration ID", styles.Bold.Render(strconv.FormatInt(migration.TargetMigrationID, 10))))
 	}
+	lines = append(lines, field("Visibility", pointerValue(migration.TargetVisibility)))
+	if target != nil {
+		availability := failureState(!target.TargetUnavailable, "Available", "Unavailable")
+		lines = append(lines, field("Target", availability.glyph+" "+availability.text))
+	}
 	lines = append(lines,
-		field("Visibility", pointerValue(migration.TargetVisibility)),
 		field("Created", pointerValue(migration.CreatedAt)),
 		field("Started", pointerValue(migration.StartedAt)),
 		field("Completed", completedValue(migration.CompletedAt)),
@@ -84,19 +88,23 @@ func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
 	return renderSection(title, lines...)
 }
 
-func renderTargetState(target *elmapi.TargetState, sourceStatus string) string {
+func renderTargetState(target *elmapi.TargetState, sourceStatus string, showAvailability bool) string {
 	if target == nil {
 		return ""
 	}
 
 	var sections []string
-	availability := failureState(!target.TargetUnavailable, "Target available", "Target unavailable")
 	lines := make([]string, 0, 2)
 	if status := pointerString(target.Status); normalizedValue(sourceStatus) != "created" && !terminatedStatus(status) {
 		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
 	}
-	lines = append(lines, bullet(availability.glyph, availability.text))
-	sections = append(sections, renderSection("Target", lines...))
+	if showAvailability {
+		availability := failureState(!target.TargetUnavailable, "Target available", "Target unavailable")
+		lines = append(lines, bullet(availability.glyph, availability.text))
+	}
+	if len(lines) > 0 {
+		sections = append(sections, renderSection("Target", lines...))
+	}
 
 	for _, progress := range target.RepositoryProgress {
 		sections = append(sections, renderRepositoryProgress(progress))
