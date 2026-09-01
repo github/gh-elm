@@ -242,10 +242,7 @@ func newMigrationPauseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req := elmapi.TargetMigrationTransitionRequest{
-				Initiator:   elmapi.TargetMigrationInitiatorCustomer,
-				OperationID: elmapi.NewTargetMigrationOperationID(),
-			}
+			req := elmapi.NewTargetMigrationTransitionRequest()
 			if err := client.PauseTargetMigration(cmd.Context(), migrationID, req); err != nil {
 				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
@@ -286,10 +283,7 @@ func newMigrationResumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req := elmapi.TargetMigrationTransitionRequest{
-				Initiator:   elmapi.TargetMigrationInitiatorCustomer,
-				OperationID: elmapi.NewTargetMigrationOperationID(),
-			}
+			req := elmapi.NewTargetMigrationTransitionRequest()
 			if err := client.ResumeTargetMigration(cmd.Context(), migrationID, req); err != nil {
 				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}
@@ -333,10 +327,7 @@ func newMigrationAbortCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req := elmapi.TargetMigrationTransitionRequest{
-				Initiator:   elmapi.TargetMigrationInitiatorCustomer,
-				OperationID: elmapi.NewTargetMigrationOperationID(),
-			}
+			req := elmapi.NewTargetMigrationTransitionRequest()
 			if err := client.AbortTargetMigration(cmd.Context(), migrationID, req); err != nil {
 				return annotateMigrationActionError(err, targetURLResolved, migrationID)
 			}

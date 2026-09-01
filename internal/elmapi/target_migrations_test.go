@@ -24,6 +24,13 @@ func TestNewTargetMigrationOperationID(t *testing.T) {
 	assert.NotEqual(t, first, second)
 }
 
+func TestNewTargetMigrationTransitionRequest(t *testing.T) {
+	req := NewTargetMigrationTransitionRequest()
+
+	assert.Equal(t, TargetMigrationInitiatorCustomer, req.Initiator)
+	require.NoError(t, uuid.Validate(req.OperationID))
+}
+
 func TestCreateTargetMigration(t *testing.T) {
 	t.Run("sends the request body and decodes the raw response", func(t *testing.T) {
 		var gotPath, gotMethod string

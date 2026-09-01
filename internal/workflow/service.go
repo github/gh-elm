@@ -683,10 +683,7 @@ func (s *Service) targetAction(
 	if err != nil {
 		return err
 	}
-	req := elmapi.TargetMigrationTransitionRequest{
-		Initiator:   elmapi.TargetMigrationInitiatorCustomer,
-		OperationID: elmapi.NewTargetMigrationOperationID(),
-	}
+	req := elmapi.NewTargetMigrationTransitionRequest()
 	return action(client, ctx, int64(id), req)
 }
 

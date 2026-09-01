@@ -55,6 +55,15 @@ func NewTargetMigrationOperationID() string {
 	return uuid.NewString()
 }
 
+// NewTargetMigrationTransitionRequest returns attribution metadata for one
+// customer-initiated target migration lifecycle mutation.
+func NewTargetMigrationTransitionRequest() TargetMigrationTransitionRequest {
+	return TargetMigrationTransitionRequest{
+		Initiator:   TargetMigrationInitiatorCustomer,
+		OperationID: NewTargetMigrationOperationID(),
+	}
+}
+
 // CreateTargetMigrationRequest is the body of a create-migration call against
 // the target (GHEC/Proxima) migration-management API. Repositories currently
 // accepts exactly one entry; the API does not yet support multi-repository
