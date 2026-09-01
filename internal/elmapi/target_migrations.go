@@ -48,14 +48,11 @@ type TargetMigrationTransitionRequest struct {
 	OperationID string `json:"operation_id"`
 }
 
-// NewCustomerTargetMigrationTransitionRequest returns metadata for one logical
-// customer-initiated lifecycle mutation. Callers should reuse the returned
-// request if they retry that mutation.
-func NewCustomerTargetMigrationTransitionRequest() TargetMigrationTransitionRequest {
-	return TargetMigrationTransitionRequest{
-		Initiator:   TargetMigrationInitiatorCustomer,
-		OperationID: uuid.NewString(),
-	}
+// NewTargetMigrationOperationID returns the operation ID for one logical
+// target migration lifecycle mutation. Callers should reuse it if they retry
+// that mutation.
+func NewTargetMigrationOperationID() string {
+	return uuid.NewString()
 }
 
 // CreateTargetMigrationRequest is the body of a create-migration call against

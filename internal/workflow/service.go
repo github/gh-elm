@@ -327,14 +327,13 @@ func (s *Service) CreateTargetMigration(ctx context.Context, in TargetCreateInpu
 	if err != nil {
 		return nil, err
 	}
-	transition := elmapi.NewCustomerTargetMigrationTransitionRequest()
 	return client.CreateTargetMigration(ctx, elmapi.CreateTargetMigrationRequest{
 		SourceURL:             strings.TrimSpace(in.SourceRepositoryURL),
 		Repositories:          []string{strings.TrimSpace(in.Repository)},
 		Description:           strings.TrimSpace(in.Description),
 		ExporterMigrationGUID: strings.TrimSpace(in.ExporterGUID),
-		Initiator:             transition.Initiator,
-		OperationID:           transition.OperationID,
+		Initiator:             elmapi.TargetMigrationInitiatorCustomer,
+		OperationID:           elmapi.NewTargetMigrationOperationID(),
 	})
 }
 
@@ -684,7 +683,10 @@ func (s *Service) targetAction(
 	if err != nil {
 		return err
 	}
-	req := elmapi.NewCustomerTargetMigrationTransitionRequest()
+	req := elmapi.TargetMigrationTransitionRequest{
+		Initiator:   elmapi.TargetMigrationInitiatorCustomer,
+		OperationID: elmapi.NewTargetMigrationOperationID(),
+	}
 	return action(client, ctx, int64(id), req)
 }
 

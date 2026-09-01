@@ -15,14 +15,13 @@ import (
 
 const testTargetOperationID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 
-func TestNewCustomerTargetMigrationTransitionRequest(t *testing.T) {
-	first := NewCustomerTargetMigrationTransitionRequest()
-	second := NewCustomerTargetMigrationTransitionRequest()
+func TestNewTargetMigrationOperationID(t *testing.T) {
+	first := NewTargetMigrationOperationID()
+	second := NewTargetMigrationOperationID()
 
-	assert.Equal(t, TargetMigrationInitiatorCustomer, first.Initiator)
-	require.NoError(t, uuid.Validate(first.OperationID))
-	require.NoError(t, uuid.Validate(second.OperationID))
-	assert.NotEqual(t, first.OperationID, second.OperationID)
+	require.NoError(t, uuid.Validate(first))
+	require.NoError(t, uuid.Validate(second))
+	assert.NotEqual(t, first, second)
 }
 
 func TestCreateTargetMigration(t *testing.T) {
