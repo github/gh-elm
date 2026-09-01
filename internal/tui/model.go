@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -552,6 +553,9 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case key.Matches(msg, keys.Refresh):
+		if m.screen == screenSourceDetail && !m.sourceMigrationStarted() {
+			return m, nil
+		}
 		return m.refresh()
 	case key.Matches(msg, keys.Open):
 		return m.activate()
@@ -1018,14 +1022,13 @@ func (m *Model) activateSourceAction() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) sourceActionItems() []actionItem {
-	actions := []actionItem{
-		{id: "refresh", label: "Refresh", shortcut: "r"},
-		{id: "messages", label: "Messages", shortcut: "m"},
-	}
-
-	status := ""
-	if m.sourceDetail != nil && m.sourceDetail.Migration != nil && m.sourceDetail.Migration.Status != nil {
-		status = normalizedStatus(*m.sourceDetail.Migration.Status)
+	status := m.sourceMigrationStatus()
+	var actions []actionItem
+	if m.sourceMigrationStarted() {
+		actions = append(actions,
+			actionItem{id: "refresh", label: "Refresh", shortcut: "r"},
+			actionItem{id: "messages", label: "Messages", shortcut: "m"},
+		)
 	}
 	readyForCutover := m.sourceDetail != nil &&
 		m.sourceDetail.CombinedState != nil &&
@@ -1057,6 +1060,17 @@ func (m *Model) sourceActionItems() []actionItem {
 		actions = append(actions, actionItem{id: "destination", label: "Details", shortcut: "d"})
 	}
 	return actions
+}
+
+func (m *Model) sourceMigrationStatus() string {
+	if m.sourceDetail == nil || m.sourceDetail.Migration == nil || m.sourceDetail.Migration.Status == nil {
+		return ""
+	}
+	return normalizedStatus(*m.sourceDetail.Migration.Status)
+}
+
+func (m *Model) sourceMigrationStarted() bool {
+	return m.sourceMigrationStatus() != "created"
 }
 
 func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
@@ -1454,6 +1468,14 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			runes := []rune(*field.text)
 			*field.text = string(runes[:len(runes)-1])
 		}
+	case "alt+backspace", "alt+delete":
+		if onActions {
+			return m, nil
+		}
+		field := &m.form.fields[m.form.cursor]
+		if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) {
+			*field.text = deletePreviousChunk(*field.text)
+		}
 	case "enter":
 		if m.form.cursor < len(m.form.fields)-1 {
 			m.form.cursor++
@@ -1477,6 +1499,18 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, command
 	}
 	return m, nil
+}
+
+func deletePreviousChunk(value string) string {
+	runes := []rune(value)
+	end := len(runes)
+	for end > 0 && unicode.IsSpace(runes[end-1]) {
+		end--
+	}
+	for end > 0 && !unicode.IsSpace(runes[end-1]) {
+		end--
+	}
+	return string(runes[:end])
 }
 
 func cycleOption(field *formField, delta int) {

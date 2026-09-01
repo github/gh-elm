@@ -58,7 +58,10 @@ func (m *Model) View() string {
 	case screenSourceDetail:
 		title = fmt.Sprintf("Migration %s", m.sourceID)
 		body = m.sourceDetailView()
-		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Back)
+		if m.sourceMigrationStarted() {
+			help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		}
 	case screenTargetList:
 		title = "Advanced destination migrations"
 		body = m.targetListView()
@@ -95,9 +98,9 @@ func (m *Model) View() string {
 	case screenForm:
 		title = m.form.title
 		body = m.formView()
-		help = "tab/↑/↓ fields • type edit • ←/→ choose • space toggle • enter continue • esc cancel"
+		help = "tab/↑/↓ fields • type edit • alt+del word • ←/→ choose • space toggle • enter continue • esc cancel"
 		if len(m.form.actions) > 0 {
-			help = "tab/↑/↓ fields/actions • type edit • ←/→ choose • space toggle • enter activate • esc cancel"
+			help = "tab/↑/↓ fields/actions • type edit • alt+del word • ←/→ choose • space toggle • enter activate • esc cancel"
 		}
 	case screenResult:
 		title = m.result.title
