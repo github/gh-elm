@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // targetMigrationBasePath is the base path for the target (GHEC/Proxima)
@@ -35,6 +37,33 @@ const (
 // IterTargetMigrations.
 const targetMigrationsPageSize = 100
 
+// TargetMigrationInitiatorCustomer identifies lifecycle mutations initiated by
+// a customer-operated gh-elm invocation.
+const TargetMigrationInitiatorCustomer = "customer"
+
+// TargetMigrationTransitionRequest attributes a target migration lifecycle
+// mutation to the customer invocation that caused it.
+type TargetMigrationTransitionRequest struct {
+	Initiator   string `json:"initiator"`
+	OperationID string `json:"operation_id"`
+}
+
+// NewTargetMigrationOperationID returns the operation ID for one logical
+// target migration lifecycle mutation. Callers should reuse it if they retry
+// that mutation.
+func NewTargetMigrationOperationID() string {
+	return uuid.NewString()
+}
+
+// NewTargetMigrationTransitionRequest returns attribution metadata for one
+// customer-initiated target migration lifecycle mutation.
+func NewTargetMigrationTransitionRequest() TargetMigrationTransitionRequest {
+	return TargetMigrationTransitionRequest{
+		Initiator:   TargetMigrationInitiatorCustomer,
+		OperationID: NewTargetMigrationOperationID(),
+	}
+}
+
 // CreateTargetMigrationRequest is the body of a create-migration call against
 // the target (GHEC/Proxima) migration-management API. Repositories currently
 // accepts exactly one entry; the API does not yet support multi-repository
@@ -44,6 +73,8 @@ type CreateTargetMigrationRequest struct {
 	Repositories          []string `json:"repositories"`
 	Description           string   `json:"description,omitempty"`
 	ExporterMigrationGUID string   `json:"exporter_migration_guid,omitempty"`
+	Initiator             string   `json:"initiator"`
+	OperationID           string   `json:"operation_id"`
 }
 
 // CreateTargetMigration creates a migration on the target (GHEC/Proxima) side
@@ -204,9 +235,9 @@ func (c *Client) GetTargetMigrationStatus(ctx context.Context, migrationID int64
 
 // PauseTargetMigration pauses a migration on the target (GHEC/Proxima) side.
 // POST /enterprise/migration/{id}/pause. Returns 204.
-func (c *Client) PauseTargetMigration(ctx context.Context, migrationID int64) error {
+func (c *Client) PauseTargetMigration(ctx context.Context, migrationID int64, req TargetMigrationTransitionRequest) error {
 	path := fmt.Sprintf("%s/%d/pause", targetMigrationBasePath, migrationID)
-	if err := c.post(ctx, path, nil, nil, http.StatusNoContent); err != nil {
+	if err := c.post(ctx, path, req, nil, http.StatusNoContent); err != nil {
 		return fmt.Errorf("pausing target migration: %w", err)
 	}
 	return nil
@@ -214,9 +245,9 @@ func (c *Client) PauseTargetMigration(ctx context.Context, migrationID int64) er
 
 // ResumeTargetMigration resumes a paused migration on the target side.
 // POST /enterprise/migration/{id}/resume. Returns 204.
-func (c *Client) ResumeTargetMigration(ctx context.Context, migrationID int64) error {
+func (c *Client) ResumeTargetMigration(ctx context.Context, migrationID int64, req TargetMigrationTransitionRequest) error {
 	path := fmt.Sprintf("%s/%d/resume", targetMigrationBasePath, migrationID)
-	if err := c.post(ctx, path, nil, nil, http.StatusNoContent); err != nil {
+	if err := c.post(ctx, path, req, nil, http.StatusNoContent); err != nil {
 		return fmt.Errorf("resuming target migration: %w", err)
 	}
 	return nil
@@ -224,9 +255,9 @@ func (c *Client) ResumeTargetMigration(ctx context.Context, migrationID int64) e
 
 // AbortTargetMigration aborts a migration on the target side. This is a
 // terminal action. POST /enterprise/migration/{id}/abort. Returns 204.
-func (c *Client) AbortTargetMigration(ctx context.Context, migrationID int64) error {
+func (c *Client) AbortTargetMigration(ctx context.Context, migrationID int64, req TargetMigrationTransitionRequest) error {
 	path := fmt.Sprintf("%s/%d/abort", targetMigrationBasePath, migrationID)
-	if err := c.post(ctx, path, nil, nil, http.StatusNoContent); err != nil {
+	if err := c.post(ctx, path, req, nil, http.StatusNoContent); err != nil {
 		return fmt.Errorf("aborting target migration: %w", err)
 	}
 	return nil
