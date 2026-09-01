@@ -190,6 +190,7 @@ type resultState struct {
 	body             string
 	parent           screen
 	popup            bool
+	blankBackground  bool
 	refresh          bool
 	reloadSourceList bool
 }
@@ -230,20 +231,21 @@ type Model struct {
 	targetListCancel context.CancelFunc
 	targetListGen    uint64
 
-	configuration     *workflow.Configuration
-	configurationErr  error
-	configGeneration  uint64
-	sourceAuthChecked bool
-	sourceAuthErr     error
-	targetAuthChecked bool
-	targetAuthErr     error
-	picker            pickerState
-	pickerGeneration  uint64
-	pickerInfoOpen    bool
-	form              formState
-	confirm           confirmState
-	alert             alertState
-	result            resultState
+	configuration        *workflow.Configuration
+	configurationErr     error
+	configurationLoading bool
+	configGeneration     uint64
+	sourceAuthChecked    bool
+	sourceAuthErr        error
+	targetAuthChecked    bool
+	targetAuthErr        error
+	picker               pickerState
+	pickerGeneration     uint64
+	pickerInfoOpen       bool
+	form                 formState
+	confirm              confirmState
+	alert                alertState
+	result               resultState
 }
 
 // New creates the main TUI model.
@@ -254,12 +256,13 @@ func New(ctx context.Context, svc service) *Model {
 	searchInput.CharLimit = 160
 
 	model := &Model{
-		ctx:          ctx,
-		service:      svc,
-		styles:       theme.New(),
-		screen:       screenHome,
-		targetParent: screenTargetList,
-		searchInput:  searchInput,
+		ctx:                  ctx,
+		service:              svc,
+		styles:               theme.New(),
+		screen:               screenHome,
+		targetParent:         screenTargetList,
+		searchInput:          searchInput,
+		configurationLoading: true,
 	}
 	model.syncHomeCursor()
 	return model
@@ -309,8 +312,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err == nil {
 			m.sourceMigrations = msg.migrations
+			if m.sourceMigrations == nil {
+				m.sourceMigrations = []elmapi.MigrationSummary{}
+			}
 			if m.screen == screenSourceList {
-				m.cursor = 0
+				m.cursor = min(max(m.cursor, 0), max(len(m.visibleSourceMigrations())-1, 0))
 			}
 		}
 	case sourceDetailMsg:
@@ -369,6 +375,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.configGeneration {
 			return m, nil
 		}
+		m.configurationLoading = false
 		m.configurationErr = msg.err
 		if m.screen == screenConfiguration {
 			m.loading = false
@@ -444,11 +451,17 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.err = nil
+		var command tea.Cmd
 		if msg.err != nil {
 			m.result = resultState{title: "Action failed", body: msg.err.Error(), parent: msg.parent}
+			if msg.refresh && msg.parent == screenSourceDetail {
+				command = tea.Batch(m.loadSourceDetailCmd(), m.startSourceListLoad())
+			}
 		} else {
 			if msg.sourceID != "" {
 				m.sourceID = msg.sourceID
+				m.sourceDetail = nil
+				m.targetID = 0
 			}
 			if msg.reloadSourceList {
 				m.invalidateSourceList()
@@ -458,6 +471,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				body:             msg.body,
 				parent:           msg.parent,
 				popup:            msg.popup,
+				blankBackground:  msg.sourceID != "",
 				refresh:          msg.refresh,
 				reloadSourceList: msg.reloadSourceList,
 			}
@@ -465,6 +479,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenResult
 		m.cursor = 0
 		m.resetViewport()
+		return m, command
 	case confirmRequestMsg:
 		m.loading = false
 		m.confirm = confirmState{
@@ -736,7 +751,7 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		}
 		switch actions[m.cursor].id {
 		case "migrations":
-			m.screen, m.loading, m.err = screenSourceList, true, nil
+			m.screen, m.loading, m.err = screenSourceList, m.sourceMigrations == nil, nil
 			return m, m.startSourceListLoad()
 		case "create":
 			return m.openSourceCreateForm(screenHome)
@@ -802,6 +817,7 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.cursor = 0
 	m.actionFocus = 0
+	var command tea.Cmd
 	switch m.screen {
 	case screenSourceList:
 		m.sourceSearch = false
@@ -812,6 +828,7 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 		m.screen = screenHome
 	case screenSourceDetail:
 		m.screen = screenSourceList
+		command = m.startSourceListLoad()
 	case screenTargetDetail:
 		m.screen = m.targetParent
 	}
@@ -819,7 +836,7 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 		m.homeCursorSet = false
 		m.syncHomeCursor()
 	}
-	return m, nil
+	return m, command
 }
 
 func (m *Model) refresh() (tea.Model, tea.Cmd) {
@@ -827,7 +844,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 	m.refreshingDetail = false
 	switch m.screen {
 	case screenSourceList:
-		m.loading = true
+		m.loading = false
 		command := m.startSourceListLoad()
 		return m, command
 	case screenSourceDetail:
@@ -935,6 +952,20 @@ func (m *Model) configurationReady() bool {
 		m.sourceAuthErr == nil &&
 		m.targetAuthChecked &&
 		m.targetAuthErr == nil
+}
+
+func (m *Model) configurationCheckPending() bool {
+	if m.configurationLoading {
+		return true
+	}
+	if m.configuration == nil || m.configurationErr != nil {
+		return false
+	}
+	sourceURL, sourceTokenSet := effectiveSourceConfiguration(m.configuration)
+	targetURL, targetTokenSet := effectiveTargetConfiguration(m.configuration)
+	sourcePending := validHTTPURL(sourceURL) && sourceTokenSet && !m.sourceAuthChecked
+	targetPending := validHTTPURL(targetURL) && targetTokenSet && !m.targetAuthChecked
+	return sourcePending || targetPending
 }
 
 func (m *Model) moveHomeCursor(delta int) {
@@ -1696,17 +1727,18 @@ func (m *Model) createSourceMigrationCmd(input workflow.SourceCreateInput) tea.C
 			return actionMsg{parent: screenSourceList, err: err}
 		}
 		sourceID := workflow.SourceMigrationID(result.Migration.MigrationID)
-		body := render.MigrationCreate(result.Migration)
+		title := "Migration created"
 		if result.Started {
-			body = fmt.Sprintf("Migration %s created and started.", result.Migration.MigrationID)
+			title = "Migration created and started"
 		}
 		return actionMsg{
-			title:    "Migration created",
-			body:     body,
-			parent:   screenSourceDetail,
-			popup:    true,
-			refresh:  true,
-			sourceID: sourceID,
+			title:            title,
+			body:             m.migrationCreatedBody(result.Migration),
+			parent:           screenSourceDetail,
+			popup:            true,
+			refresh:          true,
+			reloadSourceList: true,
+			sourceID:         sourceID,
 		}
 	}
 }
@@ -2129,6 +2161,7 @@ func (m *Model) loadTargetDetailCmd() tea.Cmd {
 }
 
 func (m *Model) startConfigurationLoad() tea.Cmd {
+	m.configurationLoading = true
 	m.configGeneration++
 	generation := m.configGeneration
 	return func() tea.Msg {

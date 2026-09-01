@@ -444,6 +444,9 @@ func statusGlyph(status string) string {
 func statusText(status string) string {
 	styles := theme.New()
 	text := friendlyValue(status)
+	if normalizedValue(status) == "terminated" {
+		text = "Cancelled"
+	}
 	switch strings.ToLower(status) {
 	case "completed", "complete", "success", "succeeded", "ready_for_cutover", "ready for cutover":
 		return styles.Success.Bold(true).Render(text)

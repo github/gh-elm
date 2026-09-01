@@ -235,7 +235,7 @@ func (m Model) phaseDetail(p Phase) string {
 	case p == PhaseCompleted && m.basePhase == PhaseCompleted && m.overlay == OverlayNone:
 		return m.completedDetail()
 	case p == PhaseCompleted && m.overlay == OverlayTerminated:
-		return m.styles.Failure.Render("Migration terminated")
+		return m.styles.Failure.Render("Migration cancelled")
 	case p == PhaseCompleted && m.overlay == OverlayFailed:
 		return m.failedDetail()
 	}

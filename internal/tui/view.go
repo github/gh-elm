@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/render"
@@ -21,7 +22,7 @@ const (
 // View implements tea.Model.
 func (m *Model) View() string {
 	if m.width > 0 && (m.width < 48 || m.height < 12) {
-		return m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit")
+		return m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit", "", "")
 	}
 
 	current := m.screen
@@ -34,15 +35,18 @@ func (m *Model) View() string {
 	if alerting {
 		current = m.alert.parent
 	}
-	if resultPopup {
+	if resultPopup && !m.result.blankBackground {
 		current = m.result.parent
 	}
 
-	var title, body, help string
+	var title, body, help, topLine, bottomLine string
 	switch current {
 	case screenHome:
 		title = homeTitle
 		body = m.menu(m.homeActionItems())
+		if m.configurationCheckPending() {
+			body += "\n\n" + m.styles.Muted.Render("… Checking configuration…")
+		}
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Help, keys.Quit)
 	case screenSourceList:
 		title = "Migrations"
@@ -50,13 +54,15 @@ func (m *Model) View() string {
 			title += " · search: " + m.searchInput.View()
 		}
 		body = m.sourceListView()
+		topLine = m.sourceListTopLine()
+		bottomLine = m.sourceListBottomLine()
 		if m.sourceSearch {
 			help = "type to filter • " + helpLine(keys.Up, keys.Down, keys.Open, keys.Back)
 		} else {
 			help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Search, keys.Density, keys.Refresh, keys.Back)
 		}
 	case screenSourceDetail:
-		title = fmt.Sprintf("Migration %s", m.sourceID)
+		title = m.sourceDetailTitle()
 		body = m.sourceDetailView()
 		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Back)
 		if m.sourceMigrationStarted() {
@@ -107,14 +113,22 @@ func (m *Model) View() string {
 		body = m.result.body
 		help = helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown, keys.Back)
 	}
+	if resultPopup && m.result.blankBackground {
+		title, body, help = "", "", ""
+	}
 
 	if m.showHelp && !confirming && !alerting && !resultPopup {
 		title = "Keyboard help"
 		body = m.fullHelpView()
 		help = "? close • q quit"
+		topLine, bottomLine = "", ""
 	}
-	if m.loading && !m.refreshingDetail {
+	showingRefreshedDetail := m.refreshingDetail &&
+		(current == screenSourceDetail && m.sourceDetail != nil ||
+			current == screenTargetDetail && m.targetDetail != nil)
+	if m.loading && !showingRefreshedDetail {
 		body = m.styles.Active.Render("Loading…")
+		topLine, bottomLine = "", ""
 	}
 	if m.err != nil {
 		body += "\n\n" + m.styles.Failure.Render("Error: "+m.err.Error())
@@ -137,7 +151,7 @@ func (m *Model) View() string {
 	} else if alerting || resultPopup {
 		help = "enter/esc close"
 	}
-	rendered := m.frame(title, body, help)
+	rendered := m.frame(title, body, help, topLine, bottomLine)
 	if confirming {
 		rendered = overlayCenter(
 			rendered,
@@ -172,7 +186,7 @@ func (m *Model) View() string {
 	return rendered
 }
 
-func (m *Model) frame(title, body, help string) string {
+func (m *Model) frame(title, body, help, topLine, bottomLine string) string {
 	contentWidth := m.contentWidth()
 	brand := m.styles.Primary.Bold(true).Render(appTitle)
 	subtitle := m.styles.Muted.Bold(false).Render(title)
@@ -185,11 +199,27 @@ func (m *Model) frame(title, body, help string) string {
 		warningBlock = "\n" + m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
 			warning
 	}
-	content := lipgloss.NewStyle().Width(contentWidth).Height(m.bodyHeight()).Render(body)
-	footer := m.styles.Muted.Render(help)
+	contentHeight := m.bodyHeight()
+	content := lipgloss.NewStyle().Width(contentWidth).Height(contentHeight).Render(body)
+	footer := m.footer(help, bottomLine, contentWidth)
+	bodySeparator := "\n\n"
+	if topLine != "" {
+		bodySeparator = "\n" + topLine + "\n"
+	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(
-		header + warningBlock + "\n\n" + content + "\n" + footer,
+		header + warningBlock + bodySeparator + content + "\n" + footer,
 	)
+}
+
+func (m *Model) footer(help, status string, width int) string {
+	if status == "" {
+		return m.styles.Muted.Render(help)
+	}
+
+	statusWidth := lipgloss.Width(status)
+	help = ansi.Truncate(help, max(0, width-statusWidth-2), "")
+	gap := max(1, width-lipgloss.Width(help)-statusWidth)
+	return m.styles.Muted.Render(help) + strings.Repeat(" ", gap) + status
 }
 
 func (m *Model) displayWidth() int {
@@ -320,14 +350,25 @@ func (m *Model) sourceListView() string {
 		}
 		builder.WriteString(m.sourceMigrationCard(migrations[index], index == m.cursor))
 	}
-	if end < len(migrations) {
-		builder.WriteString("\n")
-		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(migrations)-end)))
-	}
-	if start > 0 {
-		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
-	}
 	return builder.String()
+}
+
+func (m *Model) sourceListTopLine() string {
+	migrations := m.visibleSourceMigrations()
+	start, _ := m.sourceListBounds(len(migrations))
+	if start == 0 {
+		return ""
+	}
+	return m.styles.Muted.Render(fmt.Sprintf("↑ %d more", start))
+}
+
+func (m *Model) sourceListBottomLine() string {
+	migrations := m.visibleSourceMigrations()
+	_, end := m.sourceListBounds(len(migrations))
+	if end == len(migrations) {
+		return ""
+	}
+	return m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(migrations)-end))
 }
 
 func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected bool) string {
@@ -336,8 +377,8 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 		status = *migration.Status
 	}
 	glyph, statusText := m.statusDisplay(status)
-	source := migration.SourceOrganizationLogin + "/" + migration.SourceRepositoryName
-	target := migration.TargetOrganizationLogin + "/" + migration.TargetRepositoryName
+	source := repositoryCoordinate(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
+	target := repositoryCoordinate(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
 
 	var card strings.Builder
 	fmt.Fprintf(&card, "%s %s  %s\n", glyph, statusText, m.repositoryChip(source+" → "+target))
@@ -363,9 +404,38 @@ func (m *Model) sourceDetailView() string {
 	if m.sourceDetail != nil {
 		detail := *m.sourceDetail
 		detail.Messages = nil
-		return render.MigrationStatus(detail)
+		body := render.MigrationStatus(detail)
+		if detail.Migration != nil {
+			if _, bodyWithoutTitle, found := strings.Cut(body, "\n"); found {
+				return bodyWithoutTitle
+			}
+		}
+		return body
 	}
 	return ""
+}
+
+func (m *Model) sourceDetailTitle() string {
+	if m.sourceDetail != nil && m.sourceDetail.Migration != nil {
+		migration := m.sourceDetail.Migration
+		source := repositoryCoordinate(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
+		target := repositoryCoordinate(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
+		if source != "" && target != "" {
+			return "Migration · " + source + " → " + target
+		}
+	}
+	return fmt.Sprintf("Migration %s", m.sourceID)
+}
+
+func repositoryCoordinate(owner, name string) string {
+	switch {
+	case owner == "":
+		return name
+	case name == "":
+		return owner
+	default:
+		return owner + "/" + name
+	}
 }
 
 func (m *Model) sourceMessagesView() string {
@@ -373,6 +443,22 @@ func (m *Model) sourceMessagesView() string {
 		return "No messages reported."
 	}
 	return render.MigrationStatus(elmapi.MigrationDetail{Messages: m.sourceDetail.Messages})
+}
+
+func (m *Model) migrationCreatedBody(migration elmapi.CreateMigrationResponse) string {
+	id := migration.MigrationID
+	if id == "" {
+		id = "—"
+	}
+	expires := "—"
+	if migration.ExpiresAt != nil && *migration.ExpiresAt != "" {
+		expires = *migration.ExpiresAt
+	}
+	row := func(label, value string) string {
+		return m.styles.Muted.Render(fmt.Sprintf("%-12s", label)) + "  " + value
+	}
+	return row("Migration ID", m.styles.Bold.Render(id)) + "\n" +
+		row("Expires", expires)
 }
 
 func (m *Model) targetListView() string {
@@ -383,7 +469,8 @@ func (m *Model) targetListView() string {
 	capacity := max(1, (m.bodyHeight()-2)/4)
 	start, end := pickerBounds(m.cursor, len(m.targetMigrations), capacity)
 	if start > 0 {
-		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)))
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more", start)))
+		_ = builder.WriteByte('\n')
 	}
 	for index := start; index < end; index++ {
 		migration := m.targetMigrations[index]
@@ -716,7 +803,7 @@ func (m *Model) pickerView() string {
 	}
 	list := builder.String()
 	if start > 0 {
-		list = m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + list
+		list = m.styles.Muted.Render(fmt.Sprintf("↑ %d more", start)) + "\n" + list
 	}
 	if m.picker.kind != pickerSourceRepository || m.contentWidth() < 92 {
 		return list
@@ -873,9 +960,7 @@ func (m *Model) statusDisplay(status string) (glyph, label string) {
 		return m.styles.Warning.Render("●"), m.styles.Warning.Render("Paused")
 	case "failed":
 		return m.styles.Failure.Render("✗"), m.styles.Failure.Render("Failed")
-	case "terminated":
-		return m.styles.Failure.Render("⊘"), m.styles.Failure.Render("Terminated")
-	case "cancelled":
+	case "terminated", "cancelled", "canceled":
 		return m.styles.Failure.Render("⊘"), m.styles.Failure.Render("Cancelled")
 	default:
 		return m.styles.Muted.Render("●"), m.styles.Muted.Render(friendly(status))
@@ -893,17 +978,13 @@ func (m *Model) sourceListBounds(total int) (start, end int) {
 	if total == 0 {
 		return 0, 0
 	}
-	linesPerCard := 4
+	linesPerCard := 3
 	if m.compactSourceList() {
 		linesPerCard = 2
 	}
-	capacity := max(1, (m.bodyHeight()-1)/linesPerCard)
-	start = max(0, m.cursor-capacity+1)
-	end = min(total, start+capacity)
-	if end-start < capacity {
-		start = max(0, end-capacity)
-	}
-	return start, end
+	height := m.bodyHeight()
+	capacity := max(1, height/linesPerCard)
+	return pickerBounds(m.cursor, total, capacity)
 }
 
 func (m *Model) viewportView(body string, height int) string {

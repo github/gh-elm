@@ -138,4 +138,17 @@ func TestView(t *testing.T) {
 		m := New("id", time.Second, nil)
 		assert.Contains(t, m.View(), "Loading migration status")
 	})
+
+	t.Run("terminated migration displays as cancelled", func(t *testing.T) {
+		m := New("id", time.Second, nil)
+		m.detail = combined(combinedTerminated)
+		m.basePhase, m.overlay = DerivePhase(m.detail)
+
+		output := m.View()
+
+		assert.Equal(t, "Cancelled", OverlayTerminated.String())
+		assert.Contains(t, output, "Migration cancelled")
+		assert.NotContains(t, output, "Terminated")
+		assert.NotContains(t, output, "Migration terminated")
+	})
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -31,6 +32,7 @@ func TestModelUpdate(t *testing.T) {
 		}
 		assert.NotContains(t, model.View(), "(disabled)")
 		assert.Contains(t, model.View(), model.styles.Disabled.Render("Migrations"))
+		assert.Contains(t, model.View(), "Checking configuration…")
 		assert.Equal(t, 3, model.cursor)
 
 		model.cursor = 0
@@ -55,6 +57,33 @@ func TestModelUpdate(t *testing.T) {
 		for _, action := range model.homeActionItems() {
 			assert.False(t, action.disabled)
 		}
+		assert.NotContains(t, model.View(), "Checking configuration…")
+	})
+
+	t.Run("home shows configuration checking through authentication preflight", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.configGeneration = 1
+
+		updated, _ := model.Update(configMsg{
+			configuration: &workflow.Configuration{
+				SourceURL:      "https://source.example",
+				SourceTokenSet: true,
+				TargetURL:      "https://target.example",
+				TargetTokenSet: true,
+			},
+			generation: 1,
+		})
+		model = updated.(*Model)
+
+		assert.Contains(t, model.View(), "Checking configuration…")
+
+		updated, _ = model.Update(sourceAuthenticationMsg{generation: 1})
+		model = updated.(*Model)
+		assert.Contains(t, model.View(), "Checking configuration…")
+
+		updated, _ = model.Update(targetAuthenticationMsg{generation: 1})
+		model = updated.(*Model)
+		assert.NotContains(t, model.View(), "Checking configuration…")
 	})
 
 	t.Run("opening migrations fetches a fresh list with every status", func(t *testing.T) {
@@ -72,7 +101,9 @@ func TestModelUpdate(t *testing.T) {
 		model = updated.(*Model)
 
 		assert.Equal(t, screenSourceList, model.screen)
-		assert.True(t, model.loading)
+		assert.False(t, model.loading)
+		assert.Contains(t, model.View(), "stale")
+		assert.NotContains(t, model.View(), "Loading…")
 		require.NotNil(t, command)
 
 		updated, _ = model.Update(command())
@@ -81,6 +112,88 @@ func TestModelUpdate(t *testing.T) {
 		assert.False(t, model.loading)
 		require.Len(t, model.sourceMigrations, 1)
 		assert.Equal(t, "fresh", model.sourceMigrations[0].MigrationID)
+	})
+
+	t.Run("first migration list load shows loading", func(t *testing.T) {
+		service := &fakeService{
+			listSourceMigrations: func(context.Context, string) ([]elmapi.MigrationSummary, error) {
+				return nil, nil
+			},
+		}
+		model := New(t.Context(), service)
+		setConfigurationReady(model)
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+
+		assert.True(t, model.loading)
+		assert.Contains(t, model.View(), "Loading…")
+		require.NotNil(t, command)
+	})
+
+	t.Run("refreshing migrations keeps the current list visible", func(t *testing.T) {
+		service := &fakeService{
+			listSourceMigrations: func(context.Context, string) ([]elmapi.MigrationSummary, error) {
+				return []elmapi.MigrationSummary{
+					{MigrationID: "fresh-1"},
+					{MigrationID: "fresh-2"},
+				}, nil
+			},
+		}
+		model := New(t.Context(), service)
+		model.screen = screenSourceList
+		model.sourceMigrations = []elmapi.MigrationSummary{
+			{MigrationID: "stale-1"},
+			{MigrationID: "stale-2"},
+		}
+		model.cursor = 1
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model = updated.(*Model)
+
+		require.NotNil(t, command)
+		assert.False(t, model.loading)
+		assert.Contains(t, model.View(), "stale-2")
+		assert.NotContains(t, model.View(), "Loading…")
+
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+
+		assert.Contains(t, model.View(), "fresh-2")
+		assert.NotContains(t, model.View(), "stale-2")
+		assert.Equal(t, 1, model.cursor)
+	})
+
+	t.Run("returning to migrations refreshes the list in place", func(t *testing.T) {
+		failed := elmapi.StatusFailed
+		service := &fakeService{
+			listSourceMigrations: func(_ context.Context, status string) ([]elmapi.MigrationSummary, error) {
+				assert.Equal(t, elmapi.StatusAll, status)
+				return []elmapi.MigrationSummary{{MigrationID: "source-1", Status: &failed}}, nil
+			},
+		}
+		model := New(t.Context(), service)
+		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
+		setSourceStatus(model, elmapi.StatusCreated)
+		model.sourceMigrations = []elmapi.MigrationSummary{*model.sourceDetail.Migration}
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		model = updated.(*Model)
+
+		assert.Equal(t, screenSourceList, model.screen)
+		require.NotNil(t, command)
+		assert.False(t, model.loading)
+		assert.Contains(t, model.View(), "Created")
+		assert.NotContains(t, model.View(), "Loading…")
+
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+
+		require.Len(t, model.sourceMigrations, 1)
+		require.NotNil(t, model.sourceMigrations[0].Status)
+		assert.Equal(t, elmapi.StatusFailed, *model.sourceMigrations[0].Status)
+		assert.Contains(t, model.View(), "Failed")
 	})
 
 	t.Run("runtime configuration loss returns home through an alert", func(t *testing.T) {
@@ -467,6 +580,52 @@ func TestModelUpdate(t *testing.T) {
 		assert.Contains(t, model.View(), assert.AnError.Error())
 	})
 
+	t.Run("failed source action refreshes detail and migration list in the background", func(t *testing.T) {
+		failed := elmapi.StatusFailed
+		service := &fakeService{
+			getSourceMigration: func(_ context.Context, id workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
+				assert.Equal(t, workflow.SourceMigrationID("source-1"), id)
+				return &elmapi.MigrationDetail{
+					Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &failed},
+				}, nil
+			},
+			listSourceMigrations: func(_ context.Context, status string) ([]elmapi.MigrationSummary, error) {
+				assert.Equal(t, elmapi.StatusAll, status)
+				return []elmapi.MigrationSummary{{MigrationID: "source-1", Status: &failed}}, nil
+			},
+		}
+		model := New(t.Context(), service)
+		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
+		setSourceStatus(model, elmapi.StatusCreated)
+		model.sourceMigrations = []elmapi.MigrationSummary{*model.sourceDetail.Migration}
+
+		updated, command := model.Update(actionMsg{
+			parent:  screenSourceDetail,
+			refresh: true,
+			err:     errors.New("starting migration: HTTP 422"),
+		})
+		model = updated.(*Model)
+
+		assert.Equal(t, screenResult, model.screen)
+		assert.Contains(t, model.View(), "HTTP 422")
+		require.NotNil(t, command)
+
+		batch, ok := command().(tea.BatchMsg)
+		require.True(t, ok)
+		for _, batchCommand := range batch {
+			updated, _ = model.Update(batchCommand())
+			model = updated.(*Model)
+		}
+
+		assert.Equal(t, screenResult, model.screen)
+		require.NotNil(t, model.sourceDetail.Migration.Status)
+		assert.Equal(t, elmapi.StatusFailed, *model.sourceDetail.Migration.Status)
+		require.Len(t, model.sourceMigrations, 1)
+		require.NotNil(t, model.sourceMigrations[0].Status)
+		assert.Equal(t, elmapi.StatusFailed, *model.sourceMigrations[0].Status)
+	})
+
 	t.Run("configuration save reloads source migrations", func(t *testing.T) {
 		svc := &fakeService{
 			saveConfiguration: func(context.Context, workflow.ConfigurationInput) error {
@@ -682,6 +841,31 @@ func TestModelNavigationAndLayout(t *testing.T) {
 
 		assert.Contains(t, model.View(), "Details")
 		assert.NotContains(t, model.View(), "Actions")
+	})
+
+	t.Run("source detail moves repository names into the header", func(t *testing.T) {
+		status := elmapi.StatusInProgress
+		model := New(t.Context(), &fakeService{})
+		model.width = 100
+		model.height = 30
+		model.screen = screenSourceDetail
+		model.sourceID = "d2430eb8-eb8f-4ffd-8907-cfa23f662302"
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{
+				MigrationID:             string(model.sourceID),
+				Status:                  &status,
+				SourceOrganizationLogin: "acme-corp",
+				SourceRepositoryName:    "api-gateway",
+				TargetOrganizationLogin: "acme-cloud",
+				TargetRepositoryName:    "api-gateway",
+			},
+		}
+
+		view := model.View()
+
+		assert.Contains(t, view, "Migration · acme-corp/api-gateway → acme-cloud/api-gateway")
+		assert.NotContains(t, model.sourceDetailView(), "acme-corp/api-gateway → acme-cloud/api-gateway")
+		assert.Contains(t, model.sourceDetailView(), "In progress")
 	})
 
 	t.Run("messages render only on their dedicated page", func(t *testing.T) {
@@ -909,6 +1093,117 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.Equal(t, lipgloss.Height(unselected), lipgloss.Height(selected))
 	})
 
+	t.Run("migration list fills the available body height", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 160
+		model.height = 32
+		model.screen = screenSourceList
+		for index := range 8 {
+			model.sourceMigrations = append(model.sourceMigrations, elmapi.MigrationSummary{
+				MigrationID: fmt.Sprintf("migration-%d", index),
+			})
+		}
+
+		start, end := model.sourceListBounds(len(model.sourceMigrations))
+		view := model.sourceListView()
+
+		assert.Zero(t, start)
+		assert.Equal(t, len(model.sourceMigrations), end)
+		assert.NotContains(t, view, "more")
+		assert.LessOrEqual(t, lipgloss.Height(view), model.bodyHeight())
+	})
+
+	t.Run("migration list displays both overflow indicators outside the list", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 160
+		model.height = 20
+		model.screen = screenSourceList
+		model.densityUserSet = true
+		model.compact = false
+		model.cursor = 10
+		for index := range 20 {
+			model.sourceMigrations = append(model.sourceMigrations, elmapi.MigrationSummary{
+				MigrationID: fmt.Sprintf("migration-%d", index),
+			})
+		}
+
+		start, end := model.sourceListBounds(len(model.sourceMigrations))
+		view := model.sourceListView()
+		topLine := model.sourceListTopLine()
+		bottomLine := model.sourceListBottomLine()
+
+		assert.Positive(t, start)
+		assert.Less(t, end, len(model.sourceMigrations))
+		assert.Contains(t, topLine, "↑")
+		assert.Contains(t, bottomLine, "↓")
+		assert.NotContains(t, view, "more")
+		assert.LessOrEqual(t, lipgloss.Height(view), model.bodyHeight())
+		firstCardLine := strings.Split(model.sourceMigrationCard(model.sourceMigrations[start], false), "\n")[0]
+		assert.Equal(t, firstCardLine, strings.Split(view, "\n")[0])
+
+		renderedLines := strings.Split(model.View(), "\n")
+		indicatorLine := -1
+		firstCard := -1
+		lowerIndicatorLine := -1
+		footerLine := -1
+		for index, line := range renderedLines {
+			if indicatorLine == -1 && strings.Contains(line, "↑") && strings.Contains(line, "more") {
+				indicatorLine = index
+			}
+			if strings.Contains(line, "↓") && strings.Contains(line, "more") {
+				lowerIndicatorLine = index
+			}
+			if strings.Contains(line, "enter open") {
+				footerLine = index
+			}
+			if firstCard == -1 && strings.Contains(line, firstCardLine) {
+				firstCard = index
+			}
+		}
+		require.NotEqual(t, -1, indicatorLine)
+		require.NotEqual(t, -1, firstCard)
+		require.NotEqual(t, -1, lowerIndicatorLine)
+		require.NotEqual(t, -1, footerLine)
+		assert.Equal(t, indicatorLine+1, firstCard)
+		assert.Equal(t, lowerIndicatorLine, footerLine)
+	})
+
+	t.Run("lower overflow indicator does not reduce list capacity", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.width = 160
+		model.height = 32
+		model.screen = screenSourceList
+		model.densityUserSet = true
+		model.compact = false
+		for index := range 10 {
+			model.sourceMigrations = append(model.sourceMigrations, elmapi.MigrationSummary{
+				MigrationID: fmt.Sprintf("migration-%d", index),
+			})
+		}
+
+		start, end := model.sourceListBounds(len(model.sourceMigrations))
+
+		assert.Zero(t, start)
+		assert.Equal(t, 9, end)
+		assert.Contains(t, model.sourceListBottomLine(), "↓ 1 more")
+
+		model.cursor = len(model.sourceMigrations) - 1
+		start, end = model.sourceListBounds(len(model.sourceMigrations))
+
+		assert.Equal(t, 1, start)
+		assert.Equal(t, len(model.sourceMigrations), end)
+		assert.Empty(t, model.sourceListBottomLine())
+	})
+
+	t.Run("terminated migrations display as cancelled", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+
+		_, status := model.statusDisplay(elmapi.StatusTerminated)
+
+		assert.Contains(t, status, "Cancelled")
+		assert.NotContains(t, status, "Terminated")
+	})
+
 	t.Run("forms keep the focused field visible in short terminals", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.width = 80
@@ -1023,6 +1318,8 @@ func TestMigrationCreation(t *testing.T) {
 
 	t.Run("migration creation discovers repositories and organizations", func(t *testing.T) {
 		var sourceCreateInput workflow.SourceCreateInput
+		const migrationID = "c2856799-c6b5-4b00-aa16-7f9fe698c51f"
+		expiresAt := "2026-09-22T16:08:28Z"
 		svc := &fakeService{
 			listSourceRepositories: func(context.Context) ([]elmapi.Repository, error) {
 				return []elmapi.Repository{{FullName: "acme/api"}, {FullName: "octo/web"}}, nil
@@ -1033,7 +1330,7 @@ func TestMigrationCreation(t *testing.T) {
 			createSourceMigration: func(_ context.Context, input workflow.SourceCreateInput) (*workflow.SourceCreateResult, error) {
 				sourceCreateInput = input
 				return &workflow.SourceCreateResult{
-					Migration: elmapi.CreateMigrationResponse{MigrationID: "created-1"},
+					Migration: elmapi.CreateMigrationResponse{MigrationID: migrationID, ExpiresAt: &expiresAt},
 				}, nil
 			},
 		}
@@ -1072,14 +1369,40 @@ func TestMigrationCreation(t *testing.T) {
 		require.NotNil(t, command)
 		message := command()
 		assert.Empty(t, model.sourceID)
+		staleStatus := elmapi.StatusCompleted
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{
+				MigrationID:             "stale-migration",
+				Status:                  &staleStatus,
+				SourceOrganizationLogin: "wrong",
+				SourceRepositoryName:    "repository",
+				TargetOrganizationLogin: "random",
+				TargetRepositoryName:    "repository",
+			},
+		}
+		model.targetID = 42
 		updated, _ = model.Update(message)
 		model = updated.(*Model)
 
 		assert.Equal(t, screenResult, model.screen)
 		assert.True(t, model.result.popup)
+		assert.True(t, model.result.blankBackground)
 		assert.Contains(t, model.View(), "Migration created")
 		assert.Contains(t, model.View(), "Close")
-		assert.Equal(t, workflow.SourceMigrationID("created-1"), model.sourceID)
+		assert.Contains(t, model.View(), expiresAt)
+		assert.NotContains(t, model.View(), "Migration successfully created")
+		assert.NotContains(t, model.View(), "wrong/repository")
+		assert.Nil(t, model.sourceDetail)
+		assert.Zero(t, model.targetID)
+		assert.Equal(t, workflow.SourceMigrationID(migrationID), model.sourceID)
+		idLineFound := false
+		for line := range strings.SplitSeq(model.resultPopupOverlay(), "\n") {
+			if strings.Contains(line, "Migration ID") {
+				idLineFound = true
+				assert.Contains(t, line, migrationID)
+			}
+		}
+		assert.True(t, idLineFound)
 		assert.Equal(t, workflow.SourceCreateInput{
 			SourceOwner: "acme",
 			SourceRepo:  "api",
@@ -1093,6 +1416,8 @@ func TestMigrationCreation(t *testing.T) {
 		model = updated.(*Model)
 		assert.Equal(t, screenSourceDetail, model.screen)
 		assert.NotNil(t, command)
+		assert.Contains(t, model.View(), "Loading…")
+		assert.NotContains(t, model.View(), "wrong/repository")
 	})
 
 	t.Run("repository picker presents real metadata", func(t *testing.T) {
@@ -1476,6 +1801,7 @@ func setConfigurationReady(model *Model) {
 		TargetURL:      "https://target.example",
 		TargetTokenSet: true,
 	}
+	model.configurationLoading = false
 	model.sourceAuthChecked = true
 	model.targetAuthChecked = true
 	model.homeCursorSet = false
