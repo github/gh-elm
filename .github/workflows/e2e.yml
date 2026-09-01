@@ -7,21 +7,15 @@ on:
         description: Branch, tag, or commit SHA to test
         required: true
         type: string
-      mode:
-        description: E2E test mode
-        required: true
-        default: smoke
-        type: choice
-        options:
-          - smoke
 
-permissions:
-  contents: read
+# Permissions are granted per job. Candidate-controlled code must not receive a
+# token capable of modifying pull requests.
+permissions: {}
 
-# Only one gh-elm E2E run may use the sandbox at a time. A new run waits
-# instead of cancelling a migration test that is already in progress.
+# Only one gh-elm E2E workflow may use the shared migration environment at a
+# time. A new run waits instead of cancelling a migration already in progress.
 concurrency:
-  group: gh-elm-e2e-sandbox
+  group: migration-e2e
   cancel-in-progress: false
 
 jobs:
@@ -29,9 +23,14 @@ jobs:
     name: Resolve candidate revision
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      pull-requests: read
+
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
       harness_present: ${{ steps.candidate.outputs.harness_present }}
+      pull_request_number: ${{ steps.pull-request.outputs.number }}
 
     steps:
       - name: Validate candidate input
@@ -51,53 +50,166 @@ jobs:
             exit 1
           fi
 
-          if [[ "$CANDIDATE_REF" == *$'\n'* || "$CANDIDATE_REF" == *$'\r'* ]]; then
+          if [[ "$CANDIDATE_REF" == *$'\n'* ||
+            "$CANDIDATE_REF" == *$'\r'* ]]; then
             echo "::error::candidate_ref cannot contain line breaks."
             exit 1
           fi
 
-      # This job does not use the E2E environment and receives no E2E secrets.
-      # Checking out the candidate is safe here because no candidate code is run.
+      # This job does not use the protected E2E environment and receives no E2E
+      # secrets. Checking out the candidate is safe because candidate code is
+      # not executed in this job.
       - name: Check out candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ inputs.candidate_ref }}
           persist-credentials: false
 
-      - name: Resolve immutable commit
+      - name: Resolve immutable commit and inspect harness
         id: candidate
         env:
           CANDIDATE_REF: ${{ inputs.candidate_ref }}
-          E2E_MODE: ${{ inputs.mode }}
         shell: bash
         run: |
           set -euo pipefail
 
-          sha="$(git rev-parse HEAD)"
+          sha="$(git rev-parse --verify 'HEAD^{commit}')"
 
           if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Could not resolve the candidate to a full commit SHA."
             exit 1
           fi
 
-          if [[ -f scripts/e2e/test-elm-ghes.sh ]]; then
+          required_harness_files=(
+            script/e2e/test-elm-ghes.sh
+            script/e2e/lib/common.sh
+            script/e2e/lib/evidence.sh
+            script/e2e/lib/configuration.sh
+            script/e2e/lib/ownership.sh
+            script/e2e/lib/migration.sh
+            script/e2e/lib/polling.sh
+            script/e2e/lib/target.sh
+            script/e2e/lib/cleanup.sh
+            script/e2e/scenarios/control-plane.sh
+            script/e2e/scenarios/lifecycle.sh
+          )
+
+          missing_harness_files=()
+
+          for file in "${required_harness_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              missing_harness_files+=("$file")
+            fi
+          done
+
+          if (( ${#missing_harness_files[@]} == 0 )); then
             harness_present=true
           else
             harness_present=false
           fi
 
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "harness_present=$harness_present" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "harness_present=$harness_present" >>"$GITHUB_OUTPUT"
 
           {
             echo "## gh-elm E2E candidate"
             echo
             echo "- Requested ref: \`$CANDIDATE_REF\`"
             echo "- Resolved commit: \`$sha\`"
-            echo "- Environment: \`gh-elm-e2e-sandbox\`"
-            echo "- Mode: \`$E2E_MODE\`"
-            echo "- E2E harness present: \`$harness_present\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "- Environment: \`migration-e2e\`"
+            echo "- Candidate setup: build and install once"
+            echo "- Scenarios: \`control-plane\`, then \`lifecycle\`"
+            echo "- Complete E2E harness present: \`$harness_present\`"
+
+            if (( ${#missing_harness_files[@]} > 0 )); then
+              echo
+              echo "### Missing harness files"
+              echo
+
+              for file in "${missing_harness_files[@]}"; do
+                echo "- \`$file\`"
+              done
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Find pull request for candidate
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Candidate output is not a full commit SHA."
+            exit 1
+          fi
+
+          associated_pull_requests="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA/pulls?per_page=100"
+          )"
+
+          mapfile -t pull_request_numbers < <(
+            jq -r \
+              --arg candidate_sha "$CANDIDATE_SHA" \
+              --arg repository "$GITHUB_REPOSITORY" '
+                .[]
+                | select(
+                    .state == "open" and
+                    .head.sha == $candidate_sha and
+                    .head.repo.full_name == $repository
+                  )
+                | .number
+              ' <<<"$associated_pull_requests"
+          )
+
+          case "${#pull_request_numbers[@]}" in
+            0)
+              pull_request_number=""
+
+              echo "::notice::No matching open pull request has candidate commit $CANDIDATE_SHA as its current head; E2E will run without posting a PR comment."
+              ;;
+            1)
+              pull_request_number="${pull_request_numbers[0]}"
+              ;;
+            *)
+              echo "::error::Multiple matching open pull requests have candidate commit $CANDIDATE_SHA as their current head."
+              printf 'Matching pull requests: #%s\n' \
+                "${pull_request_numbers[@]}"
+              exit 1
+              ;;
+          esac
+
+          if [[ -n "$pull_request_number" &&
+            ! "$pull_request_number" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::GitHub returned an invalid pull request number."
+            exit 1
+          fi
+
+          echo "number=$pull_request_number" >>"$GITHUB_OUTPUT"
+
+          if [[ -n "$pull_request_number" ]]; then
+            {
+              echo
+              echo "### Pull request"
+              echo
+              echo "- Automatically identified PR: \`#$pull_request_number\`"
+              echo "- Matching head commit: \`$CANDIDATE_SHA\`"
+            } >>"$GITHUB_STEP_SUMMARY"
+
+            echo "Candidate commit $CANDIDATE_SHA is the current head of PR #$pull_request_number."
+          else
+            {
+              echo
+              echo "### Pull request"
+              echo
+              echo "No matching open pull request was found."
+              echo
+              echo "E2E will run without posting a PR comment."
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
 
   no-harness:
     name: E2E harness not present
@@ -112,47 +224,56 @@ jobs:
           {
             echo "## E2E test not run"
             echo
-            echo "The selected revision does not contain:"
+            echo "The selected revision does not contain the complete E2E harness."
             echo
-            echo "\`scripts/e2e/test-elm-ghes.sh\`"
+            echo "The resolve job summary lists the missing files."
             echo
-            echo "No E2E credentials were requested and no external services were contacted."
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "No E2E credentials were requested, and no migration services were contacted."
+          } >>"$GITHUB_STEP_SUMMARY"
 
-          echo "::notice::The selected revision has no E2E harness. Nothing was run."
+          echo "::notice::The selected revision has an incomplete E2E harness. Nothing was run."
 
-  smoke:
-    name: Smoke E2E
+  e2e:
+    name: Migration scenarios
     needs: resolve
     if: needs.resolve.outputs.harness_present == 'true'
     runs-on: ubuntu-latest
 
-    # Credentials and variables come from this single, approved sandbox.
+    # Candidate-controlled code receives only read access to repository
+    # contents. It cannot modify pull requests.
+    permissions:
+      contents: read
+
+    # This is the only secret-bearing job. Environment approval authorizes the
+    # immutable candidate commit to run against the migration test environment.
     environment:
-      name: gh-elm-e2e-sandbox
+      name: migration-e2e
+
+    # The lifecycle polling budget is at most 90 minutes. Leave additional time
+    # for candidate setup, the control-plane scenario, evidence, and cleanup.
+    timeout-minutes: 120
 
     env:
       # Source GHES
-      SOURCE_HOST: ${{ vars.E2E_GHES_URL }}
-      SOURCE_TOKEN: ${{ secrets.E2E_GHES_TOKEN }}
-      SOURCE_ORG: ${{ vars.E2E_SOURCE_ORG }}
-      SOURCE_REPO: ${{ vars.E2E_SOURCE_REPO }}
+      SOURCE_HOST: ${{ vars.GHES_URL }}
+      SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+      SOURCE_ORG: ${{ vars.SOURCE_ORG }}
+      SOURCE_REPO: ${{ vars.SOURCE_REPO }}
 
       # Migration target
-      TARGET_HOST: ${{ vars.E2E_TARGET_URL }}
-      TARGET_TOKEN: ${{ secrets.E2E_TARGET_PAT }}
-      TARGET_ORG: ${{ vars.E2E_TARGET_ORG }}
-      TARGET_VISIBILITY: ${{ vars.E2E_TARGET_VISIBILITY }}
+      TARGET_HOST: ${{ vars.TARGET_URL }}
+      TARGET_TOKEN: ${{ secrets.TARGET_TOKEN }}
+      TARGET_ORG: ${{ vars.TARGET_ORG }}
+      TARGET_VISIBILITY: ${{ vars.TARGET_VISIBILITY }}
 
-      # E2E harness configuration
-      E2E_MODE: ${{ inputs.mode }}
-      E2E_RUN_ID: actions-${{ github.run_id }}-${{ github.run_attempt }}
-      OUTDIR: ${{ github.workspace }}/elm-results
+      # Candidate code needs GitHub CLI authentication for extension
+      # installation and invocation. This job's token is read-only.
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       # Check out the immutable SHA resolved before E2E credentials were
-      # requested. If the branch moves while this workflow waits, this job
-      # still tests the original commit.
+      # requested. If the branch moves while this job waits for approval, the
+      # originally resolved commit is still tested.
       - name: Check out approved candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -166,7 +287,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          actual_sha="$(git rev-parse HEAD)"
+          actual_sha="$(git rev-parse --verify 'HEAD^{commit}')"
 
           if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
             echo "::error::Checked out $actual_sha; expected $EXPECTED_SHA."
@@ -175,7 +296,19 @@ jobs:
 
           echo "Testing immutable commit: $actual_sha"
 
-      - name: Validate required configuration
+      # Ensure that artifact upload has at least one file even when candidate
+      # setup or scenario execution fails before producing scenario evidence.
+      - name: Prepare E2E results directory
+        env:
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p elm-results
+          printf '%s\n' "$CANDIDATE_SHA" >elm-results/candidate-sha.txt
+
+      - name: Validate required environment configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -189,23 +322,68 @@ jobs:
             TARGET_TOKEN
             TARGET_ORG
             TARGET_VISIBILITY
+            GH_TOKEN
           )
 
-          missing=()
+          missing_variables=()
 
           for variable in "${required_variables[@]}"; do
             if [[ -z "${!variable:-}" ]]; then
-              missing+=("$variable")
+              missing_variables+=("$variable")
             fi
           done
 
-          if (( ${#missing[@]} > 0 )); then
-            echo "::error::The gh-elm-e2e-sandbox environment is missing required configuration."
-            printf 'Missing: %s\n' "${missing[@]}"
+          if (( ${#missing_variables[@]} > 0 )); then
+            echo "::error::The migration-e2e environment is missing required configuration."
+            printf 'Missing: %s\n' "${missing_variables[@]}"
             exit 1
           fi
 
-          echo "Required E2E configuration is present."
+          case "$TARGET_VISIBILITY" in
+            private | internal)
+              ;;
+            *)
+              echo "::error::TARGET_VISIBILITY must be private or internal."
+              exit 1
+              ;;
+          esac
+
+          echo "Required migration environment configuration is present."
+
+      - name: Validate harness syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          harness_files=(
+            script/e2e/test-elm-ghes.sh
+            script/e2e/lib/common.sh
+            script/e2e/lib/evidence.sh
+            script/e2e/lib/configuration.sh
+            script/e2e/lib/ownership.sh
+            script/e2e/lib/migration.sh
+            script/e2e/lib/polling.sh
+            script/e2e/lib/target.sh
+            script/e2e/lib/cleanup.sh
+            script/e2e/scenarios/control-plane.sh
+            script/e2e/scenarios/lifecycle.sh
+          )
+
+          for file in "${harness_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=$file::Required E2E harness file is missing."
+              exit 1
+            fi
+
+            echo "Checking Bash syntax: $file"
+
+            if ! bash -n "$file"; then
+              echo "::error file=$file::Bash syntax validation failed."
+              exit 1
+            fi
+          done
+
+          echo "All E2E harness files passed Bash syntax validation."
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -213,38 +391,109 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Run E2E smoke test
-        id: e2e
+      - name: Build and install candidate
         shell: bash
-        run: bash scripts/e2e/test-elm-ghes.sh
+        run: |
+          set -euo pipefail
 
-      - name: Add E2E summary
+          candidate_version="e2e-actions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          echo "Building candidate version: $candidate_version"
+
+          rm -f ./gh-elm
+
+          go build \
+            -trimpath \
+            -ldflags "-X main.version=${candidate_version}" \
+            -o ./gh-elm \
+            .
+
+          if [[ ! -x ./gh-elm ]]; then
+            echo "::error::The build did not produce an executable gh-elm binary."
+            exit 1
+          fi
+
+          # Keep the runner's existing GH_CONFIG_DIR for both installation and
+          # scenario execution. The harness isolates gh-elm configuration
+          # separately through GH_ELM_CONFIG_DIR.
+          gh extension install .
+
+          installed_version="$(gh elm --version)"
+          echo "Installed candidate: $installed_version"
+
+          if [[ "$installed_version" != *"$candidate_version"* ]]; then
+            echo "::error::gh elm did not report the expected candidate version $candidate_version."
+            exit 1
+          fi
+
+      # Control-plane runs first. If it or its cleanup fails, normal Actions
+      # step behavior prevents lifecycle from starting against an unsafe
+      # migration environment.
+      - name: Run control-plane scenario
+        id: control_plane
+        env:
+          E2E_MODE: control-plane
+          E2E_RUN_ID: actions-${{ github.run_id }}-${{ github.run_attempt }}-control-plane
+          OUTDIR: ${{ github.workspace }}/elm-results/control-plane
+        shell: bash
+        run: bash script/e2e/test-elm-ghes.sh
+
+      - name: Run lifecycle scenario
+        id: lifecycle
+        env:
+          E2E_MODE: lifecycle
+          E2E_RUN_ID: actions-${{ github.run_id }}-${{ github.run_attempt }}-lifecycle
+          OUTDIR: ${{ github.workspace }}/elm-results/lifecycle
+        shell: bash
+        run: bash script/e2e/test-elm-ghes.sh
+
+      - name: Add combined E2E summary
         if: always()
         env:
           CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
-          E2E_MODE: ${{ inputs.mode }}
           JOB_STATUS: ${{ job.status }}
+          CONTROL_PLANE_OUTDIR: ${{ github.workspace }}/elm-results/control-plane
+          LIFECYCLE_OUTDIR: ${{ github.workspace }}/elm-results/lifecycle
         shell: bash
         run: |
           {
             echo "## gh-elm E2E execution"
             echo
             echo "- Candidate: \`$CANDIDATE_SHA\`"
-            echo "- Environment: \`gh-elm-e2e-sandbox\`"
-            echo "- Mode: \`$E2E_MODE\`"
+            echo "- Environment: \`migration-e2e\`"
+            echo "- Candidate setup: built and installed once"
+            echo "- Execution order: \`control-plane\`, then \`lifecycle\`"
             echo "- Job result: \`$JOB_STATUS\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >>"$GITHUB_STEP_SUMMARY"
 
-          if [[ -f "$OUTDIR/evidence.md" ]]; then
+          append_scenario_evidence() {
+            local scenario="$1"
+            local scenario_outdir="$2"
+
             {
               echo
-              echo "### Harness evidence"
+              echo "### ${scenario} scenario"
               echo
-              cat "$OUTDIR/evidence.md"
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+            } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Upload E2E evidence
+            if [[ -f "$scenario_outdir/evidence.md" ]]; then
+              cat "$scenario_outdir/evidence.md" \
+                >>"$GITHUB_STEP_SUMMARY"
+            else
+              echo "No evidence file was produced. The scenario may not have started." \
+                >>"$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          append_scenario_evidence \
+            "Control-plane" \
+            "$CONTROL_PLANE_OUTDIR"
+
+          append_scenario_evidence \
+            "Lifecycle" \
+            "$LIFECYCLE_OUTDIR"
+
+      - name: Upload combined E2E evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -252,3 +501,203 @@ jobs:
           path: elm-results/
           if-no-files-found: warn
           retention-days: 14
+
+  report:
+    name: Report E2E results
+    needs:
+      - resolve
+      - e2e
+
+    # Run after success or failure, but only when E2E was started and a matching
+    # pull request was identified.
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.harness_present == 'true' &&
+      needs.resolve.outputs.pull_request_number != '' &&
+      needs.e2e.result != 'skipped'
+
+    runs-on: ubuntu-latest
+
+    # This environment contains no secrets and requires no approval. Its
+    # deployment branch policy must allow only the default branch, ensuring that
+    # this write-capable job cannot run from a modified workflow on another ref.
+    environment:
+      name: migration-e2e-reporting
+
+    # Only this trusted job may modify pull requests.
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+
+    steps:
+      # The reporting environment restricts this job to the default branch, so
+      # github.sha identifies the immutable trusted workflow revision. Never
+      # load the reporter from the candidate selected through candidate_ref.
+      - name: Check out trusted reporter
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: trusted
+
+      - name: Validate trusted reporter
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reporter="trusted/script/e2e/post-pr-summary.sh"
+
+          if [[ ! -f "$reporter" ]]; then
+            echo "::error file=$reporter::The trusted workflow revision does not contain the PR summary reporter."
+            exit 1
+          fi
+
+          if ! bash -n "$reporter"; then
+            echo "::error file=$reporter::Bash syntax validation failed."
+            exit 1
+          fi
+
+          echo "The trusted PR summary reporter passed Bash syntax validation."
+
+      - name: Download E2E evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: gh-elm-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          RESULTS_DIR: ${{ runner.temp }}/elm-results
+          E2E_RESULT: ${{ needs.e2e.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p \
+            "$RESULTS_DIR/control-plane" \
+            "$RESULTS_DIR/lifecycle"
+
+          if gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT_NAME" \
+            --dir "$RESULTS_DIR"; then
+            echo "Downloaded E2E evidence artifact: $ARTIFACT_NAME"
+          else
+            if [[ "$E2E_RESULT" == "success" ]]; then
+              echo "::error::The E2E job passed, but its results artifact could not be downloaded."
+              exit 1
+            fi
+
+            echo "::warning::No results artifact is available for the unsuccessful E2E job. Scenario results will be shown as not run."
+          fi
+
+      - name: Validate successful E2E results
+        if: needs.e2e.result == 'success'
+        env:
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
+          RESULTS_DIR: ${{ runner.temp }}/elm-results
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          candidate_file="$RESULTS_DIR/candidate-sha.txt"
+          control_plane_results="$RESULTS_DIR/control-plane/results.tsv"
+          lifecycle_results="$RESULTS_DIR/lifecycle/results.tsv"
+
+          if [[ ! -f "$candidate_file" ]]; then
+            echo "::error::The successful E2E artifact does not contain candidate-sha.txt."
+            exit 1
+          fi
+
+          artifact_candidate_sha="$(<"$candidate_file")"
+
+          if [[ "$artifact_candidate_sha" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::The E2E artifact does not match the resolved candidate."
+            exit 1
+          fi
+
+          for results_file in \
+            "$control_plane_results" \
+            "$lifecycle_results"; do
+            if [[ ! -s "$results_file" ]]; then
+              echo "::error::The successful E2E artifact is missing a required non-empty scenario results file."
+              exit 1
+            fi
+          done
+
+          echo "The successful E2E artifact contains results for both scenarios."
+
+      # The PR may advance while E2E waits for environment approval or executes.
+      # Do not replace the current sticky comment with results for an older head.
+      - name: Verify pull request still matches candidate
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pull_request_number }}
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Resolved pull request number is invalid."
+            exit 1
+          fi
+
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Resolved candidate SHA is invalid."
+            exit 1
+          fi
+
+          pr_details="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
+          )"
+
+          current_state="$(
+            jq -er '.state' <<<"$pr_details"
+          )"
+
+          current_head="$(
+            jq -er '.head.sha' <<<"$pr_details"
+          )"
+
+          current_head_repository="$(
+            jq -er '.head.repo.full_name' <<<"$pr_details"
+          )"
+
+          if [[ "$current_state" != "open" ]]; then
+            echo "::notice::PR #$PR_NUMBER is no longer open; skipping the E2E comment."
+            echo "should_post=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$current_head_repository" != "$GITHUB_REPOSITORY" ]]; then
+            echo "::notice::PR #$PR_NUMBER no longer has a head branch in this repository; skipping the E2E comment."
+            echo "should_post=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$current_head" != "$CANDIDATE_SHA" ]]; then
+            echo "::notice::PR #$PR_NUMBER has advanced from $CANDIDATE_SHA to $current_head; skipping the stale E2E comment."
+            echo "should_post=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_post=true" >>"$GITHUB_OUTPUT"
+          echo "PR #$PR_NUMBER still points to candidate commit $CANDIDATE_SHA."
+
+      - name: Post E2E results to pull request
+        if: steps.pull-request.outputs.should_post == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pull_request_number }}
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.sha }}
+          JOB_STATUS: ${{ needs.e2e.result }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CONTROL_PLANE_RESULTS: ${{ runner.temp }}/elm-results/control-plane/results.tsv
+          LIFECYCLE_RESULTS: ${{ runner.temp }}/elm-results/lifecycle/results.tsv
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash trusted/script/e2e/post-pr-summary.sh \
+            --output "$RUNNER_TEMP/gh-elm-e2e-pr-summary.md"
