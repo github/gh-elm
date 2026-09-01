@@ -369,6 +369,7 @@ func TestStatusPresentation(t *testing.T) {
 		assert.Contains(t, failureState(false, "available", "unavailable").glyph, styles.Failure.Render("✗"))
 		assert.Equal(t, styles.Success.Bold(true).Render("Completed"), statusText("completed"))
 		assert.Equal(t, styles.Failure.Bold(true).Render("Failed"), statusText("failed"))
+		assert.Equal(t, styles.Failure.Bold(true).Render("Cancelled"), statusText("terminated"))
 	})
 }
 

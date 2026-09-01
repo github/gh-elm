@@ -88,7 +88,7 @@ func (o Overlay) String() string {
 	case OverlayFailed:
 		return "Failed"
 	case OverlayTerminated:
-		return "Terminated"
+		return "Cancelled"
 	case OverlayPaused:
 		return "Paused"
 	case OverlayDegraded:
