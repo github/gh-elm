@@ -786,6 +786,51 @@ func TestModel(t *testing.T) {
 		_, _ = model.Update(cmd())
 		assert.Equal(t, 1, svc.reclaimCalls)
 	})
+
+	t.Run("uppercase [BOT] target still requires the irreversible confirmation", func(t *testing.T) {
+		svc := &fakeService{}
+		model := New(t.Context(), svc)
+		model.screen = screenMannequins
+
+		updated, _ := model.openMannequinReclaimForm(false)
+		model = updated.(*Model)
+		model.form.fields[0].value = "octo-org"
+		model.form.fields[1].value = "mannequin"
+		model.form.fields[3].value = "app[BOT]"
+		model.form.cursor = len(model.form.fields) - 1
+
+		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.NotNil(t, cmd)
+
+		updated, _ = model.Update(cmd())
+		model = updated.(*Model)
+		require.Equal(t, screenConfirm, model.screen)
+		assert.Contains(t, model.View(), "cannot be undone")
+	})
+
+	t.Run("bot target with whitespace and a non-bot source surfaces the advisory", func(t *testing.T) {
+		svc := &fakeService{}
+		model := New(t.Context(), svc)
+		model.screen = screenMannequins
+
+		updated, _ := model.openMannequinReclaimForm(false)
+		model = updated.(*Model)
+		model.form.fields[0].value = "octo-org"
+		model.form.fields[1].value = "human-mannequin"
+		model.form.fields[3].value = "app[bot] "
+		model.form.cursor = len(model.form.fields) - 1
+
+		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(*Model)
+		require.NotNil(t, cmd)
+
+		updated, _ = model.Update(cmd())
+		model = updated.(*Model)
+		require.Equal(t, screenConfirm, model.screen)
+		assert.Contains(t, model.confirm.body, "cannot be undone")
+		assert.Contains(t, model.confirm.body, "does not look like a bot mannequin")
+	})
 }
 
 func setSourceStatus(model *Model, status string) {

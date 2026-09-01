@@ -220,12 +220,7 @@ func newMannequinReclaimCmd() *cobra.Command {
 			log := mannequinLogger{w: cmd.ErrOrStderr()}
 			svc := ghapi.NewReclaimService(client, log)
 
-			if skipInvitation {
-				if err := ensureSkipInvitationAllowed(cmd, client, githubOrg, noPrompt); err != nil {
-					return annotateMannequinAuthError(err, targetURLResolved)
-				}
-			}
-
+			var records []ghapi.MannequinRecord
 			if csvPath != "" {
 				log.Infof("Reclaiming mannequins from CSV...")
 				f, err := os.Open(csvPath)
@@ -233,17 +228,33 @@ func newMannequinReclaimCmd() *cobra.Command {
 					return fmt.Errorf("opening %s: %w", csvPath, err)
 				}
 				defer func() { _ = f.Close() }()
-				records, err := ghapi.ReadMannequinCSV(f)
+				records, err = ghapi.ReadMannequinCSV(f)
 				if err != nil {
 					return err
 				}
+			} else {
+				log.Infof("Reclaiming mannequin...")
+				records = []ghapi.MannequinRecord{{MannequinUser: mannequinUser, TargetUser: targetUser}}
+			}
+
+			if skipInvitation {
+				if _, userCount, _ := ghapi.BotReclaimAdvisory(records); userCount > 0 {
+					if err := ensureSkipInvitationAllowed(cmd, client, githubOrg, noPrompt); err != nil {
+						return annotateMannequinAuthError(err, targetURLResolved)
+					}
+				}
+			}
+
+			if err := confirmBotReclaims(cmd, log, records, noPrompt); err != nil {
+				return err
+			}
+
+			if csvPath != "" {
 				if err := svc.ReclaimMannequins(cmd.Context(), records, githubOrg, force, skipInvitation); err != nil {
 					return annotateMannequinAuthError(err, targetURLResolved)
 				}
 				return nil
 			}
-
-			log.Infof("Reclaiming mannequin...")
 			if err := svc.ReclaimMannequin(cmd.Context(), mannequinUser, mannequinID, targetUser, githubOrg, force, skipInvitation); err != nil {
 				return annotateMannequinAuthError(err, targetURLResolved)
 			}
@@ -259,7 +270,7 @@ func newMannequinReclaimCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetUser, "target-user", "", "Target user login (alternative to the positional argument).")
 	cmd.Flags().BoolVar(&force, "force", false, "Reclaim even if the mannequin is already mapped to a user.")
 	cmd.Flags().BoolVar(&skipInvitation, "skip-invitation", false, "Reattribute immediately without the invitation email (EMU orgs only).")
-	cmd.Flags().BoolVar(&noPrompt, "no-prompt", false, "Do not prompt for confirmation when using --skip-invitation.")
+	cmd.Flags().BoolVar(&noPrompt, "no-prompt", false, "Do not prompt for confirmation (--skip-invitation or bot reclaims).")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target API base URL.")
 	cmd.Flags().StringVar(&targetToken, "target-token", "", "Override the target API token.")
 	_ = cmd.Flags().MarkHidden("github-org")
@@ -310,6 +321,40 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	default:
 		return false
 	}
+}
+
+// confirmBotReclaims warns about likely mis-targets and, unless noPrompt is set,
+// asks for confirmation before an irreversible bot reattribution. Reattributing
+// to a bot auto-accepts and cannot be undone. The source mannequin's login is
+// our only hint that it represents a bot; a non-"[bot]" source is very likely a
+// mis-target (a human's content going to a bot), but the convention is
+// GitHub-specific, so we warn and let the admin proceed rather than blocking.
+func confirmBotReclaims(cmd *cobra.Command, log mannequinLogger, records []ghapi.MannequinRecord, noPrompt bool) error {
+	botCount, humanCount, mistargets := ghapi.BotReclaimAdvisory(records)
+	for _, src := range mistargets {
+		log.Warnf("%q does not look like a bot mannequin (its login does not end in %q). Are you sure you want to do this?", src, "[bot]")
+	}
+
+	if botCount == 0 || noPrompt {
+		return nil
+	}
+
+	var summary string
+	if len(records) > 1 {
+		summary = fmt.Sprintf("You are about to reattribute %d mannequin(s) to GitHub App / bot account(s)", botCount)
+		if humanCount > 0 {
+			summary += fmt.Sprintf(" and %d mannequin(s) to user(s)", humanCount)
+		}
+		summary += "."
+	} else {
+		summary = fmt.Sprintf("You are about to reattribute every mannequin identity matching %q to the GitHub App / bot account %q.", records[0].MannequinUser, records[0].TargetUser)
+	}
+
+	if !confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),
+		summary+" Reattributing content to a bot is immediate and cannot be undone. Continue? [y/N]") {
+		return errors.New("aborted")
+	}
+	return nil
 }
 
 // mannequinClient resolves the target endpoint (flag > env > stored config) and

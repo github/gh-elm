@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -24,11 +25,10 @@ const (
 	apiVersionHeader = "X-GitHub-Api-Version"
 	apiVersion       = "2022-11-28"
 
-	// graphQLFeaturesHeader opts into preview GraphQL schema features. The
-	// mannequin_claiming_emu feature exposes the reattributeMannequinToUser
-	// mutation used by `mannequin reclaim --skip-invitation`; without it the
-	// mutation; mannequin_claiming_bot
-	// exposes reattributeMannequinToBot used when reclaiming to a GitHub App / bot
+	// graphQLFeaturesHeader opts into preview GraphQL schema features.
+	// mannequin_claiming_emu exposes the reattributeMannequinToUser mutation used
+	// by `mannequin reclaim --skip-invitation`; mannequin_claiming_bot exposes the
+	// reattributeMannequinToBot mutation used when reclaiming to a GitHub App / bot
 	// account. Without them the mutations are absent from the schema and the call
 	// fails with "doesn't exist on type 'Mutation'". gh-gei sends this header on
 	// every request (it is ignored by REST), so we do the same.
@@ -102,8 +102,22 @@ func (e *GraphQLError) Error() string {
 
 // graphQLRequest is the JSON body of a GraphQL POST.
 type graphQLRequest struct {
-	Query     string `json:"query"`
-	Variables any    `json:"variables,omitempty"`
+	Query         string `json:"query"`
+	OperationName string `json:"operationName,omitempty"`
+	Variables     any    `json:"variables,omitempty"`
+}
+
+// graphQLOperationNameRE captures the name of a named query or mutation.
+var graphQLOperationNameRE = regexp.MustCompile(`(?m)^\s*(?:query|mutation)\s+([A-Za-z_]\w*)`)
+
+// graphQLOperationName returns the operation name of a named query or mutation,
+// or "" for an anonymous operation. Sending operationName lets servers (and test
+// mocks) dispatch on the operation rather than the query text.
+func graphQLOperationName(query string) string {
+	if m := graphQLOperationNameRE.FindStringSubmatch(query); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // graphQLResponse captures the parts of a GraphQL response gh-elm inspects.
@@ -117,7 +131,7 @@ type graphQLResponse struct {
 // graphQL issues a GraphQL query/mutation and decodes response.data into out.
 // A non-empty errors array is returned as a *GraphQLError.
 func (c *Client) graphQL(ctx context.Context, query string, variables, out any) error {
-	body, err := json.Marshal(graphQLRequest{Query: query, Variables: variables})
+	body, err := json.Marshal(graphQLRequest{Query: query, OperationName: graphQLOperationName(query), Variables: variables})
 	if err != nil {
 		return fmt.Errorf("encoding graphql request: %w", err)
 	}

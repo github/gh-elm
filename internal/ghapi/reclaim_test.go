@@ -165,15 +165,24 @@ func TestReclaimMannequin(t *testing.T) {
 		svc, _ := newService(f)
 
 		err := svc.ReclaimMannequin(t.Context(), "alice", "", "example-ci[bot]", "octo", false, false)
-		if err != nil {
-			t.Fatalf("ReclaimMannequin: %v", err)
+		require.NoError(t, err, "ReclaimMannequin")
+		assert.Equal(t, []string{"m1->b1"}, f.botReattributions)
+		assert.Empty(t, f.invitations, "should not have used the invitation path")
+		assert.Zero(t, f.reattributeAttempts, "should not have used the user reattribution path")
+	})
+
+	t.Run("returns an error when the bot mutation fails", func(t *testing.T) {
+		f := &fakeClient{
+			orgID:             "ORG",
+			byLogin:           map[string][]Mannequin{"alice": {{ID: "m1", Login: "alice"}}},
+			botIDs:            map[string]string{"example-ci[bot]": "b1"},
+			botReattributeErr: &GraphQLError{Messages: []string{"Target must be an admin of the organization"}},
 		}
-		if len(f.botReattributions) != 1 || f.botReattributions[0] != "m1->b1" {
-			t.Errorf("botReattributions = %v", f.botReattributions)
-		}
-		if len(f.invitations) != 0 || f.reattributeAttempts != 0 {
-			t.Errorf("should not have used the user path: invitations=%v reattributeAttempts=%d", f.invitations, f.reattributeAttempts)
-		}
+		svc, _ := newService(f)
+
+		err := svc.ReclaimMannequin(t.Context(), "alice", "", "example-ci[bot]", "octo", false, false)
+		require.Error(t, err)
+		assert.Empty(t, f.botReattributions, "no successful reattribution should be recorded")
 	})
 }
 
@@ -281,11 +290,53 @@ func TestReclaimMannequins(t *testing.T) {
 		}
 		svc, log := newService(f)
 
-		require.NoError(t, svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true), "ReclaimMannequins")
-		// Must stop after the first row rather than treating it as a soft skip
-		// and continuing through the batch.
+		err := svc.ReclaimMannequins(t.Context(), recs("alice,m1,alice-t", "bob,m2,bob-t"), "octo", false, true)
+		// Must stop after the first row rather than treating it as a soft skip and
+		// continuing through the batch, and surface the failure to the caller.
+		require.Error(t, err)
 		assert.Equal(t, 1, f.reattributeAttempts, "reattributeAttempts (fail-fast)")
 		assert.True(t, log.contains("not enabled"), "missing unavailability warning: %v", log.lines)
+	})
+}
+
+func TestBotReclaimAdvisory(t *testing.T) {
+	t.Run("classifies bot and user targets and flags mis-targets", func(t *testing.T) {
+		botCount, userCount, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "legacy-ci[bot]", TargetUser: "example-ci[bot]"},
+			{MannequinUser: "human", TargetUser: "app[bot]"},
+			{MannequinUser: "alice", TargetUser: "alice-t"},
+		})
+		assert.Equal(t, 2, botCount)
+		assert.Equal(t, 1, userCount)
+		assert.Equal(t, []string{"human"}, mistargets)
+	})
+
+	t.Run("trims the target and matches casing", func(t *testing.T) {
+		botCount, userCount, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "human", TargetUser: "app[BOT] "},
+		})
+		assert.Equal(t, 1, botCount)
+		assert.Zero(t, userCount)
+		assert.Equal(t, []string{"human"}, mistargets)
+	})
+
+	t.Run("deduplicates mis-target source logins", func(t *testing.T) {
+		_, _, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "human", TargetUser: "a[bot]"},
+			{MannequinUser: "human", TargetUser: "b[bot]"},
+		})
+		assert.Equal(t, []string{"human"}, mistargets)
+	})
+
+	t.Run("ignores rows with an empty target", func(t *testing.T) {
+		botCount, userCount, mistargets := BotReclaimAdvisory([]MannequinRecord{
+			{MannequinUser: "alice", TargetUser: ""},
+			{MannequinUser: "bob", TargetUser: "   "},
+			{MannequinUser: "legacy-ci[bot]", TargetUser: "example-ci[bot]"},
+		})
+		assert.Equal(t, 1, botCount)
+		assert.Zero(t, userCount)
+		assert.Empty(t, mistargets)
 	})
 }
 

@@ -58,7 +58,7 @@ type mannequinsData struct {
 	} `json:"node"`
 }
 
-const mannequinsQuery = `query($id: ID!, $first: Int, $after: String) {
+const mannequinsQuery = `query ListMannequins($id: ID!, $first: Int, $after: String) {
   node(id: $id) {
     ... on Organization {
       mannequins(first: $first, after: $after) {
@@ -69,7 +69,7 @@ const mannequinsQuery = `query($id: ID!, $first: Int, $after: String) {
   }
 }`
 
-const mannequinsByLoginQuery = `query($id: ID!, $first: Int, $after: String, $login: String) {
+const mannequinsByLoginQuery = `query ListMannequinsByLogin($id: ID!, $first: Int, $after: String, $login: String) {
   node(id: $id) {
     ... on Organization {
       mannequins(first: $first, after: $after, login: $login) {
@@ -88,7 +88,7 @@ func (c *Client) OrganizationID(ctx context.Context, org string) (string, error)
 		} `json:"organization"`
 	}
 	vars := map[string]any{"login": org}
-	if err := c.graphQL(ctx, `query($login: String!) { organization(login: $login) { login id name } }`, vars, &data); err != nil {
+	if err := c.graphQL(ctx, `query GetOrganization($login: String!) { organization(login: $login) { login id name } }`, vars, &data); err != nil {
 		return "", fmt.Errorf("looking up organization ID for %q: %w", org, err)
 	}
 	if data.Organization.ID == "" {
@@ -105,7 +105,7 @@ func (c *Client) UserID(ctx context.Context, login string) (string, error) {
 		} `json:"user"`
 	}
 	vars := map[string]any{"login": login}
-	if err := c.graphQL(ctx, `query($login: String!) { user(login: $login) { id name } }`, vars, &data); err != nil {
+	if err := c.graphQL(ctx, `query GetUser($login: String!) { user(login: $login) { id name } }`, vars, &data); err != nil {
 		if isUserNotFound(err) {
 			return "", fmt.Errorf("user %q not found: %w", login, ErrUserNotFound)
 		}
@@ -163,7 +163,7 @@ func (c *Client) LoginName(ctx context.Context) (string, error) {
 			Login string `json:"login"`
 		} `json:"viewer"`
 	}
-	if err := c.graphQL(ctx, `query { viewer { login } }`, nil, &data); err != nil {
+	if err := c.graphQL(ctx, `query GetViewer { viewer { login } }`, nil, &data); err != nil {
 		return "", fmt.Errorf("looking up the current user's login: %w", err)
 	}
 	return data.Viewer.Login, nil
@@ -226,21 +226,21 @@ func (c *Client) fetchMannequins(ctx context.Context, query string, vars map[str
 	}
 }
 
-const createAttributionInvitationMutation = `mutation($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
+const createAttributionInvitationMutation = `mutation CreateAttributionInvitation($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
   createAttributionInvitation(input: { ownerId: $orgId, sourceId: $sourceId, targetId: $targetId }) {
     source { ... on Mannequin { id login } }
     target { ... on User { id login } }
   }
 }`
 
-const reattributeMannequinToUserMutation = `mutation($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
+const reattributeMannequinToUserMutation = `mutation ReattributeMannequinToUser($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
   reattributeMannequinToUser(input: { ownerId: $orgId, sourceId: $sourceId, targetId: $targetId }) {
     source { ... on Mannequin { id login } }
     target { ... on User { id login } }
   }
 }`
 
-const reattributeMannequinToBotMutation = `mutation($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
+const reattributeMannequinToBotMutation = `mutation ReattributeMannequinToBot($orgId: ID!, $sourceId: ID!, $targetId: ID!) {
   reattributeMannequinToBot(input: { ownerId: $orgId, sourceId: $sourceId, targetId: $targetId }) {
     source { ... on Mannequin { id login } }
     target { ... on Bot { id login } }

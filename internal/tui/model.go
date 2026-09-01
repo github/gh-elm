@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -1522,7 +1523,11 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 				Force:          values["force"] == "true",
 				SkipInvitation: values["skip"] == "true",
 			}
-			if strings.HasSuffix(input.TargetUser, "[bot]") {
+			// Match workflow.Service, which trims the target before deciding the
+			// reclaim path, so a bot login with stray whitespace still selects the
+			// irreversible confirmation.
+			input.TargetUser = strings.TrimSpace(input.TargetUser)
+			if ghapi.IsBotLogin(input.TargetUser) {
 				input.SkipInvitation = true
 			}
 			action := func() tea.Msg {
@@ -1534,12 +1539,26 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 				}
 				return actionMsg{title: "Mannequin reclaim", body: body, parent: screenMannequins, err: err}
 			}
+			// Mirror the CLI's confirmBotReclaims: classify the actual records so
+			// bot reclaims surface the irreversible warning and flag likely
+			// mis-targets (a bot target whose source login is not itself a bot).
+			var records []ghapi.MannequinRecord
+			if csvMode {
+				records, _ = readReclaimCSV(input.CSVPath)
+			} else {
+				records = []ghapi.MannequinRecord{{MannequinUser: strings.TrimSpace(input.Mannequin), TargetUser: input.TargetUser}}
+			}
+			botCount, _, mistargets := ghapi.BotReclaimAdvisory(records)
+
 			confirmation := "Send reclaim invitations for the selected mannequin data?"
 			if csvMode {
 				confirmation = "Reclaim mannequins from this CSV? Rows targeting app[bot] accounts are reattributed immediately and cannot be undone."
 			}
-			if input.SkipInvitation || strings.HasSuffix(input.TargetUser, "[bot]") {
+			if input.SkipInvitation || botCount > 0 {
 				confirmation = "This immediately reattributes mannequin content and cannot be undone."
+			}
+			for _, src := range mistargets {
+				confirmation += fmt.Sprintf("\nWarning: %q does not look like a bot mannequin (its login does not end in \"[bot]\"). Are you sure you want to do this?", src)
 			}
 			return func() tea.Msg {
 				return confirmRequestMsg{
@@ -1551,6 +1570,22 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 			}, nil
 		},
 	})
+}
+
+// readReclaimCSV reads mannequin reclaim records from the CSV at path so the TUI
+// can classify bot targets before confirming. An empty path or read error
+// yields no records, letting the confirmation fall back to its generic copy.
+func readReclaimCSV(path string) ([]ghapi.MannequinRecord, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return nil, nil
+	}
+	file, err := os.Open(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	return ghapi.ReadMannequinCSV(file)
 }
 
 func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
