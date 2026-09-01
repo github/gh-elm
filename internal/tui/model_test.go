@@ -389,7 +389,7 @@ func TestModelUpdate(t *testing.T) {
 			model := New(t.Context(), service)
 			model.screen = screenSourceDetail
 			model.sourceID = "source-1"
-			setSourceStatus(model, elmapi.StatusCreated)
+			setSourceStatus(model, elmapi.StatusInProgress)
 
 			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 			model = updated.(*Model)
@@ -453,7 +453,7 @@ func TestModelUpdate(t *testing.T) {
 		})
 		model.screen = screenSourceDetail
 		model.sourceID = "source-1"
-		setSourceStatus(model, elmapi.StatusCreated)
+		setSourceStatus(model, elmapi.StatusInProgress)
 
 		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 		model = updated.(*Model)
@@ -931,6 +931,41 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.LessOrEqual(t, lipgloss.Height(view), model.bodyHeight())
 	})
 
+	t.Run("form alt delete removes the previous chunk", func(t *testing.T) {
+		t.Run("backspace event", func(t *testing.T) {
+			value := "owner/repository migration  "
+			model := New(t.Context(), &fakeService{})
+			model.screen = screenForm
+			model.form = formState{fields: []formField{textFormField("Value", "", &value)}}
+
+			_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace, Alt: true})
+
+			assert.Equal(t, "owner/repository ", value)
+		})
+
+		t.Run("delete event", func(t *testing.T) {
+			value := "owner/repository migration"
+			model := New(t.Context(), &fakeService{})
+			model.screen = screenForm
+			model.form = formState{fields: []formField{textFormField("Value", "", &value)}}
+
+			_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDelete, Alt: true})
+
+			assert.Equal(t, "owner/repository ", value)
+		})
+	})
+
+	t.Run("form alt delete does not change a selection", func(t *testing.T) {
+		value := "internal"
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenForm
+		model.form = formState{fields: []formField{selectFormField("Visibility", &value, "internal", "private")}}
+
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace, Alt: true})
+
+		assert.Equal(t, "internal", value)
+	})
+
 	t.Run("dynamic warnings synchronize viewport height", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -1325,10 +1360,20 @@ func TestModelActions(t *testing.T) {
 
 	t.Run("source actions follow migration state", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
 
 		t.Run("created can start or cancel", func(t *testing.T) {
 			setSourceStatus(model, elmapi.StatusCreated)
-			assert.ElementsMatch(t, []string{"refresh", "messages", "start", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.ElementsMatch(t, []string{"start", "cancel"}, actionIDs(model.sourceActionItems()))
+			assert.NotContains(t, model.View(), "Refresh")
+			assert.NotContains(t, model.View(), "Messages")
+			assert.NotContains(t, model.View(), "r refresh")
+
+			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+			model = updated.(*Model)
+			assert.Nil(t, command)
+			assert.False(t, model.loading)
 		})
 
 		t.Run("in progress can pause force cutover or cancel", func(t *testing.T) {
