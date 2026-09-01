@@ -200,17 +200,18 @@ type Model struct {
 	service service
 	styles  theme.Styles
 
-	screen        screen
-	width         int
-	height        int
-	cursor        int
-	homeCursorSet bool
-	actionFocus   int
-	loading       bool
-	err           error
-	viewport      viewport.Model
-	viewportReady bool
-	showHelp      bool
+	screen           screen
+	width            int
+	height           int
+	cursor           int
+	homeCursorSet    bool
+	actionFocus      int
+	loading          bool
+	refreshingDetail bool
+	err              error
+	viewport         viewport.Model
+	viewportReady    bool
+	showHelp         bool
 
 	sourceMigrations []elmapi.MigrationSummary
 	sourceListGen    uint64
@@ -316,7 +317,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showConfigurationAlert(msg.err) {
 			return m, nil
 		}
+		refreshing := m.refreshingDetail
 		m.loading = false
+		m.refreshingDetail = false
 		m.err = msg.err
 		if msg.err == nil {
 			m.sourceDetail = msg.detail
@@ -325,7 +328,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.targetID = workflow.TargetMigrationID(msg.detail.Migration.TargetMigrationID)
 			}
 			m.clampActionFocus()
-		} else {
+		} else if !refreshing {
 			m.sourceDetail = nil
 			m.targetID = 0
 		}
@@ -347,7 +350,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showConfigurationAlert(msg.err) {
 			return m, nil
 		}
+		refreshing := m.refreshingDetail
 		m.loading = false
+		m.refreshingDetail = false
 		m.err = msg.err
 		if msg.err == nil {
 			m.targetDetail = msg.migration
@@ -356,7 +361,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.repository = msg.migration.Repositories[0]
 			}
 			m.clampActionFocus()
-		} else {
+		} else if !refreshing {
 			m.targetDetail = nil
 			m.repository = ""
 		}
@@ -816,6 +821,7 @@ func (m *Model) back() (tea.Model, tea.Cmd) {
 
 func (m *Model) refresh() (tea.Model, tea.Cmd) {
 	m.err = nil
+	m.refreshingDetail = false
 	switch m.screen {
 	case screenSourceList:
 		m.loading = true
@@ -823,6 +829,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 		return m, command
 	case screenSourceDetail:
 		m.loading = true
+		m.refreshingDetail = true
 		command := m.loadSourceDetailCmd()
 		return m, command
 	case screenTargetList:
@@ -831,6 +838,7 @@ func (m *Model) refresh() (tea.Model, tea.Cmd) {
 		return m, command
 	case screenTargetDetail:
 		m.loading = true
+		m.refreshingDetail = true
 		command := m.loadTargetDetailCmd()
 		return m, command
 	case screenConfiguration:
@@ -1222,6 +1230,7 @@ func (m *Model) showConfigurationAlert(err error) bool {
 		parent: m.screen,
 	}
 	m.loading = false
+	m.refreshingDetail = false
 	m.err = nil
 	m.pickerInfoOpen = false
 	m.screen = screenAlert

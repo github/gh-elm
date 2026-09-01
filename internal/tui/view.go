@@ -110,7 +110,7 @@ func (m *Model) View() string {
 		body = m.fullHelpView()
 		help = "? close • q quit"
 	}
-	if m.loading {
+	if m.loading && !m.refreshingDetail {
 		body = m.styles.Active.Render("Loading…")
 	}
 	if m.err != nil {

@@ -376,6 +376,97 @@ func TestModelUpdate(t *testing.T) {
 		assert.Empty(t, model.repository)
 	})
 
+	t.Run("detail refresh keeps current values visible until replacements arrive", func(t *testing.T) {
+		t.Run("source migration", func(t *testing.T) {
+			completed := elmapi.StatusCompleted
+			service := &fakeService{
+				getSourceMigration: func(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
+					return &elmapi.MigrationDetail{
+						Migration: &elmapi.MigrationSummary{MigrationID: "source-1", Status: &completed},
+					}, nil
+				},
+			}
+			model := New(t.Context(), service)
+			model.screen = screenSourceDetail
+			model.sourceID = "source-1"
+			setSourceStatus(model, elmapi.StatusCreated)
+
+			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+			model = updated.(*Model)
+
+			require.NotNil(t, command)
+			assert.True(t, model.loading)
+			assert.True(t, model.refreshingDetail)
+			assert.NotContains(t, model.View(), "Loading…")
+			assert.Contains(t, model.View(), "source-1")
+
+			updated, _ = model.Update(command())
+			model = updated.(*Model)
+
+			assert.False(t, model.loading)
+			assert.False(t, model.refreshingDetail)
+			require.NotNil(t, model.sourceDetail.Migration.Status)
+			assert.Equal(t, elmapi.StatusCompleted, *model.sourceDetail.Migration.Status)
+		})
+
+		t.Run("destination migration", func(t *testing.T) {
+			service := &fakeService{
+				getTargetMigration: func(context.Context, workflow.TargetMigrationID) (*elmapi.TargetMigration, error) {
+					return &elmapi.TargetMigration{
+						Status:       elmapi.TargetMigrationStatusComplete,
+						Repositories: []string{"new/repository"},
+					}, nil
+				},
+			}
+			model := New(t.Context(), service)
+			model.screen = screenTargetDetail
+			model.targetID = 42
+			model.targetDetail = &elmapi.TargetMigration{
+				Status:       elmapi.TargetMigrationStatusInProgress,
+				Repositories: []string{"old/repository"},
+			}
+
+			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+			model = updated.(*Model)
+
+			require.NotNil(t, command)
+			assert.True(t, model.loading)
+			assert.True(t, model.refreshingDetail)
+			assert.NotContains(t, model.View(), "Loading…")
+			assert.Contains(t, model.View(), "old/repository")
+
+			updated, _ = model.Update(command())
+			model = updated.(*Model)
+
+			assert.False(t, model.loading)
+			assert.False(t, model.refreshingDetail)
+			assert.Equal(t, elmapi.TargetMigrationStatusComplete, model.targetDetail.Status)
+			assert.Equal(t, []string{"new/repository"}, model.targetDetail.Repositories)
+		})
+	})
+
+	t.Run("failed detail refresh preserves current values", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{
+			getSourceMigration: func(context.Context, workflow.SourceMigrationID) (*elmapi.MigrationDetail, error) {
+				return nil, assert.AnError
+			},
+		})
+		model.screen = screenSourceDetail
+		model.sourceID = "source-1"
+		setSourceStatus(model, elmapi.StatusCreated)
+
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model = updated.(*Model)
+		require.NotNil(t, command)
+
+		updated, _ = model.Update(command())
+		model = updated.(*Model)
+
+		require.NotNil(t, model.sourceDetail)
+		assert.Contains(t, model.View(), "source-1")
+		assert.Contains(t, model.View(), assert.AnError.Error())
+	})
+
 	t.Run("configuration save reloads source migrations", func(t *testing.T) {
 		svc := &fakeService{
 			saveConfiguration: func(context.Context, workflow.ConfigurationInput) error {
