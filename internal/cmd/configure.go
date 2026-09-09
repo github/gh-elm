@@ -66,6 +66,7 @@ func newConfigCmd() *cobra.Command {
 	_ = cmd.Flags().MarkHidden("show")
 	_ = cmd.Flags().MarkHidden("reset")
 	cmd.AddCommand(
+		newConfigCheckCmd(),
 		newConfigShowCmd(),
 		newConfigResetCmd(),
 		newSetMigratorPATInteractiveCmd(),

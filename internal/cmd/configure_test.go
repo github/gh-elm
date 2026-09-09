@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -69,6 +71,46 @@ func TestConfigureShow(t *testing.T) {
 	assert.Contains(t, out, "https://ghes.example.com", "missing source url in output")
 	assert.Contains(t, out, "set (hidden)", "seeded source token should read as set")
 	assert.Contains(t, out, "not set", "unset target token should read as not set")
+}
+
+func TestConfigCheck(t *testing.T) {
+	seedFileStore(t)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, []string{"/api/v3/meta", "/api/v3/user"}, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer source.Close()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, []string{"/meta", "/user"}, r.URL.Path)
+		if r.URL.Path == "/user" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	require.NoError(t, (&config.Config{SourceURL: source.URL, TargetURL: target.URL}).Save())
+	store, err := creds.NewStore()
+	require.NoError(t, err)
+	require.NoError(t, store.Set(creds.SourceToken, "source-token"))
+	require.NoError(t, store.Set(creds.TargetToken, "target-token"))
+
+	root := NewRootCmd("test")
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"config", "check"})
+	err = root.Execute()
+
+	require.Error(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "[OK] Source network")
+	assert.Contains(t, stderr.String(), "[OK] Source service")
+	assert.Contains(t, stderr.String(), "[OK] Source authentication")
+	assert.Contains(t, stderr.String(), "[OK] Target network")
+	assert.Contains(t, stderr.String(), "[OK] Target service")
+	assert.Contains(t, stderr.String(), "[FAIL] Target authentication: HTTP 403 Forbidden")
 }
 
 func TestMigratorPATInput(t *testing.T) {
