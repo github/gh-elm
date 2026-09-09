@@ -25,7 +25,11 @@ func CheckEndpoint(ctx context.Context, stderr io.Writer, name, baseURL, token s
 		return fmt.Errorf("%s preflight failed: URL is not configured; run `gh elm config`", strings.ToLower(name))
 	}
 
-	userEndpoint := strings.TrimRight(baseURL, "/") + "/user"
+userEndpoint := strings.TrimRight(baseURL, "/") + "/user"
+	if request, err := http.NewRequest(http.MethodGet, userEndpoint, nil); err == nil {
+		request.URL.User = nil
+		userEndpoint = request.URL.String()
+	}
 	client := elmapi.NewClient(baseURL, token)
 	authenticationErr := client.CheckAuthentication(ctx)
 	var httpErr *elmapi.HTTPError
