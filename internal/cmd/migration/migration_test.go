@@ -19,6 +19,9 @@ func TestCreate(t *testing.T) {
 		var gotPath, gotMethod string
 		var gotBody elmapiCreateBody
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			if r.Method == http.MethodGet {
 				assert.Equal(t, elmapi.StatusCreated, r.URL.Query().Get("status"))
 				assert.Equal(t, "100", r.URL.Query().Get("page_size"))
@@ -155,6 +158,9 @@ func TestCreate(t *testing.T) {
 	t.Run("checks every created migration page", func(t *testing.T) {
 		var cursors []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			cursors = append(cursors, r.URL.Query().Get("after"))
 			if r.URL.Query().Get("after") == "" {
 				_, _ = w.Write([]byte(`{"migrations":[{
@@ -186,7 +192,10 @@ func TestCreate(t *testing.T) {
 	})
 
 	t.Run("surfaces duplicate preflight failures", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 		}))
 		defer srv.Close()
@@ -243,6 +252,9 @@ func TestStart(t *testing.T) {
 	t.Run("posts to the start endpoint", func(t *testing.T) {
 		var gotPath string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			gotPath = r.URL.Path
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -266,22 +278,32 @@ func TestStatus(t *testing.T) {
 	t.Run("prints human-readable status", func(t *testing.T) {
 		const respBody = `{"migration":{"migration_id":"mig-1","status":"in_progress"},"target_state":null,"combined_state":null,"messages":[]}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			assert.True(t, strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1"), "path = %q", r.URL.Path)
 			_, _ = w.Write([]byte(respBody))
 		}))
 		defer srv.Close()
 
-		out := run(t, "status", "mig-1",
+		out, stderr, err := execStreams(t, "status", "mig-1",
 			"--source-url", srv.URL, "--source-token", "tok")
+		require.NoError(t, err)
 
 		for _, want := range []string{"Migration", "Migration ID", "mig-1", "In progress"} {
 			assert.Contains(t, out, want)
 		}
+		assert.Contains(t, stderr, "[OK] Source network")
+		assert.Contains(t, stderr, "[OK] Source service")
+		assert.Contains(t, stderr, "[OK] Source authentication")
 	})
 
 	t.Run("--json preserves the raw status response", func(t *testing.T) {
 		const respBody = `{"migration":{"migration_id":"mig-1"},"future_field":{"value":1}}`
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			_, _ = w.Write([]byte(respBody))
 		}))
 		defer srv.Close()
@@ -332,6 +354,9 @@ func TestList(t *testing.T) {
 		const createdBody = `{"migrations":[{"migration_id":"created-id","status":"created"}],"total_count":1}`
 		var statuses []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			status := r.URL.Query().Get("status")
 			statuses = append(statuses, status)
 			if status == "" {
@@ -351,7 +376,10 @@ func TestList(t *testing.T) {
 
 	t.Run("does not fall back when page size is explicit", func(t *testing.T) {
 		var requests int
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			requests++
 			_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
 		}))
@@ -364,7 +392,10 @@ func TestList(t *testing.T) {
 
 	t.Run("does not fall back when a cursor is explicit", func(t *testing.T) {
 		var requests int
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			requests++
 			_, _ = w.Write([]byte(`{"migrations":[],"total_count":0}`))
 		}))
@@ -377,7 +408,10 @@ func TestList(t *testing.T) {
 
 	t.Run("does not fall back when the default response is non-empty", func(t *testing.T) {
 		var requests int
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			requests++
 			_, _ = w.Write([]byte(`{"migrations":[{"migration_id":"active-id","status":"in_progress"}],"total_count":1}`))
 		}))
@@ -391,7 +425,10 @@ func TestList(t *testing.T) {
 
 	t.Run("does not fall back when migrations are returned despite a zero total count", func(t *testing.T) {
 		var requests int
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			requests++
 			_, _ = w.Write([]byte(`{"migrations":[{"migration_id":"active-id","status":"in_progress"}],"total_count":0}`))
 		}))
@@ -431,6 +468,9 @@ func TestActions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotPath, gotMethod string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveSuccessfulPreflight(w, r) {
+					return
+				}
 				gotPath = r.URL.Path
 				gotMethod = r.Method
 				w.WriteHeader(tc.respCode)
@@ -457,6 +497,9 @@ func TestCancel(t *testing.T) {
 	t.Run("accepts the kill alias", func(t *testing.T) {
 		var gotPath string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			gotPath = r.URL.Path
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -470,6 +513,9 @@ func TestCancel(t *testing.T) {
 	t.Run("accepts the migration ID flag", func(t *testing.T) {
 		var gotPath string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			gotPath = r.URL.Path
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -529,6 +575,9 @@ func TestCutover(t *testing.T) {
 	t.Run("sends force in the body", func(t *testing.T) {
 		var gotForce bool
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			var body struct {
 				Force bool `json:"force"`
 			}
@@ -547,6 +596,9 @@ func TestCutover(t *testing.T) {
 	t.Run("accepts the old command name as an alias", func(t *testing.T) {
 		var gotPath string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			gotPath = r.URL.Path
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -604,8 +656,32 @@ func TestRevertCutoverCompatibility(t *testing.T) {
 }
 
 func TestSourceErrorAnnotation(t *testing.T) {
+	t.Run("blocks status when authentication preflight fails", func(t *testing.T) {
+		var statusCalled bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/user") {
+				http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+				return
+			}
+			statusCalled = true
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		_, stderr, err := execStreams(t, "status", "m", "--source-url", srv.URL, "--source-token", "tok")
+
+		require.Error(t, err)
+		assert.False(t, statusCalled)
+		assert.Contains(t, stderr, "[OK] Source network: reachable (HTTP 401 Unauthorized)")
+		assert.Contains(t, stderr, "[OK] Source service: responding (HTTP 401 Unauthorized)")
+		assert.Contains(t, stderr, "[FAIL] Source authentication: HTTP 401 Unauthorized; the configured token was rejected")
+	})
+
 	t.Run("annotates an authentication failure", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
 		}))
@@ -677,8 +753,14 @@ func TestSourceErrorAnnotation(t *testing.T) {
 	})
 
 	t.Run("reports failed authentication behind an ELM 404", func(t *testing.T) {
+		userRequests := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasSuffix(r.URL.Path, "/user") {
+				userRequests++
+				if userRequests == 1 {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
 				http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
 				return
 			}
@@ -693,6 +775,9 @@ func TestSourceErrorAnnotation(t *testing.T) {
 
 	t.Run("preserves a missing migration error when ELM is available", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations") {
 				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0,"next_cursor":""}`))
 				return
@@ -772,6 +857,9 @@ func TestTargetID(t *testing.T) {
 
 	t.Run("prints the target migration ID (human)", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
 			assert.True(t, strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations/mig-1"), "path = %q", r.URL.Path)
 			_, _ = w.Write([]byte(withTargetID))
 		}))
@@ -802,7 +890,14 @@ func TestTargetID(t *testing.T) {
 		// A mistyped / unknown migration ID returns 404 from GHES. The command
 		// must surface that as an error rather than printing a target ID, so a
 		// nonexistent migration is never mistaken for a successful lookup.
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveSuccessfulPreflight(w, r) {
+				return
+			}
+			if strings.HasSuffix(r.URL.Path, "/enterprise/live-migrations") {
+				_, _ = w.Write([]byte(`{"migrations":[],"total_count":0,"next_cursor":""}`))
+				return
+			}
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 		}))
@@ -873,15 +968,28 @@ func runErr(t *testing.T, args ...string) error {
 }
 
 func exec(t *testing.T, args ...string) (string, error) {
+	stdout, _, err := execStreams(t, args...)
+	return stdout, err
+}
+
+func execStreams(t *testing.T, args ...string) (stdoutText, stderrText string, err error) {
 	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
 
 	cmd := NewCommand()
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
 	cmd.SetArgs(args)
 
-	err := cmd.Execute()
-	return buf.String(), err
+	err = cmd.Execute()
+	return stdout.String(), stderr.String(), err
+}
+
+func serveSuccessfulPreflight(w http.ResponseWriter, r *http.Request) bool {
+	if strings.HasSuffix(r.URL.Path, "/meta") || strings.HasSuffix(r.URL.Path, "/user") {
+		w.WriteHeader(http.StatusOK)
+		return true
+	}
+	return false
 }

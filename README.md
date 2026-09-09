@@ -36,6 +36,7 @@ gh elm --help            # list available commands
 gh elm --version         # print the extension version
 
 gh elm config                # interactively set up credentials
+gh elm config check          # check source and target connectivity and authentication
 gh elm config show           # print current config (tokens redacted)
 gh elm config reset          # remove stored config and credentials
 gh elm config set-source-pat ORG # set an organization's SOURCE_PAT secret
@@ -231,6 +232,13 @@ Where values are stored:
 
 Force a specific backend with `GH_ELM_CREDENTIAL_STORE=keyring` or `GH_ELM_CREDENTIAL_STORE=file`.
 `gh elm config show` prints which backend is active.
+
+`gh elm config check` checks source and target independently. For each endpoint it reports
+network reachability, API service health (including `5xx` responses), and whether the configured
+credentials can access the authenticated-user endpoint. Results, including successes, are written
+to standard error so they remain available when standard output is redirected or formatted as JSON.
+Every source-backed `gh elm migration` command runs the same source check before its migration API
+request.
 
 ### Environment variables and precedence
 

@@ -123,6 +123,7 @@ func TestRootHelp(t *testing.T) {
 	assert.Contains(t, help, "\nUSAGE\n  gh elm <command> <subcommand> [flags]\n")
 	assert.Contains(t, help, "\nCOMMANDS\n")
 	assert.Contains(t, help, "  config:")
+	assert.Contains(t, help, "  config check:")
 	assert.Contains(t, help, "  config show:")
 	assert.Contains(t, help, "  config reset:")
 	assert.Contains(t, help, "  help:          Help about any command")

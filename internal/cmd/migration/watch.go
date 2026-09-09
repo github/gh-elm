@@ -162,7 +162,7 @@ func newWatchCmd() *cobra.Command {
 				return fmt.Errorf("interval must be positive, got %s", interval)
 			}
 
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}

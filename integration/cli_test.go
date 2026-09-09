@@ -69,8 +69,12 @@ func TestMigrationStatus(t *testing.T) {
 			requestCount.Add(1)
 
 			assert.Equal(t, http.MethodGet, r.Method)
-			assert.Equal(t, "/api/v3/enterprise/live-migrations/mig-1", r.URL.Path)
 			assert.Equal(t, "Bearer source-token", r.Header.Get("Authorization"))
+			if r.URL.Path == "/api/v3/user" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			assert.Equal(t, "/api/v3/enterprise/live-migrations/mig-1", r.URL.Path)
 
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(response))
@@ -93,8 +97,10 @@ func TestMigrationStatus(t *testing.T) {
 		for _, want := range []string{"Migration", "mig-1", "In progress"} {
 			assert.Contains(t, result.Stdout, want)
 		}
-		assert.Empty(t, result.Stderr)
-		assert.Equal(t, int32(1), requestCount.Load())
+		assert.Contains(t, result.Stderr, "[OK] Source network")
+		assert.Contains(t, result.Stderr, "[OK] Source service")
+		assert.Contains(t, result.Stderr, "[OK] Source authentication")
+		assert.Equal(t, int32(2), requestCount.Load())
 
 		// Tokens must never be included in user-facing output.
 		assert.NotContains(t, result.Stdout, "source-token")
@@ -107,7 +113,7 @@ func TestMigrationStatus(t *testing.T) {
 			requestCount.Add(1)
 
 			assert.Equal(t, http.MethodGet, r.Method)
-			assert.Equal(t, "/api/v3/enterprise/live-migrations/mig-1", r.URL.Path)
+			assert.Equal(t, "/api/v3/user", r.URL.Path)
 			assert.Equal(t, "Bearer invalid-source-token", r.Header.Get("Authorization"))
 
 			w.Header().Set("Content-Type", "application/json")
@@ -133,10 +139,10 @@ func TestMigrationStatus(t *testing.T) {
 		assert.Equal(t, int32(1), requestCount.Load())
 
 		assert.Contains(t, result.Stderr, "Error\n")
-		assert.Contains(t, result.Stderr, "authentication failed")
-		assert.Contains(t, result.Stderr, "HTTP 401")
-		assert.Contains(t, result.Stderr, "GH_SOURCE_HOST")
-		assert.Contains(t, result.Stderr, "GH_SOURCE_TOKEN")
+		assert.Contains(t, result.Stderr, "[OK] Source network: reachable (HTTP 401 Unauthorized)")
+		assert.Contains(t, result.Stderr, "[OK] Source service: responding (HTTP 401 Unauthorized)")
+		assert.Contains(t, result.Stderr, "[FAIL] Source authentication: HTTP 401 Unauthorized")
+		assert.Contains(t, result.Stderr, "configured token was rejected or has expired")
 
 		// The supplied credential must not be echoed in diagnostics.
 		assert.NotContains(t, result.Stdout, "invalid-source-token")
@@ -256,7 +262,7 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
 		assert.Contains(t, result.Stdout, `"source": "stored"`)
-		assert.Empty(t, result.Stderr)
+		assert.Contains(t, result.Stderr, "[OK] Source authentication")
 	})
 
 	t.Run("environment overrides stored configuration", func(t *testing.T) {
@@ -275,7 +281,7 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
 		assert.Contains(t, result.Stdout, `"source": "environment"`)
-		assert.Empty(t, result.Stderr)
+		assert.Contains(t, result.Stderr, "[OK] Source authentication")
 	})
 
 	t.Run("flags override environment and stored configuration", func(t *testing.T) {
@@ -298,12 +304,12 @@ func TestSourceConfigurationPrecedence(t *testing.T) {
 
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
 		assert.Contains(t, result.Stdout, `"source": "flag"`)
-		assert.Empty(t, result.Stderr)
+		assert.Contains(t, result.Stderr, "[OK] Source authentication")
 	})
 
-	assert.Equal(t, int32(1), storedRequests.Load())
-	assert.Equal(t, int32(1), envRequests.Load())
-	assert.Equal(t, int32(1), flagRequests.Load())
+	assert.Equal(t, int32(2), storedRequests.Load())
+	assert.Equal(t, int32(2), envRequests.Load())
+	assert.Equal(t, int32(2), flagRequests.Load())
 }
 
 // newStatusServer returns a source API server that identifies itself in its
@@ -318,8 +324,12 @@ func newStatusServer(
 		requestCount.Add(1)
 
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v3/enterprise/live-migrations/mig-1", r.URL.Path)
 		assert.Equal(t, "Bearer "+expectedToken, r.Header.Get("Authorization"))
+		if r.URL.Path == "/api/v3/user" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		assert.Equal(t, "/api/v3/enterprise/live-migrations/mig-1", r.URL.Path)
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(

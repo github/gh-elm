@@ -18,6 +18,7 @@ import (
 	"github.com/github/gh-elm/internal/config"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/preflight"
 	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/workflow"
 )
@@ -64,7 +65,7 @@ func NewCommand() *cobra.Command {
 // sourceClient resolves the source (GHES) endpoint (flags override env override
 // stored config) and returns a ready client plus the resolved base URL for error
 // messages.
-func sourceClient(sourceURL, sourceToken string) (*elmapi.Client, string, error) {
+func sourceClient(ctx context.Context, stderr io.Writer, sourceURL, sourceToken string) (*elmapi.Client, string, error) {
 	resolver, err := endpoints.NewResolver()
 	if err != nil {
 		return nil, "", err
@@ -73,11 +74,8 @@ func sourceClient(sourceURL, sourceToken string) (*elmapi.Client, string, error)
 	if err != nil {
 		return nil, "", err
 	}
-	if ep.URL == "" {
-		return nil, "", fmt.Errorf("no source URL configured; run `gh elm config`, set %s, or pass --source-url", config.EnvSourceURL)
-	}
-	if ep.Token == "" {
-		return nil, "", fmt.Errorf("no source token configured; run `gh elm config`, set %s, or pass --source-token", config.EnvSourceToken)
+	if err := preflight.CheckEndpoint(ctx, stderr, "Source", ep.URL, ep.Token); err != nil {
+		return nil, ep.URL, err
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), ep.URL, nil
 }
@@ -154,11 +152,6 @@ func newCreateCmd() *cobra.Command {
 				return errors.New("--json cannot be used with --watch")
 			}
 
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
-			if err != nil {
-				return err
-			}
-
 			// WORKAROUND (API defect): the create endpoint requires a
 			// target_api_endpoint, even though every other migration command here
 			// only talks to the source (GHES) API and this CLI has no target-api
@@ -171,6 +164,11 @@ func newCreateCmd() *cobra.Command {
 			}
 			if targetAPI == "" {
 				return fmt.Errorf("the create API requires a target endpoint; set %s (for example api.staffship-01.ghe.com) or run `gh elm config`", config.EnvTargetURL)
+			}
+
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			if err != nil {
+				return err
 			}
 
 			req := elmapi.CreateMigrationRequest{
@@ -249,7 +247,7 @@ func newStartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -288,7 +286,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -337,7 +335,7 @@ func newTargetIDCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -390,7 +388,7 @@ func newListCmd() *cobra.Command {
 					return err
 				}
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -444,7 +442,7 @@ func newCancelCmd() *cobra.Command {
 				return err
 			}
 
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -489,7 +487,7 @@ func newCutoverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -537,7 +535,7 @@ func newCutoverStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -582,7 +580,7 @@ func newRevertCutoverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -627,7 +625,7 @@ func newPauseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
@@ -658,7 +656,7 @@ func newResumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, srcURL, err := sourceClient(*sourceURLFlag(cmd), *sourceTokenFlag(cmd))
+			client, srcURL, err := sourceClient(cmd.Context(), cmd.ErrOrStderr(), *sourceURLFlag(cmd), *sourceTokenFlag(cmd))
 			if err != nil {
 				return err
 			}
