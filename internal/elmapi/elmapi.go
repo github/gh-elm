@@ -92,7 +92,14 @@ func NewClient(baseURL, token string, opts ...Option) *Client {
 // CheckAuthentication verifies that the configured token can access the
 // authenticated-user endpoint.
 func (c *Client) CheckAuthentication(ctx context.Context) error {
-	if err := c.get(ctx, "/user", nil, nil); err != nil {
+	probeClient := *c
+	httpClient := *c.httpClient
+	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	probeClient.httpClient = &httpClient
+
+	if err := probeClient.get(ctx, "/user", nil, nil); err != nil {
 		return fmt.Errorf("checking authentication: %w", err)
 	}
 	return nil

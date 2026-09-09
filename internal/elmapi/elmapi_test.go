@@ -48,3 +48,21 @@ func TestHTTPErrorFallsBackToRawBody(t *testing.T) {
 	assert.Empty(t, httpErr.DocumentationURL)
 	assert.Empty(t, httpErr.CorrelationID)
 }
+
+func TestCheckAuthenticationDoesNotFollowRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	err := NewClient(srv.URL, "tok").CheckAuthentication(t.Context())
+	require.Error(t, err)
+
+	var httpErr *HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusFound, httpErr.StatusCode)
+}
