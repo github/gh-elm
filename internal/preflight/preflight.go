@@ -26,7 +26,7 @@ func CheckEndpoint(ctx context.Context, stderr io.Writer, name, baseURL, token s
 	}
 
 	userEndpoint := strings.TrimRight(baseURL, "/") + "/user"
-	if request, err := http.NewRequest(http.MethodGet, userEndpoint, nil); err == nil {
+	if request, err := http.NewRequestWithContext(ctx, http.MethodGet, userEndpoint, http.NoBody); err == nil {
 		request.URL.User = nil
 		userEndpoint = request.URL.String()
 	}
