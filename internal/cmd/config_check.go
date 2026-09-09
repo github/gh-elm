@@ -19,14 +19,16 @@ func newConfigCheckCmd() *cobra.Command {
 			"for both the configured source and target. All results are written to stderr.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			stderr := cmd.ErrOrStderr()
 			resolver, err := endpoints.NewResolver()
 			if err != nil {
-				return err
+				sourceErr := checkResolvedEndpoint(cmd, stderr, "Source", "", "", err)
+				targetErr := checkResolvedEndpoint(cmd, stderr, "Target", "", "", err)
+				return errors.Join(sourceErr, targetErr)
 			}
 
 			source, sourceResolveErr := resolver.Source("", "")
 			target, targetResolveErr := resolver.Target("", "")
-			stderr := cmd.ErrOrStderr()
 			sourceErr := checkResolvedEndpoint(cmd, stderr, "Source", source.URL, source.Token, sourceResolveErr)
 			targetErr := checkResolvedEndpoint(cmd, stderr, "Target", target.URL, target.Token, targetResolveErr)
 			return errors.Join(sourceErr, targetErr)
