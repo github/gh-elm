@@ -244,6 +244,39 @@ Repository states
 
 		assert.Contains(t, output, "acme/web · Backfill · In progress")
 		assert.Contains(t, output, "✗ Not ready for cutover")
+		assert.NotContains(t, output, "Backfilling")
+	})
+
+	t.Run("suppresses running migration status from cutover", func(t *testing.T) {
+		status := "exporting"
+
+		output := CutoverStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:          &status,
+				DisplayMessage:  "Exporting data from source",
+				ReadyForCutover: false,
+			},
+		})
+
+		assert.Equal(t, `Cutover
+  ✗ Not ready for cutover
+`, output)
+	})
+
+	t.Run("shows active cutover status without obsolete readiness", func(t *testing.T) {
+		status := "cutting_over"
+
+		output := CutoverStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:         &status,
+				DisplayMessage: "Cutover in progress",
+			},
+		})
+
+		assert.Equal(t, `Cutover
+  ● Cutting over
+  Cutover in progress
+`, output)
 	})
 }
 

@@ -579,9 +579,11 @@ func TestCutoverStatus(t *testing.T) {
 		out := run(t, "cutover", "status", "m",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		for _, want := range []string{"○ Not ready for cutover", "Backfill in progress", "backfill incomplete", "acme/web · Backfill · In progress"} {
+		for _, want := range []string{"✗ Not ready for cutover", "backfill incomplete", "acme/web · Backfill · In progress"} {
 			assert.Contains(t, out, want)
 		}
+		assert.NotContains(t, out, "Backfilling")
+		assert.NotContains(t, out, "Backfill in progress")
 		assert.NotContains(t, out, "Ready for cutover: false")
 	})
 
