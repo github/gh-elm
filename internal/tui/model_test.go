@@ -47,7 +47,7 @@ func TestModelUpdate(t *testing.T) {
 		assert.Equal(t, 3, model.cursor)
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(*Model)
-		assert.Equal(t, 5, model.cursor)
+		assert.Equal(t, 4, model.cursor)
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
 		model = updated.(*Model)
 		assert.Equal(t, 3, model.cursor)
@@ -327,40 +327,12 @@ func TestModelUpdate(t *testing.T) {
 		assert.Contains(t, view, "destination URL, destination token")
 	})
 
-	t.Run("cancels a destination migration load and returns home", func(t *testing.T) {
-		started := make(chan int)
-		service := &fakeService{
-			listTargetMigrations: func(ctx context.Context, _ string, maxResults int) ([]elmapi.TargetMigration, error) {
-				started <- maxResults
-				<-ctx.Done()
-				return nil, ctx.Err()
-			},
-		}
-		model := New(t.Context(), service)
+	t.Run("omits standalone advanced destination operations", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
 		setConfigurationReady(model)
-		model.cursor = 4
 
-		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model = updated.(*Model)
-		require.NotNil(t, command)
-		require.Equal(t, screenTargetList, model.screen)
-		require.True(t, model.loading)
-
-		response := make(chan tea.Msg)
-		go func() {
-			response <- command()
-		}()
-		assert.Equal(t, targetListLimit, <-started)
-
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
-		model = updated.(*Model)
-		assert.Equal(t, screenHome, model.screen)
-		assert.False(t, model.loading)
-
-		updated, _ = model.Update(<-response)
-		model = updated.(*Model)
-		assert.Equal(t, screenHome, model.screen)
-		assert.NoError(t, model.err)
+		assert.NotContains(t, actionIDs(model.homeActionItems()), "target")
+		assert.NotContains(t, model.View(), "Advanced destination operations")
 	})
 
 	t.Run("hides authentication rows until prerequisites are configured", func(t *testing.T) {
@@ -1051,7 +1023,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.Contains(t, model.View(), "←/→ select action")
 	})
 
-	t.Run("advanced destination actions use a vertical menu", func(t *testing.T) {
+	t.Run("destination actions use a vertical menu", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenTargetDetail
 		model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusInProgress}

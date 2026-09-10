@@ -69,11 +69,11 @@ func (m *Model) View() string {
 			help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 		}
 	case screenTargetList:
-		title = "Advanced destination migrations"
+		title = "Destination migrations"
 		body = m.targetListView()
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Manual, keys.Refresh, keys.Back)
 	case screenTargetDetail:
-		title = fmt.Sprintf("Destination migration %d (advanced)", m.targetID)
+		title = fmt.Sprintf("Destination migration %d", m.targetID)
 		body = m.targetDetailView()
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
@@ -463,7 +463,7 @@ func (m *Model) migrationCreatedBody(migration elmapi.CreateMigrationResponse) s
 
 func (m *Model) targetListView() string {
 	if len(m.targetMigrations) == 0 {
-		return "No target migrations found.\n\nPress n for advanced direct creation or m to open a numeric target ID."
+		return "No target migrations found.\n\nPress n for direct creation or m to open a numeric target ID."
 	}
 	var builder strings.Builder
 	capacity := max(1, (m.bodyHeight()-2)/4)
