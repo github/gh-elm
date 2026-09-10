@@ -904,6 +904,120 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.Contains(t, model.sourceDetailView(), "In progress")
 	})
 
+	t.Run("destination detail renders responsive progress tables", func(t *testing.T) {
+		summaries := []elmapi.TargetRepositoryStateSummary{
+			{
+				Repository: "acme/api",
+				Backfill: elmapi.TargetOriginStateSummary{
+					Breakdown: []elmapi.TargetStateBreakdownEntry{
+						{State: "processed", Type: "issue", Count: 1100},
+						{State: "pending", Type: "issue", Count: 100},
+						{State: "failed", Type: "issue", Count: 50},
+						{State: "processed", Type: "issue_comment", Count: 75},
+						{State: "processed", Type: "organization", Count: 1},
+					},
+				},
+				LiveUpdate: elmapi.TargetOriginStateSummary{
+					Breakdown: []elmapi.TargetStateBreakdownEntry{
+						{State: "processed", Type: "pull_request", Count: 79},
+						{State: "eligible", Type: "pull_request", Count: 5},
+					},
+				},
+			},
+			{
+				Repository: "acme/web",
+				Backfill: elmapi.TargetOriginStateSummary{
+					Breakdown: []elmapi.TargetStateBreakdownEntry{
+						{State: "processed", Type: "issue", Count: 90},
+						{State: "acknowledged", Type: "issue", Count: 10},
+					},
+				},
+				LiveUpdate: elmapi.TargetOriginStateSummary{
+					Breakdown: []elmapi.TargetStateBreakdownEntry{
+						{State: "processed", Type: "pull_request", Count: 12},
+						{State: "failed", Type: "pull_request", Count: 1},
+						{State: "pending", Type: "pull_request_review", Count: 3},
+					},
+				},
+			},
+		}
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenTargetDetail
+		model.targetID = 42
+		model.sourceID = "403166a1-05b8-479f-b483-086496070084"
+		model.sourceDetail = &elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{
+				MigrationID:             string(model.sourceID),
+				SourceOrganizationLogin: "acme-corp",
+				SourceRepositoryName:    "android-app",
+				TargetOrganizationLogin: "acme-cloud",
+				TargetRepositoryName:    "android-app",
+				TargetMigrationID:       int64(model.targetID),
+			},
+		}
+		model.targetDetail = &elmapi.TargetMigration{
+			MigrationID:              "42",
+			Status:                   elmapi.TargetMigrationStatusInProgress,
+			Repositories:             []string{"acme/api", "acme/web"},
+			Description:              "Migration of acme/api to acme-cloud/api",
+			RepositoryStateSummaries: summaries,
+		}
+
+		model.width = 120
+		model.height = 30
+		wide := model.targetDetailView()
+		view := model.View()
+
+		assert.Contains(t, view, "Migration · acme-corp/android-app → acme-cloud/android-app · 403166a1-05b8-479f-b483-086496070084")
+		assert.NotContains(t, wide, "Status:")
+		assert.NotContains(t, wide, "Repositories:")
+		assert.NotContains(t, wide, "Description:")
+		assert.NotContains(t, wide, "Expires:")
+		assert.Contains(t, wide, "Backfill Breakdown (1,425 total)")
+		assert.Contains(t, wide, "Live Update Breakdown (100 total)")
+		assert.Contains(t, wide, "RESOURCE TYPE")
+		assert.Contains(t, wide, "PROCESSED")
+		assert.Contains(t, wide, "FAILED")
+		assert.Contains(t, wide, "IN PROGRESS")
+		assert.Contains(t, wide, "IssueComment")
+		assert.Contains(t, wide, "PullRequest")
+		assert.Contains(t, wide, "PullRequestReview")
+		assert.NotContains(t, wide, "Organization")
+		assert.Contains(t, wide, "1,265")
+		assert.Contains(t, wide, "50")
+		assert.Contains(t, wide, "110")
+		assert.Contains(t, wide, "91")
+		assert.Contains(t, wide, "1")
+		assert.Contains(t, wide, "8")
+		assert.Contains(t, wide, "9")
+		assert.True(t, lineContainsAll(wide, "Backfill Breakdown", "Live Update Breakdown"))
+		assert.NotContains(t, wide, "Resources ━")
+
+		model.width = 80
+		stacked := model.targetDetailView()
+
+		assert.False(t, lineContainsAll(stacked, "Backfill Breakdown", "Live Update Breakdown"))
+		assert.Less(t, strings.Index(stacked, "Backfill Breakdown"), strings.Index(stacked, "Live Update Breakdown"))
+		assert.LessOrEqual(t, lipgloss.Width(stacked), model.contentWidth())
+	})
+
+	t.Run("destination detail title uses target metadata when opened directly", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.targetID = 42
+		model.targetDetail = &elmapi.TargetMigration{
+			MigrationID:           "42",
+			Repositories:          []string{"github/migrations-vnext"},
+			Description:           "Migration of github/migrations-vnext to elm-test/migrations-vnext-zz",
+			ExporterMigrationGUID: "403166a1-05b8-479f-b483-086496070084",
+		}
+
+		assert.Equal(
+			t,
+			"Migration · github/migrations-vnext → elm-test/migrations-vnext-zz · 403166a1-05b8-479f-b483-086496070084",
+			model.targetDetailTitle(),
+		)
+	})
+
 	t.Run("messages render only on their dedicated page", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.width = 80
@@ -1766,7 +1880,7 @@ func TestModelActions(t *testing.T) {
 		t.Run("in progress can pause or abort", func(t *testing.T) {
 			model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusInProgress}
 			assert.ElementsMatch(t,
-				[]string{"refresh", "resources", "report-request", "report-status", "report-url", "pause", "abort"},
+				[]string{"resources", "report-request", "report-status", "report-url", "pause", "abort"},
 				actionIDs(model.targetActionItems()),
 			)
 		})
@@ -1774,7 +1888,7 @@ func TestModelActions(t *testing.T) {
 		t.Run("paused can resume or abort", func(t *testing.T) {
 			model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusPaused}
 			assert.ElementsMatch(t,
-				[]string{"refresh", "resources", "report-request", "report-status", "report-url", "resume", "abort"},
+				[]string{"resources", "report-request", "report-status", "report-url", "resume", "abort"},
 				actionIDs(model.targetActionItems()),
 			)
 		})
@@ -1782,7 +1896,7 @@ func TestModelActions(t *testing.T) {
 		t.Run("completed has no lifecycle mutation", func(t *testing.T) {
 			model.targetDetail = &elmapi.TargetMigration{Status: elmapi.TargetMigrationStatusComplete}
 			assert.ElementsMatch(t,
-				[]string{"refresh", "resources", "report-request", "report-status", "report-url"},
+				[]string{"resources", "report-request", "report-status", "report-url"},
 				actionIDs(model.targetActionItems()),
 			)
 		})
@@ -1858,6 +1972,22 @@ func actionLabels(actions []actionItem) []string {
 		labels[index] = action.label
 	}
 	return labels
+}
+
+func lineContainsAll(value string, fragments ...string) bool {
+	for line := range strings.SplitSeq(value, "\n") {
+		containsAll := true
+		for _, fragment := range fragments {
+			if !strings.Contains(line, fragment) {
+				containsAll = false
+				break
+			}
+		}
+		if containsAll {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeService struct {

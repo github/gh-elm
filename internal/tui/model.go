@@ -1105,8 +1105,6 @@ func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch actions[m.actionFocus].id {
-	case "refresh":
-		return m.refresh()
 	case "resources":
 		return m.openResourcesForm()
 	case "report-request":
@@ -1130,7 +1128,6 @@ func (m *Model) activateTargetAction() (tea.Model, tea.Cmd) {
 
 func (m *Model) targetActionItems() []actionItem {
 	actions := []actionItem{
-		{id: "refresh", label: "Refresh", shortcut: "r"},
 		{id: "resources", label: "List repository resources", shortcut: "o"},
 		{id: "report-request", label: "Request node report", shortcut: "n"},
 		{id: "report-status", label: "Check report status", shortcut: "s"},

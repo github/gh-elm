@@ -73,6 +73,58 @@ type TargetRepositoryProgress struct {
 	LiveUpdateResourcesAcknowledged int64  `json:"liveUpdateResourcesAcknowledged"`
 }
 
+// TargetRepositoryStateSummary contains per-type node counts for a repository.
+type TargetRepositoryStateSummary struct {
+	Repository string                   `json:"repository"`
+	Backfill   TargetOriginStateSummary `json:"backfill"`
+	LiveUpdate TargetOriginStateSummary `json:"liveUpdate"`
+}
+
+// TargetOriginStateSummary contains node counts for one migration origin.
+type TargetOriginStateSummary struct {
+	Breakdown []TargetStateBreakdownEntry `json:"breakdown"`
+	Total     int64                       `json:"total"`
+}
+
+// UnmarshalJSON accepts the quoted int64 values emitted by protobuf JSON.
+func (s *TargetOriginStateSummary) UnmarshalJSON(data []byte) error {
+	type summaryFields TargetOriginStateSummary
+	var fields struct {
+		summaryFields
+		Total wireInt64 `json:"total"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*s = TargetOriginStateSummary(fields.summaryFields)
+	s.Total = int64(fields.Total)
+	return nil
+}
+
+// TargetStateBreakdownEntry is one state, kind, and resource-type bucket.
+type TargetStateBreakdownEntry struct {
+	State  string `json:"state"`
+	Kind   string `json:"kind"`
+	Type   string `json:"type"`
+	Count  int64  `json:"count"`
+	Origin string `json:"origin"`
+}
+
+// UnmarshalJSON accepts the quoted int64 values emitted by protobuf JSON.
+func (e *TargetStateBreakdownEntry) UnmarshalJSON(data []byte) error {
+	type entryFields TargetStateBreakdownEntry
+	var fields struct {
+		entryFields
+		Count wireInt64 `json:"count"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*e = TargetStateBreakdownEntry(fields.entryFields)
+	e.Count = int64(fields.Count)
+	return nil
+}
+
 // UnmarshalJSON accepts the quoted int64 values returned by the status endpoint
 // while remaining compatible with the numeric values documented by its schema.
 func (p *TargetRepositoryProgress) UnmarshalJSON(data []byte) error {
@@ -125,12 +177,14 @@ func (v *wireInt64) UnmarshalJSON(data []byte) error {
 // verbatim — preserving fields this struct does not model and avoiding
 // zero-valued fields that re-marshaling would inject.
 type TargetMigration struct {
-	MigrationID        string                     `json:"migrationId"`
-	Status             string                     `json:"status"`
-	ExpiresAt          time.Time                  `json:"expiresAt"`
-	Description        string                     `json:"description,omitempty"`
-	Repositories       []string                   `json:"repositories,omitempty"`
-	RepositoryProgress []TargetRepositoryProgress `json:"repositoryProgress,omitempty"`
+	MigrationID              string                         `json:"migrationId"`
+	Status                   string                         `json:"status"`
+	ExpiresAt                time.Time                      `json:"expiresAt"`
+	Description              string                         `json:"description,omitempty"`
+	Repositories             []string                       `json:"repositories,omitempty"`
+	RepositoryProgress       []TargetRepositoryProgress     `json:"repositoryProgress,omitempty"`
+	RepositoryStateSummaries []TargetRepositoryStateSummary `json:"repositoryStateSummaries,omitempty"`
+	ExporterMigrationGUID    string                         `json:"exporterMigrationGuid,omitempty"`
 
 	// Raw is the original JSON object for this migration. It is populated on
 	// decode and excluded from (re-)marshaling.

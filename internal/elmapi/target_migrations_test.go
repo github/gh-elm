@@ -270,7 +270,7 @@ func TestGetTargetMigrationStatus(t *testing.T) {
 		var gotPath string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
-			_, _ = w.Write([]byte(`{"migration":{"migrationId":"42","status":"STATUS_TYPE_IN_PROGRESS","expiresAt":"2024-01-01T00:00:00Z","repositoryProgress":[{"repositoryNwo":"octo/repo","resourcesAdded":10,"resourcesProcessed":5}]}}`))
+			_, _ = w.Write([]byte(`{"migration":{"migrationId":"42","status":"STATUS_TYPE_IN_PROGRESS","expiresAt":"2024-01-01T00:00:00Z","exporterMigrationGuid":"source-guid","repositoryProgress":[{"repositoryNwo":"octo/repo","resourcesAdded":10,"resourcesProcessed":5}]}}`))
 		}))
 		defer srv.Close()
 
@@ -280,6 +280,7 @@ func TestGetTargetMigrationStatus(t *testing.T) {
 
 		assert.Equal(t, "/enterprise/migration/42/status", gotPath)
 		assert.Equal(t, "42", resp.Migration.MigrationID)
+		assert.Equal(t, "source-guid", resp.Migration.ExporterMigrationGUID)
 		require.Len(t, resp.Migration.RepositoryProgress, 1)
 		assert.Equal(t, "octo/repo", resp.Migration.RepositoryProgress[0].RepositoryNWO)
 		assert.Equal(t, int64(10), resp.Migration.RepositoryProgress[0].ResourcesAdded)
@@ -302,6 +303,25 @@ func TestGetTargetMigrationStatus(t *testing.T) {
 		assert.Equal(t, int64(3), progress.EventsProcessed)
 		assert.Equal(t, int64(2), progress.BackfillResourcesAcknowledged)
 		assert.Equal(t, int64(1), progress.LiveUpdateResourcesAcknowledged)
+	})
+
+	t.Run("decodes repository state summaries", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"migration":{"migrationId":"42","repositoryStateSummaries":[{"repository":"octo/repo","backfill":{"total":"12","breakdown":[{"state":"processed","kind":"resource","type":"issue_comment","count":"10","origin":"backfill"},{"state":"failed","kind":"resource","type":"issue_comment","count":2,"origin":"backfill"}]},"liveUpdate":{"total":"3","breakdown":[{"state":"pending","kind":"event","type":"pull_request","count":"3","origin":"live_update"}]}}]}}`))
+		}))
+		defer srv.Close()
+
+		resp, err := NewClient(srv.URL, "tok").GetTargetMigrationStatus(t.Context(), 42)
+
+		require.NoError(t, err)
+		require.Len(t, resp.Migration.RepositoryStateSummaries, 1)
+		summary := resp.Migration.RepositoryStateSummaries[0]
+		assert.Equal(t, "octo/repo", summary.Repository)
+		assert.Equal(t, int64(12), summary.Backfill.Total)
+		require.Len(t, summary.Backfill.Breakdown, 2)
+		assert.Equal(t, "issue_comment", summary.Backfill.Breakdown[0].Type)
+		assert.Equal(t, int64(10), summary.Backfill.Breakdown[0].Count)
+		assert.Equal(t, int64(3), summary.LiveUpdate.Total)
 	})
 
 	t.Run("rejects malformed progress counts", func(t *testing.T) {
