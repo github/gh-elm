@@ -45,12 +45,11 @@ gh elm config set-target-pat ORG # set an organization's TARGET_PAT secret
 When standard input and output are interactive terminals, invoking `gh elm` with no
 arguments opens a full-screen TUI. Its main migration workflow supports creating,
 monitoring, and controlling migrations, then links to destination details, resources,
-and reports without repeatedly copying IDs. Lower-level destination migration controls
-remain available under **Advanced destination operations**. Use arrow keys or `j`/`k`
-to move, Enter to select, Escape to go back, `/` to search migrations, `Ctrl+V` to
-toggle list density, `?` for contextual help, and `q` to quit. Long detail and result
-views support Page Up and Page Down. Action screens always focus their first button;
-use Left/Right and Enter or the shortcut shown inside a button to activate it.
+and reports without repeatedly copying IDs. Use arrow keys or `j`/`k` to move, Enter
+to select, Escape to go back, `/` to search migrations, `Ctrl+V` to toggle list density,
+`?` for contextual help, and `q` to quit. Long detail and result views support Page Up
+and Page Down. Action screens always focus their first button; use Left/Right and Enter
+or the shortcut shown inside a button to activate it.
 
 Migration creation lazily loads searchable source repositories and destination
 organizations from the configured APIs. The destination repository name defaults to

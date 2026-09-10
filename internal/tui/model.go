@@ -763,10 +763,6 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 			m.resetViewport()
 			command := m.startConfigurationLoad()
 			return m, command
-		case "target":
-			m.screen, m.loading, m.err = screenTargetList, true, nil
-			command := m.startTargetListLoad()
-			return m, command
 		case "quit":
 			return m, tea.Quit
 		}
@@ -919,7 +915,6 @@ var homeActions = []actionItem{
 	{id: "create", label: "Create migration"},
 	{id: "mannequins", label: "Target mannequins"},
 	{id: "configuration", label: "Configuration"},
-	{id: "target", label: "Advanced destination operations"},
 	{id: "quit", label: "Quit"},
 }
 
@@ -1777,7 +1772,7 @@ func (m *Model) openTargetCreateForm() (tea.Model, tea.Cmd) {
 	description := ""
 	guid := ""
 	return m.openForm(formState{
-		title:  "Create target migration (advanced)",
+		title:  "Create target migration",
 		parent: screenTargetList,
 		fields: []formField{
 			textFormField("Source repository URL", "", &sourceURL),
