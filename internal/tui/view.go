@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -73,7 +75,7 @@ func (m *Model) View() string {
 		body = m.targetListView()
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Manual, keys.Refresh, keys.Back)
 	case screenTargetDetail:
-		title = fmt.Sprintf("Destination migration %d", m.targetID)
+		title = m.targetDetailTitle()
 		body = m.targetDetailView()
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
@@ -415,6 +417,159 @@ func (m *Model) sourceDetailView() string {
 	return ""
 }
 
+const (
+	progressTableGap      = 3
+	minProgressTableWidth = 46
+)
+
+type progressStage int
+
+const (
+	progressBackfill progressStage = iota
+	progressLiveUpdate
+)
+
+func (m *Model) targetProgressTables(summaries []elmapi.TargetRepositoryStateSummary) string {
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	width := m.contentWidth()
+	if width >= 2*minProgressTableWidth+progressTableGap {
+		leftWidth := (width - progressTableGap) / 2
+		rightWidth := width - progressTableGap - leftWidth
+		return lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			m.progressTable("Backfill Breakdown", summaries, progressBackfill, leftWidth),
+			strings.Repeat(" ", progressTableGap),
+			m.progressTable("Live Update Breakdown", summaries, progressLiveUpdate, rightWidth),
+		)
+	}
+
+	return m.progressTable("Backfill Breakdown", summaries, progressBackfill, width) +
+		"\n\n" +
+		m.progressTable("Live Update Breakdown", summaries, progressLiveUpdate, width)
+}
+
+func (m *Model) progressTable(title string, summaries []elmapi.TargetRepositoryStateSummary, stage progressStage, width int) string {
+	type row struct {
+		resourceType string
+		processed    int64
+		failed       int64
+		total        int64
+	}
+
+	byType := make(map[string]row)
+	for _, repository := range summaries {
+		var entries []elmapi.TargetStateBreakdownEntry
+		switch stage {
+		case progressBackfill:
+			entries = repository.Backfill.Breakdown
+		case progressLiveUpdate:
+			entries = repository.LiveUpdate.Breakdown
+		}
+		for _, entry := range entries {
+			if strings.EqualFold(entry.Type, "organization") {
+				continue
+			}
+			current := byType[entry.Type]
+			current.resourceType = resourceTypeLabel(entry.Type)
+			current.total += entry.Count
+			switch strings.ToLower(strings.TrimPrefix(entry.State, "NODE_STATE_")) {
+			case "processed":
+				current.processed += entry.Count
+			case "failed":
+				current.failed += entry.Count
+			}
+			byType[entry.Type] = current
+		}
+	}
+
+	rows := make([]row, 0, len(byType))
+	for _, current := range byType {
+		rows = append(rows, current)
+	}
+	slices.SortFunc(rows, func(left, right row) int {
+		return strings.Compare(left.resourceType, right.resourceType)
+	})
+
+	var total, totalProcessed, totalFailed int64
+	innerWidth := max(1, width-2)
+	resourceTypeWidth := max(13, innerWidth-30)
+	tableRow := func(resourceType, processed, failed, inProgress string) string {
+		resourceType = ansi.Truncate(resourceType, resourceTypeWidth, "…")
+		left := lipgloss.NewStyle().Width(resourceTypeWidth).Render(resourceType)
+		right := func(value string, cellWidth int) string {
+			return lipgloss.NewStyle().Width(cellWidth).Align(lipgloss.Right).Render(value)
+		}
+		failedCell := right(failed, 7)
+		if failed != "FAILED" && failed != "0" {
+			failedCell = m.styles.Failure.Render(failedCell)
+		}
+		return left + " " + right(processed, 9) + " " + failedCell + " " + right(inProgress, 11)
+	}
+	count := formatCount
+
+	lines := []string{
+		m.styles.Muted.Bold(true).Render(tableRow("RESOURCE TYPE", "PROCESSED", "FAILED", "IN PROGRESS")),
+		m.styles.Muted.Render(strings.Repeat("─", innerWidth)),
+	}
+	for _, current := range rows {
+		inProgress := pendingResources(current.total, current.processed+current.failed)
+		lines = append(lines, tableRow(
+			current.resourceType,
+			count(current.processed),
+			count(current.failed),
+			count(inProgress),
+		))
+		total += current.total
+		totalProcessed += current.processed
+		totalFailed += current.failed
+	}
+	lines = append(lines, m.styles.Bold.Render(tableRow(
+		"TOTAL",
+		count(totalProcessed),
+		count(totalFailed),
+		count(pendingResources(total, totalProcessed+totalFailed)),
+	)))
+
+	heading := m.styles.Bold.Render(fmt.Sprintf("%s (%s total)", title, count(total)))
+	table := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.styles.Muted.GetForeground()).
+		Render(strings.Join(lines, "\n"))
+	return heading + "\n" + table
+}
+
+func pendingResources(added, processed int64) int64 {
+	return max(0, added-processed)
+}
+
+func resourceTypeLabel(value string) string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	})
+	if len(parts) == 0 {
+		return "Unknown"
+	}
+	for index := range parts {
+		parts[index] = strings.ToUpper(parts[index][:1]) + strings.ToLower(parts[index][1:])
+	}
+	return strings.Join(parts, "")
+}
+
+func formatCount(value int64) string {
+	digits := strconv.FormatInt(value, 10)
+	start := 0
+	if strings.HasPrefix(digits, "-") {
+		start = 1
+	}
+	for index := len(digits) - 3; index > start; index -= 3 {
+		digits = digits[:index] + "," + digits[index:]
+	}
+	return digits
+}
+
 func (m *Model) sourceDetailTitle() string {
 	if m.sourceDetail != nil && m.sourceDetail.Migration != nil {
 		migration := m.sourceDetail.Migration
@@ -425,6 +580,74 @@ func (m *Model) sourceDetailTitle() string {
 		}
 	}
 	return fmt.Sprintf("Migration %s", m.sourceID)
+}
+
+func (m *Model) targetDetailTitle() string {
+	var source, target, id string
+	if migration := m.sourceMigrationForTarget(); migration != nil {
+		source = repositoryCoordinate(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
+		target = repositoryCoordinate(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
+		id = migration.MigrationID
+	}
+	if migration := m.targetDetail; migration != nil {
+		if source == "" && len(migration.Repositories) > 0 {
+			source = migration.Repositories[0]
+		}
+		if parsedSource, parsedTarget, ok := parseMigrationDescription(migration.Description); ok {
+			if source == "" {
+				source = parsedSource
+			}
+			if target == "" {
+				target = parsedTarget
+			}
+		}
+		if id == "" {
+			id = migration.ExporterMigrationGUID
+		}
+		if id == "" {
+			id = migration.MigrationID
+		}
+	}
+	if id == "" && m.targetID > 0 {
+		id = strconv.FormatInt(int64(m.targetID), 10)
+	}
+
+	parts := []string{"Migration"}
+	if source != "" && target != "" {
+		parts = append(parts, source+" → "+target)
+	} else if source != "" {
+		parts = append(parts, source)
+	}
+	if id != "" {
+		parts = append(parts, id)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (m *Model) sourceMigrationForTarget() *elmapi.MigrationSummary {
+	if m.sourceDetail != nil && m.sourceDetail.Migration != nil &&
+		workflow.TargetMigrationID(m.sourceDetail.Migration.TargetMigrationID) == m.targetID {
+		return m.sourceDetail.Migration
+	}
+	for index := range m.sourceMigrations {
+		if workflow.TargetMigrationID(m.sourceMigrations[index].TargetMigrationID) == m.targetID {
+			return &m.sourceMigrations[index]
+		}
+	}
+	return nil
+}
+
+func parseMigrationDescription(description string) (source, target string, ok bool) {
+	const prefix = "Migration of "
+	remainder, found := strings.CutPrefix(description, prefix)
+	if !found {
+		return "", "", false
+	}
+	source, target, found = strings.Cut(remainder, " to ")
+	if !found || source == "" || target == "" {
+		return "", "", false
+	}
+	return source, target, true
 }
 
 func repositoryCoordinate(owner, name string) string {
@@ -491,48 +714,10 @@ func (m *Model) targetListView() string {
 }
 
 func (m *Model) targetDetailView() string {
-	var detail strings.Builder
-	if migration := m.targetDetail; migration != nil {
-		fmt.Fprintf(&detail, "Status:       %s\n", friendly(migration.Status))
-		fmt.Fprintf(&detail, "Repositories: %s\n", strings.Join(migration.Repositories, ", "))
-		if migration.Description != "" {
-			fmt.Fprintf(&detail, "Description:  %s\n", migration.Description)
-		}
-		if !migration.ExpiresAt.IsZero() {
-			fmt.Fprintf(&detail, "Expires:      %s\n", migration.ExpiresAt.Format("2006-01-02 15:04:05Z07:00"))
-		}
-		if len(migration.RepositoryProgress) > 0 {
-			detail.WriteString("\nRepository progress\n")
-		}
-		for index, progress := range migration.RepositoryProgress {
-			fmt.Fprintf(
-				&detail,
-				"%s\n  Resources %s %d/%d\n  Events    %s %d/%d\n  Acknowledged: %d backfill · %d live updates\n  Sent: %s resources · %s live updates\n",
-				progress.RepositoryNWO,
-				render.ProgressBar(progress.ResourcesProcessed, progress.ResourcesAdded, 20),
-				progress.ResourcesProcessed,
-				progress.ResourcesAdded,
-				render.ProgressBar(progress.EventsProcessed, progress.EventsAdded, 20),
-				progress.EventsProcessed,
-				progress.EventsAdded,
-				progress.BackfillResourcesAcknowledged,
-				progress.LiveUpdateResourcesAcknowledged,
-				yesNo(progress.AllResourcesSent),
-				yesNo(progress.AllLiveUpdatesSent),
-			)
-			if index < len(migration.RepositoryProgress)-1 {
-				detail.WriteString("\n")
-			}
-		}
+	if m.targetDetail == nil {
+		return ""
 	}
-	return detail.String()
-}
-
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
+	return m.targetProgressTables(m.targetDetail.RepositoryStateSummaries)
 }
 
 func (m *Model) detailLayout(detail, actions string) string {
