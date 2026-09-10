@@ -145,7 +145,8 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	var lines, renderedValues []string
 	normalizedStatus := normalizedValue(status)
 	notStarted := normalizedStatus == "created" || normalizedStatus == "queued"
-	if !terminated && !notStarted && normalizedStatus != "" {
+	cutoverStatus := cutoverRelatedStatus(status)
+	if cutoverStatus {
 		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
 		renderedValues = append(renderedValues, status)
 	}
@@ -154,12 +155,12 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	if combined.ReadyForCutover {
 		readinessText = "Ready for cutover"
 	}
-	if !completed && !equivalentValue(status, readinessText) {
+	if !completed && !cutoverStatus {
 		lines = append(lines, bullet(readiness.glyph, readiness.text))
 		renderedValues = append(renderedValues, readinessText)
 	}
 	if displayMessage := strings.TrimSpace(combined.DisplayMessage); displayMessage != "" &&
-		!terminated && !notStarted && !containsEquivalentValue(renderedValues, displayMessage) {
+		cutoverStatus && !containsEquivalentValue(renderedValues, displayMessage) {
 		lines = append(lines, detail(displayMessage))
 		renderedValues = append(renderedValues, displayMessage)
 	}
@@ -200,6 +201,16 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 		sections = append(sections, renderSection("Repository states", repositoryLines...))
 	}
 	return joinSections(sections...)
+}
+
+func cutoverRelatedStatus(status string) bool {
+	switch normalizedValue(status) {
+	case "ready for cutover", "cutting over", "cutover pending", "cutover finalizing",
+		"completed", "complete", "success", "succeeded":
+		return true
+	default:
+		return false
+	}
 }
 
 func terminatedStatus(status string) bool {
