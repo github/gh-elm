@@ -1195,9 +1195,13 @@ var configurationActions = []actionItem{
 	{id: "reset", label: "Reset configuration", shortcut: "x"},
 }
 
-var createMigrationActions = []actionItem{
-	{id: "create", label: "Create"},
-	{id: "cancel", label: "Cancel"},
+var createMigrationActions = formActions("create", "Create")
+
+func formActions(id, label string) []actionItem {
+	return []actionItem{
+		{id: id, label: label},
+		{id: "cancel", label: "Cancel"},
+	}
 }
 
 func (m *Model) activateConfigurationAction() (tea.Model, tea.Cmd) {
@@ -1562,9 +1566,10 @@ func cycleOption(field *formField, delta int) {
 func (m *Model) openSourceIDForm() (tea.Model, tea.Cmd) {
 	id := ""
 	return m.openForm(formState{
-		title:  "Open source migration",
-		parent: screenSourceList,
-		fields: []formField{textFormField("Source migration UUID", "", &id)},
+		title:   "Open source migration",
+		parent:  screenSourceList,
+		fields:  []formField{textFormField("Source migration UUID", "", &id)},
+		actions: formActions("show", "Show migration"),
 		submit: func() (tea.Cmd, error) {
 			id = strings.TrimSpace(id)
 			if id == "" {
@@ -1746,9 +1751,10 @@ func (m *Model) createSourceMigrationCmd(input workflow.SourceCreateInput) tea.C
 func (m *Model) openTargetIDForm() (tea.Model, tea.Cmd) {
 	value := ""
 	return m.openForm(formState{
-		title:  "Open target migration",
-		parent: screenTargetList,
-		fields: []formField{textFormField("Numeric target migration ID", "", &value)},
+		title:   "Open target migration",
+		parent:  screenTargetList,
+		fields:  []formField{textFormField("Numeric target migration ID", "", &value)},
+		actions: formActions("show", "Show migration"),
 		submit: func() (tea.Cmd, error) {
 			id, err := workflow.ParseTargetMigrationID(value)
 			if err != nil {
@@ -1779,6 +1785,7 @@ func (m *Model) openTargetCreateForm() (tea.Model, tea.Cmd) {
 			textFormField("Description", "", &description),
 			textFormField("Exporter migration GUID", "", &guid),
 		},
+		actions: formActions("create", "Create migration"),
 		submit: func() (tea.Cmd, error) {
 			input := workflow.TargetCreateInput{
 				SourceRepositoryURL: sourceURL,
@@ -1808,6 +1815,7 @@ func (m *Model) openResourcesForm() (tea.Model, tea.Cmd) {
 			selectFormField("State", &state, "all", "pending", "processed", "failed", "eligible"),
 			textFormField("Maximum results (0 = all)", "", &maximum),
 		},
+		actions: formActions("show", "Show resources"),
 		submit: func() (tea.Cmd, error) {
 			maxResults, err := strconv.Atoi(strings.TrimSpace(maximum))
 			if err != nil || maxResults < 0 {
@@ -1847,10 +1855,18 @@ func (m *Model) openReportForm(title, operation string) (tea.Model, tea.Cmd) {
 		state = "all"
 		fields = append(fields, selectFormField("Node state", &state, "all", "migrated", "unmigrated"))
 	}
+	actionLabel := "Continue"
+	switch operation {
+	case "status":
+		actionLabel = "Show status"
+	case "url":
+		actionLabel = "Show URL"
+	}
 	return m.openForm(formState{
-		title:  title,
-		parent: screenTargetDetail,
-		fields: fields,
+		title:   title,
+		parent:  screenTargetDetail,
+		fields:  fields,
+		actions: formActions(operation, actionLabel),
 		submit: func() (tea.Cmd, error) {
 			input := workflow.ReportInput{MigrationID: m.targetID, Stage: stage, State: state}
 			return func() tea.Msg {
@@ -1887,10 +1903,17 @@ func (m *Model) openMannequinListForm(export bool) (tea.Model, tea.Cmd) {
 	if export {
 		title = "Export mannequins"
 	}
+	actionID := "search"
+	actionLabel := "Search"
+	if export {
+		actionID = "export"
+		actionLabel = "Export mannequins"
+	}
 	return m.openForm(formState{
-		title:  title,
-		parent: screenMannequins,
-		fields: fields,
+		title:   title,
+		parent:  screenMannequins,
+		fields:  fields,
+		actions: formActions(actionID, actionLabel),
 		submit: func() (tea.Cmd, error) {
 			return func() tea.Msg {
 				if export {
@@ -1931,9 +1954,10 @@ func (m *Model) openMannequinReclaimForm(csvMode bool) (tea.Model, tea.Cmd) {
 		boolFormField("Immediate reattribution (EMU)", &skipInvitation),
 	)
 	return m.openForm(formState{
-		title:  "Reclaim mannequins",
-		parent: screenMannequins,
-		fields: fields,
+		title:   "Reclaim mannequins",
+		parent:  screenMannequins,
+		fields:  fields,
+		actions: formActions("continue", "Continue"),
 		submit: func() (tea.Cmd, error) {
 			input := workflow.MannequinReclaimInput{
 				Organization:   organization,
@@ -1993,10 +2017,7 @@ func (m *Model) openConfigurationForm() (tea.Model, tea.Cmd) {
 			textFormField("Target URL", "", &targetURL),
 			secretFormField("Target token", &targetToken, targetTokenSet),
 		},
-		actions: []actionItem{
-			{id: "save", label: "Save"},
-			{id: "cancel", label: "Cancel"},
-		},
+		actions: formActions("save", "Save"),
 		submit: func() (tea.Cmd, error) {
 			input := workflow.ConfigurationInput{
 				SourceURL:   sourceURL,
