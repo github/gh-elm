@@ -24,7 +24,9 @@ const (
 // View implements tea.Model.
 func (m *Model) View() string {
 	if m.width > 0 && (m.width < 48 || m.height < 12) {
-		return m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit", "", "")
+		return nativeCursorView(
+			m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit", "", ""),
+		)
 	}
 
 	current := m.screen
@@ -154,6 +156,9 @@ func (m *Model) View() string {
 		help = "enter/esc close"
 	}
 	rendered := m.frame(title, body, help, topLine, bottomLine)
+	if confirming || alerting || resultPopup {
+		rendered = strings.ReplaceAll(rendered, nativeCursorPositionMarker, "")
+	}
 	if confirming {
 		rendered = overlayCenter(
 			rendered,
@@ -185,7 +190,7 @@ func (m *Model) View() string {
 			)
 		}
 	}
-	return rendered
+	return nativeCursorView(rendered)
 }
 
 func (m *Model) frame(title, body, help, topLine, bottomLine string) string {
@@ -877,6 +882,18 @@ func (m *Model) formView() string {
 		focused := index == m.form.cursor
 		if focused {
 			label = m.styles.Info.Bold(true).Render(label)
+			if field.kind == fieldSecret && field.text != nil && *field.text == "" && placeholder {
+				value = ""
+				placeholder = false
+			}
+			if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) {
+				if *field.text == "" {
+					value = nativeCursorPositionMarker + value
+				} else {
+					value = truncateFormValue(value, max(1, m.contentWidth()-4))
+					value += nativeCursorPositionMarker
+				}
+			}
 			if placeholder {
 				value = m.styles.Placeholder.Render(value)
 			}
@@ -925,6 +942,14 @@ func (m *Model) formView() string {
 	}
 	builder.WriteString(suffix)
 	return builder.String()
+}
+
+func truncateFormValue(value string, width int) string {
+	excess := ansi.StringWidth(value) - width
+	if excess <= 0 {
+		return value
+	}
+	return ansi.TruncateLeft(value, excess, "")
 }
 
 func (m *Model) focusedFormAction() int {
