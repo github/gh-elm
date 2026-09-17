@@ -197,16 +197,16 @@ func (c *Client) migrationPath(migrationID string, action ...string) string {
 	return p.String()
 }
 
-// --- Typed views over the GET status document, used by `watch`. ---
+// --- Typed views over the GET status document. ---
 
-// MigrationDetail is a partial typed decode of the GET status document. Only the
-// fields the watch renderer needs are modeled; the raw document (from
-// GetMigration) is the source of truth for `status`.
+// MigrationDetail is a partial typed decode for human-readable status displays.
+// GetMigration preserves the complete raw document for JSON output.
 type MigrationDetail struct {
-	Migration     *MigrationSummary  `json:"migration"`
-	TargetState   *TargetState       `json:"target_state"`
-	CombinedState *CombinedState     `json:"combined_state"`
-	Messages      []MigrationMessage `json:"messages"`
+	Migration                *MigrationSummary  `json:"migration"`
+	SourceRepositoryArchived *bool              `json:"source_repository_archived"`
+	TargetState              *TargetState       `json:"target_state"`
+	CombinedState            *CombinedState     `json:"combined_state"`
+	Messages                 []MigrationMessage `json:"messages"`
 }
 
 // MigrationSummary is the core migration record.

@@ -117,6 +117,15 @@ gh elm migration cutover revert <uuid>
 gh elm migration cutover revert <uuid> --json | jq .success
 ```
 
+Migration status, live watch (`gh elm migration watch <uuid>`), and TUI details
+show the source repository's observed archive state separately from migration
+progress and completion. The `source_repository_archived` response field is
+`true`, `false`, or `null`. A missing or null field, including on servers that do
+not support the observation, displays "Source repository archive state unavailable".
+The observation is a sample, not proof of a successful archive operation or a
+guarantee that an unarchived repository is writable. `--json` preserves the complete
+response, including this field and legacy progress fields.
+
 Look up a migration's destination (GitHub with Data Residency) migration ID —
 `gh elm migration target-id` (human-readable by default; add `--json` for a
 machine-readable object). The numeric target migration ID it returns is the positional

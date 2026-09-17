@@ -29,16 +29,29 @@ func MigrationCancel(migrationID string) string {
 
 // MigrationStatus renders a migration status response.
 func MigrationStatus(v elmapi.MigrationDetail) string {
-	if v.Migration == nil && v.TargetState == nil && v.CombinedState == nil && len(v.Messages) == 0 {
+	if v.Migration == nil && v.SourceRepositoryArchived == nil && v.TargetState == nil && v.CombinedState == nil && len(v.Messages) == 0 {
 		return "No migration status data returned.\n"
 	}
 
 	return joinSections(
 		renderMigrationSummary(v.Migration),
+		renderSection("Source", "  "+SourceRepositoryArchiveState(v.SourceRepositoryArchived)),
 		renderTargetState(v.TargetState),
 		renderCombinedState(v.CombinedState),
 		renderMessages(v.Messages),
 	)
+}
+
+// SourceRepositoryArchiveState renders a nullable source observation, not migration progress.
+func SourceRepositoryArchiveState(archived *bool) string {
+	styles := theme.New()
+	if archived == nil {
+		return styles.Muted.Render("Source repository archive state unavailable")
+	}
+	if *archived {
+		return styles.Primary.Render("Source repository archived")
+	}
+	return styles.Primary.Render("Source repository not archived")
 }
 
 // CutoverStatus renders the cutover portion of a migration status response.
@@ -106,11 +119,9 @@ func renderRepositoryProgress(progress elmapi.RepositoryProgress) string {
 
 	resources := positiveState(progress.AllResourcesSent, "All resources sent", "Resources still being sent")
 	gitPush := positiveState(progress.InitialGitPushComplete, "Initial Git push complete", "Initial Git push pending")
-	lock := neutralState(progress.RepositoryLocked, "Source repository locked", "Source repository unlocked")
 	lines = append(lines,
 		bullet(resources.glyph, resources.text),
 		bullet(gitPush.glyph, gitPush.text),
-		bullet(lock.glyph, lock.text),
 	)
 
 	return renderSection("Progress · "+valueOrEmpty(progress.RepositoryNWO), lines...)
@@ -364,20 +375,6 @@ func failureState(value bool, trueText, falseText string) state {
 	return state{
 		glyph: styles.Failure.Render("✗"),
 		text:  styles.Failure.Render(falseText),
-	}
-}
-
-func neutralState(value bool, trueText, falseText string) state {
-	styles := theme.New()
-	if value {
-		return state{
-			glyph: styles.Warning.Render("●"),
-			text:  styles.Warning.Render(trueText),
-		}
-	}
-	return state{
-		glyph: styles.Muted.Render("○"),
-		text:  styles.Muted.Render(falseText),
 	}
 }
 

@@ -263,6 +263,48 @@ func TestStart(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
+	t.Run("renders source-only observations and empty documents", func(t *testing.T) {
+		cases := []struct {
+			body string
+			want string
+		}{
+			{`{"source_repository_archived":true}`, "Source repository archived"},
+			{`{"source_repository_archived":false}`, "Source repository not archived"},
+			{`{"migration":{},"source_repository_archived":null}`, "Source repository archive state unavailable"},
+			{`{"migration":{}}`, "Source repository archive state unavailable"},
+			{`{}`, "No migration status data returned."},
+			{`{"source_repository_archived":null}`, "No migration status data returned."},
+			{`null`, "No migration status data returned."},
+		}
+		for _, tc := range cases {
+			t.Run(tc.body, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = w.Write([]byte(tc.body))
+				}))
+				t.Cleanup(srv.Close)
+
+				out := run(t, "status", "mig-1", "--source-url", srv.URL, "--source-token", "tok")
+				assert.Contains(t, out, tc.want)
+				assert.NotContains(t, out, "Source repository locked")
+				assert.NotContains(t, out, "Source repository unlocked")
+			})
+		}
+	})
+
+	t.Run("invalid observation fails human output but survives raw JSON", func(t *testing.T) {
+		const body = `{"source_repository_archived":"unexpected","future_field":{"value":1}}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+
+		out, err := exec(t, "status", "mig-1", "--source-url", srv.URL, "--source-token", "tok")
+		require.ErrorContains(t, err, "source_repository_archived")
+		assert.NotContains(t, out, "Source repository archived")
+		out = run(t, "status", "mig-1", "--json", "--source-url", srv.URL, "--source-token", "tok")
+		assert.JSONEq(t, body, out)
+	})
+
 	t.Run("prints human-readable status", func(t *testing.T) {
 		const respBody = `{"migration":{"migration_id":"mig-1","status":"in_progress"},"target_state":null,"combined_state":null,"messages":[]}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +322,7 @@ func TestStatus(t *testing.T) {
 	})
 
 	t.Run("--json preserves the raw status response", func(t *testing.T) {
-		const respBody = `{"migration":{"migration_id":"mig-1"},"future_field":{"value":1}}`
+		const respBody = `{"migration":{"migration_id":"mig-1"},"source_repository_archived":false,"target_state":{"repository_progress":[{"repository_locked":true}]},"future_field":{"value":1}}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(respBody))
 		}))

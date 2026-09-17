@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
 
@@ -37,6 +38,8 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	w(&b, m.renderHeader())
+	w(&b, render.SourceRepositoryArchiveState(m.detail.SourceRepositoryArchived))
+	w(&b, "\n")
 	w(&b, "\n")
 	w(&b, m.renderTimeline())
 	w(&b, m.renderPreflight())
@@ -308,13 +311,12 @@ func (m Model) cutoverDetail() string {
 		return "Waiting for cutover status..."
 	}
 
-	locked := boolCheck(rp.RepositoryLocked, m.styles)
 	gitPush := boolCheck(rp.InitialGitPushComplete, m.styles)
 	resourcesSent := boolCheck(rp.AllResourcesSent, m.styles)
 
 	var b strings.Builder
-	w(&b, fmt.Sprintf("Repo locked: %s  Git push: %s  All resources sent: %s",
-		locked, gitPush, resourcesSent))
+	w(&b, fmt.Sprintf("Git push: %s  All resources sent: %s",
+		gitPush, resourcesSent))
 
 	if cs := m.detail.CombinedState; cs != nil && cs.DisplayMessage != "" {
 		w(&b, "\n"+m.styles.Warning.Render(cs.DisplayMessage))

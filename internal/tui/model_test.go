@@ -333,6 +333,66 @@ func TestModel(t *testing.T) {
 		assert.Zero(t, model.targetID)
 	})
 
+	t.Run("source archive refresh replaces observations and retains detail on request failure", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		model.width, model.height = 100, 60
+		model.sourceWatching = true
+		cases := []struct {
+			body string
+			want *bool
+			text string
+		}{
+			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
+			{`{"source_repository_archived":false}`, new(false), "Source repository not archived"},
+			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
+			{`{"migration":{},"source_repository_archived":null}`, nil, "Source repository archive state unavailable"},
+			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
+			{`{"migration":{}}`, nil, "Source repository archive state unavailable"},
+		}
+		for _, tc := range cases {
+			var detail elmapi.MigrationDetail
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &detail))
+			updated, cmd := model.Update(sourceDetailMsg{detail: &detail})
+			model = updated.(*Model)
+			require.NoError(t, model.err)
+			assert.NotNil(t, cmd)
+			assert.Same(t, &detail, model.sourceDetail)
+			assert.Equal(t, tc.want, model.sourceDetail.SourceRepositoryArchived)
+			assert.Contains(t, model.View(), tc.text)
+			assert.Equal(t, 1, strings.Count(model.View(), "Source repository"))
+		}
+
+		previous := &elmapi.MigrationDetail{SourceRepositoryArchived: new(true)}
+		_, _ = model.Update(sourceDetailMsg{detail: previous})
+		_, cmd := model.Update(sourceDetailMsg{err: assert.AnError})
+		assert.ErrorIs(t, model.err, assert.AnError)
+		assert.Same(t, previous, model.sourceDetail)
+		assert.NotNil(t, cmd)
+		assert.Contains(t, model.View(), "Source repository archived")
+		assert.Contains(t, model.View(), assert.AnError.Error())
+	})
+
+	t.Run("completed source detail with disagreeing target progress displays archive state once", func(t *testing.T) {
+		model := New(t.Context(), &fakeService{})
+		model.screen = screenSourceDetail
+		model.width, model.height = 100, 60
+		model.sourceDetail = &elmapi.MigrationDetail{
+			SourceRepositoryArchived: new(false),
+			CombinedState:            &elmapi.CombinedState{Status: new("completed")},
+			TargetState: &elmapi.TargetState{RepositoryProgress: []elmapi.RepositoryProgress{
+				{RepositoryNWO: "target/one", RepositoryLocked: true},
+				{RepositoryNWO: "target/two", RepositoryLocked: true},
+			}},
+		}
+		out := model.View()
+		assert.Contains(t, out, "Source repository not archived")
+		assert.Equal(t, 1, strings.Count(out, "Source repository"))
+		assert.Contains(t, out, "Completed")
+		assert.NotContains(t, out, "Source repository locked")
+		assert.NotContains(t, out, "Source repository unlocked")
+	})
+
 	t.Run("source actions remain visible in a standard terminal", func(t *testing.T) {
 		model := New(t.Context(), &fakeService{})
 		model.screen = screenSourceDetail
