@@ -38,7 +38,7 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	w(&b, m.renderHeader())
-	w(&b, render.SourceRepositoryArchiveState(m.detail.SourceRepositoryArchived))
+	w(&b, render.SourceRepositoryArchiveState(m.detail.Migration))
 	w(&b, "\n")
 	w(&b, "\n")
 	w(&b, m.renderTimeline())

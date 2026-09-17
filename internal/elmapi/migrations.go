@@ -202,27 +202,27 @@ func (c *Client) migrationPath(migrationID string, action ...string) string {
 // MigrationDetail is a partial typed decode for human-readable status displays.
 // GetMigration preserves the complete raw document for JSON output.
 type MigrationDetail struct {
-	Migration                *MigrationSummary  `json:"migration"`
-	SourceRepositoryArchived *bool              `json:"source_repository_archived"`
-	TargetState              *TargetState       `json:"target_state"`
-	CombinedState            *CombinedState     `json:"combined_state"`
-	Messages                 []MigrationMessage `json:"messages"`
+	Migration     *MigrationSummary  `json:"migration"`
+	TargetState   *TargetState       `json:"target_state"`
+	CombinedState *CombinedState     `json:"combined_state"`
+	Messages      []MigrationMessage `json:"messages"`
 }
 
 // MigrationSummary is the core migration record.
 type MigrationSummary struct {
-	MigrationID             string  `json:"migration_id"`
-	Status                  *string `json:"status"`
-	SourceOrganizationLogin string  `json:"source_organization_login"`
-	TargetOrganizationLogin string  `json:"target_organization_login"`
-	SourceRepositoryName    string  `json:"source_repository_name"`
-	TargetRepositoryName    string  `json:"target_repository_name"`
-	TargetVisibility        *string `json:"target_visibility"`
-	TargetMigrationID       int64   `json:"target_migration_id"`
-	CreatedAt               *string `json:"created_at"`
-	StartedAt               *string `json:"started_at"`
-	CompletedAt             *string `json:"completed_at"`
-	ExpiresAt               *string `json:"expires_at"`
+	MigrationID              string  `json:"migration_id"`
+	Status                   *string `json:"status"`
+	SourceOrganizationLogin  string  `json:"source_organization_login"`
+	TargetOrganizationLogin  string  `json:"target_organization_login"`
+	SourceRepositoryName     string  `json:"source_repository_name"`
+	SourceRepositoryArchived *bool   `json:"source_repository_archived"`
+	TargetRepositoryName     string  `json:"target_repository_name"`
+	TargetVisibility         *string `json:"target_visibility"`
+	TargetMigrationID        int64   `json:"target_migration_id"`
+	CreatedAt                *string `json:"created_at"`
+	StartedAt                *string `json:"started_at"`
+	CompletedAt              *string `json:"completed_at"`
+	ExpiresAt                *string `json:"expires_at"`
 }
 
 // TargetState carries destination-side aggregate progress.

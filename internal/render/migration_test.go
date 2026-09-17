@@ -89,8 +89,8 @@ func TestMigrationStatus(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				output := MigrationStatus(elmapi.MigrationDetail{
-					SourceRepositoryArchived: tc.archived,
-					CombinedState:            &elmapi.CombinedState{Status: new("completed")},
+					Migration:     &elmapi.MigrationSummary{SourceRepositoryArchived: tc.archived},
+					CombinedState: &elmapi.CombinedState{Status: new("completed")},
 					TargetState: &elmapi.TargetState{RepositoryProgress: []elmapi.RepositoryProgress{
 						{RepositoryNWO: "target/one", RepositoryLocked: tc.locked},
 						{RepositoryNWO: "target/two", RepositoryLocked: tc.locked},
@@ -108,13 +108,15 @@ func TestMigrationStatus(t *testing.T) {
 	})
 
 	t.Run("renders source-only true", func(t *testing.T) {
-		assert.Equal(t, "Source\n  Source repository archived\n",
-			MigrationStatus(elmapi.MigrationDetail{SourceRepositoryArchived: new(true)}))
+		assert.Contains(t, MigrationStatus(elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(true)},
+		}), "Source\n  Source repository archived\n")
 	})
 
 	t.Run("renders source-only false", func(t *testing.T) {
-		assert.Equal(t, "Source\n  Source repository not archived\n",
-			MigrationStatus(elmapi.MigrationDetail{SourceRepositoryArchived: new(false)}))
+		assert.Contains(t, MigrationStatus(elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(false)},
+		}), "Source\n  Source repository not archived\n")
 	})
 
 	t.Run("renders nested status sections", func(t *testing.T) {
@@ -241,12 +243,18 @@ func TestSourceRepositoryArchiveState(t *testing.T) {
 	styles := theme.New()
 
 	t.Run("true is a neutral fact", func(t *testing.T) {
-		assert.Equal(t, styles.Primary.Render("Source repository archived"), SourceRepositoryArchiveState(new(true)))
+		assert.Equal(t, styles.Primary.Render("Source repository archived"),
+			SourceRepositoryArchiveState(&elmapi.MigrationSummary{SourceRepositoryArchived: new(true)}))
 	})
 	t.Run("false is a neutral fact", func(t *testing.T) {
-		assert.Equal(t, styles.Primary.Render("Source repository not archived"), SourceRepositoryArchiveState(new(false)))
+		assert.Equal(t, styles.Primary.Render("Source repository not archived"),
+			SourceRepositoryArchiveState(&elmapi.MigrationSummary{SourceRepositoryArchived: new(false)}))
 	})
-	t.Run("nil is explicitly unavailable", func(t *testing.T) {
+	t.Run("nil observation is explicitly unavailable", func(t *testing.T) {
+		assert.Equal(t, styles.Muted.Render("Source repository archive state unavailable"),
+			SourceRepositoryArchiveState(&elmapi.MigrationSummary{}))
+	})
+	t.Run("nil migration is explicitly unavailable", func(t *testing.T) {
 		assert.Equal(t, styles.Muted.Render("Source repository archive state unavailable"), SourceRepositoryArchiveState(nil))
 	})
 }

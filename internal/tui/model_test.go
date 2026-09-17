@@ -340,15 +340,18 @@ func TestModel(t *testing.T) {
 		model.sourceWatching = true
 		cases := []struct {
 			body string
-			want *bool
 			text string
 		}{
-			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
-			{`{"source_repository_archived":false}`, new(false), "Source repository not archived"},
-			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
-			{`{"migration":{},"source_repository_archived":null}`, nil, "Source repository archive state unavailable"},
-			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
-			{`{"migration":{}}`, nil, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{"source_repository_archived":false}}`, "Source repository not archived"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{"source_repository_archived":null}}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{}}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":null,"combined_state":{"status":"completed"}}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"combined_state":{"status":"completed"}}`, "Source repository archive state unavailable"},
 		}
 		for _, tc := range cases {
 			var detail elmapi.MigrationDetail
@@ -358,12 +361,11 @@ func TestModel(t *testing.T) {
 			require.NoError(t, model.err)
 			assert.NotNil(t, cmd)
 			assert.Same(t, &detail, model.sourceDetail)
-			assert.Equal(t, tc.want, model.sourceDetail.SourceRepositoryArchived)
 			assert.Contains(t, model.View(), tc.text)
 			assert.Equal(t, 1, strings.Count(model.View(), "Source repository"))
 		}
 
-		previous := &elmapi.MigrationDetail{SourceRepositoryArchived: new(true)}
+		previous := &elmapi.MigrationDetail{Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(true)}}
 		_, _ = model.Update(sourceDetailMsg{detail: previous})
 		_, cmd := model.Update(sourceDetailMsg{err: assert.AnError})
 		assert.ErrorIs(t, model.err, assert.AnError)
@@ -378,8 +380,8 @@ func TestModel(t *testing.T) {
 		model.screen = screenSourceDetail
 		model.width, model.height = 100, 60
 		model.sourceDetail = &elmapi.MigrationDetail{
-			SourceRepositoryArchived: new(false),
-			CombinedState:            &elmapi.CombinedState{Status: new("completed")},
+			Migration:     &elmapi.MigrationSummary{SourceRepositoryArchived: new(false)},
+			CombinedState: &elmapi.CombinedState{Status: new("completed")},
 			TargetState: &elmapi.TargetState{RepositoryProgress: []elmapi.RepositoryProgress{
 				{RepositoryNWO: "target/one", RepositoryLocked: true},
 				{RepositoryNWO: "target/two", RepositoryLocked: true},

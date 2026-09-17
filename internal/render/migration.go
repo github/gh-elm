@@ -29,13 +29,13 @@ func MigrationCancel(migrationID string) string {
 
 // MigrationStatus renders a migration status response.
 func MigrationStatus(v elmapi.MigrationDetail) string {
-	if v.Migration == nil && v.SourceRepositoryArchived == nil && v.TargetState == nil && v.CombinedState == nil && len(v.Messages) == 0 {
+	if v.Migration == nil && v.TargetState == nil && v.CombinedState == nil && len(v.Messages) == 0 {
 		return "No migration status data returned.\n"
 	}
 
 	return joinSections(
 		renderMigrationSummary(v.Migration),
-		renderSection("Source", "  "+SourceRepositoryArchiveState(v.SourceRepositoryArchived)),
+		renderSection("Source", "  "+SourceRepositoryArchiveState(v.Migration)),
 		renderTargetState(v.TargetState),
 		renderCombinedState(v.CombinedState),
 		renderMessages(v.Messages),
@@ -43,12 +43,12 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 }
 
 // SourceRepositoryArchiveState renders a nullable source observation, not migration progress.
-func SourceRepositoryArchiveState(archived *bool) string {
+func SourceRepositoryArchiveState(migration *elmapi.MigrationSummary) string {
 	styles := theme.New()
-	if archived == nil {
+	if migration == nil || migration.SourceRepositoryArchived == nil {
 		return styles.Muted.Render("Source repository archive state unavailable")
 	}
-	if *archived {
+	if *migration.SourceRepositoryArchived {
 		return styles.Primary.Render("Source repository archived")
 	}
 	return styles.Primary.Render("Source repository not archived")

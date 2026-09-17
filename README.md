@@ -119,7 +119,7 @@ gh elm migration cutover revert <uuid> --json | jq .success
 
 Migration status, live watch (`gh elm migration watch <uuid>`), and TUI details
 show the source repository's observed archive state separately from migration
-progress and completion. The `source_repository_archived` response field is
+progress and completion. The `migration.source_repository_archived` response field is
 `true`, `false`, or `null`. A missing or null field, including on servers that do
 not support the observation, displays "Source repository archive state unavailable".
 The observation is a sample, not proof of a successful archive operation or a

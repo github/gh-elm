@@ -109,7 +109,7 @@ func TestView(t *testing.T) {
 				m := New("mig-1", time.Second, nil)
 				m.width = 60
 				m.detail = &elmapi.MigrationDetail{
-					SourceRepositoryArchived: tc.archived,
+					Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: tc.archived},
 					TargetState: &elmapi.TargetState{RepositoryProgress: []elmapi.RepositoryProgress{{
 						RepositoryLocked:       true,
 						InitialGitPushComplete: true,
@@ -136,7 +136,7 @@ func TestView(t *testing.T) {
 
 	t.Run("source-only response and empty response preserve existing timeline", func(t *testing.T) {
 		m := New("id", time.Second, nil)
-		m.detail = &elmapi.MigrationDetail{SourceRepositoryArchived: new(false)}
+		m.detail = &elmapi.MigrationDetail{Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(false)}}
 		assert.Contains(t, m.View(), "Source repository not archived")
 		m.detail = &elmapi.MigrationDetail{}
 		assert.Contains(t, m.View(), "Source repository archive state unavailable")
@@ -210,15 +210,18 @@ func TestUpdate(t *testing.T) {
 		m := New("mig-1", time.Second, elmapi.NewClient(srv.URL, "tok"))
 		cases := []struct {
 			body string
-			want *bool
 			text string
 		}{
-			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
-			{`{"source_repository_archived":false}`, new(false), "Source repository not archived"},
-			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
-			{`{"source_repository_archived":null}`, nil, "Source repository archive state unavailable"},
-			{`{"source_repository_archived":true}`, new(true), "Source repository archived"},
-			{`{}`, nil, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{"source_repository_archived":false}}`, "Source repository not archived"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{"source_repository_archived":null}}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{}}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":null}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{}`, "Source repository archive state unavailable"},
 		}
 		for _, tc := range cases {
 			responses <- response{body: tc.body, status: http.StatusOK}
@@ -227,11 +230,11 @@ func TestUpdate(t *testing.T) {
 			m = updated.(Model)
 			require.NoError(t, m.fetchErr)
 			require.NotNil(t, cmd)
-			assert.Equal(t, tc.want, m.detail.SourceRepositoryArchived)
 			assert.Contains(t, m.View(), tc.text)
+			assert.Equal(t, 1, strings.Count(m.View(), "Source repository"))
 		}
 
-		responses <- response{body: `{"source_repository_archived":true}`, status: http.StatusOK}
+		responses <- response{body: `{"migration":{"source_repository_archived":true}}`, status: http.StatusOK}
 		updated, _ := m.Update(fetchStatus(m.client, m.migrationID, m.interval))
 		m = updated.(Model)
 		lastDetail, lastUpdated := m.detail, m.lastUpdated
@@ -250,7 +253,7 @@ func TestUpdate(t *testing.T) {
 		updated, _ = m.Update(fetchStatus(m.client, m.migrationID, m.interval))
 		m = updated.(Model)
 		assert.NoError(t, m.fetchErr)
-		assert.Nil(t, m.detail.SourceRepositoryArchived)
+		assert.Nil(t, m.detail.Migration)
 		assert.NotContains(t, m.View(), "Failed to refresh")
 	})
 }

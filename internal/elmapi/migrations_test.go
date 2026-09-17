@@ -17,12 +17,12 @@ func TestGetMigrationDetail(t *testing.T) {
 			body string
 			want *bool
 		}{
-			{"true", `{"source_repository_archived":true}`, new(true)},
-			{"false", `{"source_repository_archived":false}`, new(false)},
-			{"null", `{"source_repository_archived":null}`, nil},
-			{"absent", `{}`, nil},
-			{"null document", `null`, nil},
-			{"completed with disagreeing legacy progress", `{"source_repository_archived":false,"migration":{"status":"completed"},"target_state":{"repository_progress":[{"repository_locked":true}]}}`, new(false)},
+			{"true", `{"migration":{"source_repository_archived":true}}`, new(true)},
+			{"false", `{"migration":{"source_repository_archived":false}}`, new(false)},
+			{"null", `{"migration":{"source_repository_archived":null}}`, nil},
+			{"absent", `{"migration":{}}`, nil},
+			{"completed with disagreeing legacy progress", `{"migration":{"status":"completed","source_repository_archived":false},"target_state":{"repository_progress":[{"repository_locked":true}]}}`, new(false)},
+			{"ignores top-level observation", `{"migration":{},"source_repository_archived":true}`, nil},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -35,7 +35,23 @@ func TestGetMigrationDetail(t *testing.T) {
 
 				detail, err := NewClient(srv.URL, "tok").GetMigrationDetail(t.Context(), "mig-1")
 				require.NoError(t, err)
-				assert.Equal(t, tc.want, detail.SourceRepositoryArchived)
+				require.NotNil(t, detail.Migration)
+				assert.Equal(t, tc.want, detail.Migration.SourceRepositoryArchived)
+			})
+		}
+	})
+
+	t.Run("does not synthesize missing migration metadata", func(t *testing.T) {
+		for _, body := range []string{`{}`, `{"migration":null}`, `null`, `{"source_repository_archived":true}`} {
+			t.Run(body, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = w.Write([]byte(body))
+				}))
+				t.Cleanup(srv.Close)
+
+				detail, err := NewClient(srv.URL, "tok").GetMigrationDetail(t.Context(), "mig-1")
+				require.NoError(t, err)
+				assert.Nil(t, detail.Migration)
 			})
 		}
 	})
@@ -44,14 +60,14 @@ func TestGetMigrationDetail(t *testing.T) {
 		for _, value := range []string{`"true"`, `1`, `{}`, `[]`} {
 			t.Run(value, func(t *testing.T) {
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = w.Write([]byte(`{"source_repository_archived":` + value + `}`))
+					_, _ = w.Write([]byte(`{"migration":{"source_repository_archived":` + value + `}}`))
 				}))
 				t.Cleanup(srv.Close)
 
 				detail, err := NewClient(srv.URL, "tok").GetMigrationDetail(t.Context(), "mig-1")
 				var typeError *json.UnmarshalTypeError
 				require.ErrorAs(t, err, &typeError)
-				assert.Equal(t, "source_repository_archived", typeError.Field)
+				assert.Equal(t, "migration.source_repository_archived", typeError.Field)
 				assert.Nil(t, detail)
 			})
 		}

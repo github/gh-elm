@@ -268,12 +268,14 @@ func TestStatus(t *testing.T) {
 			body string
 			want string
 		}{
-			{`{"source_repository_archived":true}`, "Source repository archived"},
-			{`{"source_repository_archived":false}`, "Source repository not archived"},
-			{`{"migration":{},"source_repository_archived":null}`, "Source repository archive state unavailable"},
+			{`{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{`{"migration":{"source_repository_archived":false}}`, "Source repository not archived"},
+			{`{"migration":{"source_repository_archived":null}}`, "Source repository archive state unavailable"},
 			{`{"migration":{}}`, "Source repository archive state unavailable"},
+			{`{"target_state":{}}`, "Source repository archive state unavailable"},
+			{`{"migration":null,"target_state":{}}`, "Source repository archive state unavailable"},
 			{`{}`, "No migration status data returned."},
-			{`{"source_repository_archived":null}`, "No migration status data returned."},
+			{`{"migration":null}`, "No migration status data returned."},
 			{`null`, "No migration status data returned."},
 		}
 		for _, tc := range cases {
@@ -292,7 +294,7 @@ func TestStatus(t *testing.T) {
 	})
 
 	t.Run("invalid observation fails human output but survives raw JSON", func(t *testing.T) {
-		const body = `{"source_repository_archived":"unexpected","future_field":{"value":1}}`
+		const body = `{"migration":{"source_repository_archived":"unexpected"},"future_field":{"value":1}}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(body))
 		}))
@@ -322,7 +324,7 @@ func TestStatus(t *testing.T) {
 	})
 
 	t.Run("--json preserves the raw status response", func(t *testing.T) {
-		const respBody = `{"migration":{"migration_id":"mig-1"},"source_repository_archived":false,"target_state":{"repository_progress":[{"repository_locked":true}]},"future_field":{"value":1}}`
+		const respBody = `{"migration":{"migration_id":"mig-1","source_repository_archived":false,"future_field":{"value":1}},"target_state":{"repository_progress":[{"repository_locked":true}]},"future_field":{"value":1}}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(respBody))
 		}))

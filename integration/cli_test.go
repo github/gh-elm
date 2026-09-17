@@ -67,12 +67,15 @@ func TestMigrationStatus(t *testing.T) {
 			body string
 			want string
 		}{
-			{"true", `{"source_repository_archived":true}`, "Source repository archived"},
-			{"false with completed legacy true", `{"source_repository_archived":false,"combined_state":{"status":"completed"},"target_state":{"repository_progress":[{"repository_locked":true}]},"future_field":{"value":1}}`, "Source repository not archived"},
-			{"null", `{"source_repository_archived":null,"migration":{}}`, "Source repository archive state unavailable"},
+			{"true", `{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{"false with completed legacy true", `{"migration":{"source_repository_archived":false,"future_field":{"value":1}},"combined_state":{"status":"completed"},"target_state":{"repository_progress":[{"repository_locked":true}]},"future_field":{"value":1}}`, "Source repository not archived"},
+			{"null", `{"migration":{"source_repository_archived":null}}`, "Source repository archive state unavailable"},
 			{"absent", `{"migration":{}}`, "Source repository archive state unavailable"},
+			{"missing migration", `{"combined_state":{"status":"completed"}}`, "Source repository archive state unavailable"},
+			{"null migration", `{"migration":null,"combined_state":{"status":"completed"}}`, "Source repository archive state unavailable"},
+			{"ignores top-level observation", `{"migration":{},"source_repository_archived":true}`, "Source repository archive state unavailable"},
 			{"empty", `{}`, "No migration status data returned."},
-			{"null only", `{"source_repository_archived":null}`, "No migration status data returned."},
+			{"null only", `{"migration":null}`, "No migration status data returned."},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +108,7 @@ func TestMigrationStatus(t *testing.T) {
 	})
 
 	t.Run("invalid observation is an error only for typed human output", func(t *testing.T) {
-		const response = `{"source_repository_archived":"unexpected","future_field":[false,null,42]}`
+		const response = `{"migration":{"source_repository_archived":"unexpected"},"future_field":[false,null,42]}`
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(response))
 		}))
