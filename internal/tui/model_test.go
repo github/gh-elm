@@ -368,7 +368,7 @@ func TestModel(t *testing.T) {
 		previous := &elmapi.MigrationDetail{Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(true)}}
 		_, _ = model.Update(sourceDetailMsg{detail: previous})
 		_, cmd := model.Update(sourceDetailMsg{err: assert.AnError})
-		assert.ErrorIs(t, model.err, assert.AnError)
+		require.ErrorIs(t, model.err, assert.AnError)
 		assert.Same(t, previous, model.sourceDetail)
 		assert.NotNil(t, cmd)
 		assert.Contains(t, model.View(), "Source repository archived")

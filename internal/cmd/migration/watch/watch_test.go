@@ -252,7 +252,7 @@ func TestUpdate(t *testing.T) {
 		responses <- response{body: `{}`, status: http.StatusOK}
 		updated, _ = m.Update(fetchStatus(m.client, m.migrationID, m.interval))
 		m = updated.(Model)
-		assert.NoError(t, m.fetchErr)
+		require.NoError(t, m.fetchErr)
 		assert.Nil(t, m.detail.Migration)
 		assert.NotContains(t, m.View(), "Failed to refresh")
 	})

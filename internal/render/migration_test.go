@@ -110,13 +110,13 @@ func TestMigrationStatus(t *testing.T) {
 	t.Run("renders source-only true", func(t *testing.T) {
 		assert.Contains(t, MigrationStatus(elmapi.MigrationDetail{
 			Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(true)},
-		}), "Source\n  Source repository archived\n")
+		}), "Source\n  Source repository archived\n") //nolint:dupword // header label followed by output line, not a real repeated word
 	})
 
 	t.Run("renders source-only false", func(t *testing.T) {
 		assert.Contains(t, MigrationStatus(elmapi.MigrationDetail{
 			Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(false)},
-		}), "Source\n  Source repository not archived\n")
+		}), "Source\n  Source repository not archived\n") //nolint:dupword // header label followed by output line, not a real repeated word
 	})
 
 	t.Run("renders nested status sections", func(t *testing.T) {
@@ -181,15 +181,15 @@ func TestMigrationStatus(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, `Source
-  Source repository archive state unavailable
-
-Cutover
-  ✓ Ready for cutover
-
-Repository states
-  • elm-test/the-hook2 · Ready for cutover
-`, output)
+		want := "Source\n" +
+			"  Source repository archive state unavailable\n" +
+			"\n" +
+			"Cutover\n" +
+			"  ✓ Ready for cutover\n" +
+			"\n" +
+			"Repository states\n" +
+			"  • elm-test/the-hook2 · Ready for cutover\n"
+		assert.Equal(t, want, output)
 	})
 
 	t.Run("suppresses completed-state readiness and stale blockers", func(t *testing.T) {
@@ -204,13 +204,13 @@ Repository states
 			},
 		})
 
-		assert.Equal(t, `Source
-  Source repository archive state unavailable
-
-Cutover
-  ✓ Completed
-  Migration completed successfully
-`, output)
+		want := "Source\n" +
+			"  Source repository archive state unavailable\n" +
+			"\n" +
+			"Cutover\n" +
+			"  ✓ Completed\n" +
+			"  Migration completed successfully\n"
+		assert.Equal(t, want, output)
 	})
 
 	t.Run("preserves distinct repository phase and status", func(t *testing.T) {
