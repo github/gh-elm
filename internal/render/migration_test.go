@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -74,6 +75,50 @@ func TestMigrationCancel(t *testing.T) {
 }
 
 func TestMigrationStatus(t *testing.T) {
+	t.Run("source observation is independent of target progress and completion", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			archived *bool
+			locked   bool
+			want     string
+		}{
+			{"archived with legacy false", new(true), false, "Source repository archived"},
+			{"not archived with legacy true", new(false), true, "Source repository not archived"},
+			{"unavailable with legacy true", nil, true, "Source repository archive state unavailable"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				output := MigrationStatus(elmapi.MigrationDetail{
+					Migration:     &elmapi.MigrationSummary{SourceRepositoryArchived: tc.archived},
+					CombinedState: &elmapi.CombinedState{Status: new("completed")},
+					TargetState: &elmapi.TargetState{RepositoryProgress: []elmapi.RepositoryProgress{
+						{RepositoryNWO: "target/one", RepositoryLocked: tc.locked},
+						{RepositoryNWO: "target/two", RepositoryLocked: tc.locked},
+					}},
+				})
+				assert.Contains(t, output, tc.want)
+				assert.Equal(t, 1, strings.Count(output, "Source repository"))
+				assert.Less(t, strings.Index(output, tc.want), strings.Index(output, "Target\n"))
+				assert.Contains(t, output, "Completed")
+				assert.Contains(t, output, "Progress · target/two")
+				assert.NotContains(t, output, "Source repository locked")
+				assert.NotContains(t, output, "Source repository unlocked")
+			})
+		}
+	})
+
+	t.Run("renders source-only true", func(t *testing.T) {
+		assert.Contains(t, MigrationStatus(elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(true)},
+		}), "Source\n  Source repository archived\n") //nolint:dupword // header label followed by output line, not a real repeated word
+	})
+
+	t.Run("renders source-only false", func(t *testing.T) {
+		assert.Contains(t, MigrationStatus(elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{SourceRepositoryArchived: new(false)},
+		}), "Source\n  Source repository not archived\n") //nolint:dupword // header label followed by output line, not a real repeated word
+	})
+
 	t.Run("renders nested status sections", func(t *testing.T) {
 		status := "in_progress"
 		phase := "backfill"
@@ -136,12 +181,15 @@ func TestMigrationStatus(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, `Cutover
-  ✓ Ready for cutover
-
-Repository states
-  • elm-test/the-hook2 · Ready for cutover
-`, output)
+		want := "Source\n" +
+			"  Source repository archive state unavailable\n" +
+			"\n" +
+			"Cutover\n" +
+			"  ✓ Ready for cutover\n" +
+			"\n" +
+			"Repository states\n" +
+			"  • elm-test/the-hook2 · Ready for cutover\n"
+		assert.Equal(t, want, output)
 	})
 
 	t.Run("suppresses completed-state readiness and stale blockers", func(t *testing.T) {
@@ -156,10 +204,13 @@ Repository states
 			},
 		})
 
-		assert.Equal(t, `Cutover
-  ✓ Completed
-  Migration completed successfully
-`, output)
+		want := "Source\n" +
+			"  Source repository archive state unavailable\n" +
+			"\n" +
+			"Cutover\n" +
+			"  ✓ Completed\n" +
+			"  Migration completed successfully\n"
+		assert.Equal(t, want, output)
 	})
 
 	t.Run("preserves distinct repository phase and status", func(t *testing.T) {
@@ -180,6 +231,31 @@ Repository states
 
 		assert.Contains(t, output, "acme/web · Backfill · In progress")
 		assert.Contains(t, output, "○ Not ready for cutover")
+	})
+}
+
+func TestSourceRepositoryArchiveState(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(previousProfile)
+	})
+	styles := theme.New()
+
+	t.Run("true is a neutral fact", func(t *testing.T) {
+		assert.Equal(t, styles.Primary.Render("Source repository archived"),
+			SourceRepositoryArchiveState(&elmapi.MigrationSummary{SourceRepositoryArchived: new(true)}))
+	})
+	t.Run("false is a neutral fact", func(t *testing.T) {
+		assert.Equal(t, styles.Primary.Render("Source repository not archived"),
+			SourceRepositoryArchiveState(&elmapi.MigrationSummary{SourceRepositoryArchived: new(false)}))
+	})
+	t.Run("nil observation is explicitly unavailable", func(t *testing.T) {
+		assert.Equal(t, styles.Muted.Render("Source repository archive state unavailable"),
+			SourceRepositoryArchiveState(&elmapi.MigrationSummary{}))
+	})
+	t.Run("nil migration is explicitly unavailable", func(t *testing.T) {
+		assert.Equal(t, styles.Muted.Render("Source repository archive state unavailable"), SourceRepositoryArchiveState(nil))
 	})
 }
 
