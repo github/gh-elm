@@ -275,6 +275,8 @@ func (m *Model) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
+//
+//nolint:maintidx // Bubble Tea centralizes model message dispatch in this method.
 func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
@@ -549,23 +551,25 @@ func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.actionFocus++
 		}
 	case key.Matches(msg, keys.Up):
-		if m.screen == screenHome {
+		switch {
+		case m.screen == screenHome:
 			m.moveHomeCursor(-1)
-		} else if m.verticalActionScreen() && m.actionFocus > 0 {
+		case m.verticalActionScreen() && m.actionFocus > 0:
 			m.actionFocus--
-		} else if m.scrollableScreen() {
+		case m.scrollableScreen():
 			return m.updateViewport(msg)
-		} else if !m.actionScreen() && m.cursor > 0 {
+		case !m.actionScreen() && m.cursor > 0:
 			m.cursor--
 		}
 	case key.Matches(msg, keys.Down):
-		if m.screen == screenHome {
+		switch {
+		case m.screen == screenHome:
 			m.moveHomeCursor(1)
-		} else if m.verticalActionScreen() && m.actionFocus < m.itemCount()-1 {
+		case m.verticalActionScreen() && m.actionFocus < m.itemCount()-1:
 			m.actionFocus++
-		} else if m.scrollableScreen() {
+		case m.scrollableScreen():
 			return m.updateViewport(msg)
-		} else if !m.actionScreen() && m.cursor < m.itemCount()-1 {
+		case !m.actionScreen() && m.cursor < m.itemCount()-1:
 			m.cursor++
 		}
 	case key.Matches(msg, keys.Refresh):
@@ -753,7 +757,8 @@ func (m *Model) activate() (tea.Model, tea.Cmd) {
 		switch actions[m.cursor].id {
 		case "migrations":
 			m.screen, m.loading, m.err = screenSourceList, m.sourceMigrations == nil, nil
-			return m, m.startSourceListLoad()
+			command := m.startSourceListLoad()
+			return m, command
 		case "create":
 			return m.openSourceCreateForm(screenHome)
 		case "mannequins":
@@ -1293,7 +1298,8 @@ func (m *Model) updateAlert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.cursor = 0
 	m.homeCursorSet = false
 	m.syncHomeCursor()
-	return m, m.startConfigurationLoad()
+	command := m.startConfigurationLoad()
+	return m, command
 }
 
 func (m *Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1337,7 +1343,8 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return model, command
 		}
 		if reloadSourceList {
-			return m, m.startSourceListLoad()
+			command := m.startSourceListLoad()
+			return m, command
 		}
 	}
 	return m, nil

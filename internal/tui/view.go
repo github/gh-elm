@@ -22,6 +22,8 @@ const (
 )
 
 // View implements tea.Model.
+//
+//nolint:maintidx // Bubble Tea centralizes screen rendering in this method.
 func (m *Model) View() string {
 	if m.width > 0 && (m.width < 48 || m.height < 12) {
 		return nativeCursorView(
@@ -159,28 +161,29 @@ func (m *Model) View() string {
 	if confirming || alerting || resultPopup {
 		rendered = strings.ReplaceAll(rendered, nativeCursorPositionMarker, "")
 	}
-	if confirming {
+	switch {
+	case confirming:
 		rendered = overlayCenter(
 			rendered,
 			m.confirmationOverlay(),
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
-	} else if alerting {
+	case alerting:
 		rendered = overlayCenter(
 			rendered,
 			m.alertOverlay(),
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
-	} else if resultPopup {
+	case resultPopup:
 		rendered = overlayCenter(
 			rendered,
 			m.resultPopupOverlay(),
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
-	} else if m.pickerInfoOpen {
+	case m.pickerInfoOpen:
 		if overlay := m.pickerInfoOverlay(); overlay != "" {
 			rendered = overlayCenter(
 				rendered,
