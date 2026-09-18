@@ -1944,10 +1944,10 @@ func TestModelActions(t *testing.T) {
 
 		updated, _ := model.openMannequinReclaimForm(false)
 		model = updated.(*Model)
-		model.form.fields[0].value = "octo-org"
-		model.form.fields[1].value = "mannequin"
-		model.form.fields[3].value = "app[BOT]"
-		model.form.cursor = len(model.form.fields) - 1
+		*model.form.fields[0].text = "octo-org"
+		*model.form.fields[1].text = "mannequin"
+		*model.form.fields[3].text = "app[BOT]"
+		model.form.cursor = len(model.form.fields)
 
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
@@ -1966,10 +1966,10 @@ func TestModelActions(t *testing.T) {
 
 		updated, _ := model.openMannequinReclaimForm(false)
 		model = updated.(*Model)
-		model.form.fields[0].value = "octo-org"
-		model.form.fields[1].value = "human-mannequin"
-		model.form.fields[3].value = "app[bot] "
-		model.form.cursor = len(model.form.fields) - 1
+		*model.form.fields[0].text = "octo-org"
+		*model.form.fields[1].text = "human-mannequin"
+		*model.form.fields[3].text = "app[bot] "
+		model.form.cursor = len(model.form.fields)
 
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model = updated.(*Model)
