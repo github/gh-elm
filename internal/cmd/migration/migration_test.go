@@ -40,8 +40,7 @@ func TestCreate(t *testing.T) {
 		assert.True(t, strings.HasSuffix(gotPath, "/enterprise/live-migrations"), "path suffix: %q", gotPath)
 		// The target endpoint is derived from GH_TARGET_HOST (API-defect workaround).
 		assert.Equal(t, "https://api.example.ghe.com", gotBody.TargetAPIEndpoint)
-		// pat_name is stubbed with a sentinel (API-defect workaround).
-		assert.Equal(t, "BOGON", gotBody.PATName)
+		assert.Equal(t, elmapi.SystemPATName, gotBody.PATName)
 		assert.Equal(t, "acme", gotBody.SourceOrganizationLogin)
 		assert.Equal(t, "web", gotBody.SourceRepositoryName)
 		assert.Equal(t, "acme-cloud", gotBody.TargetOrganizationLogin)
@@ -580,9 +579,11 @@ func TestCutoverStatus(t *testing.T) {
 		out := run(t, "cutover", "status", "m",
 			"--source-url", srv.URL, "--source-token", "tok")
 
-		for _, want := range []string{"○ Not ready for cutover", "Backfill in progress", "backfill incomplete", "acme/web · Backfill · In progress"} {
+		for _, want := range []string{"✗ Not ready for cutover", "backfill incomplete", "acme/web · Backfill · In progress"} {
 			assert.Contains(t, out, want)
 		}
+		assert.NotContains(t, out, "Backfilling")
+		assert.NotContains(t, out, "Backfill in progress")
 		assert.NotContains(t, out, "Ready for cutover: false")
 	})
 

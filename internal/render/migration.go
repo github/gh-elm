@@ -32,10 +32,14 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 	if v.Migration == nil && v.TargetState == nil && v.CombinedState == nil && len(v.Messages) == 0 {
 		return "No migration status data returned.\n"
 	}
+	sourceStatus := ""
+	if v.Migration != nil {
+		sourceStatus = pointerString(v.Migration.Status)
+	}
 
 	return joinSections(
-		renderMigrationSummary(v.Migration),
-		renderTargetState(v.TargetState),
+		renderMigrationSummary(v.Migration, v.TargetState),
+		renderTargetState(v.TargetState, sourceStatus, v.Migration == nil),
 		renderCombinedState(v.CombinedState),
 		renderMessages(v.Messages),
 	)
@@ -49,17 +53,17 @@ func CutoverStatus(v elmapi.MigrationDetail) string {
 	return renderCombinedState(v.CombinedState)
 }
 
-func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
+func renderMigrationSummary(migration *elmapi.MigrationSummary, target *elmapi.TargetState) string {
 	if migration == nil {
 		return ""
 	}
 
 	styles := theme.New()
 	source := repositoryName(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
-	target := repositoryName(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
+	targetRepository := repositoryName(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
 	title := "Migration"
-	if source != emptyValue || target != emptyValue {
-		title = source + " → " + target
+	if source != emptyValue || targetRepository != emptyValue {
+		title = source + " → " + targetRepository
 	}
 
 	lines := []string{
@@ -69,8 +73,12 @@ func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
 	if migration.TargetMigrationID != 0 {
 		lines = append(lines, field("Target migration ID", styles.Bold.Render(strconv.FormatInt(migration.TargetMigrationID, 10))))
 	}
+	lines = append(lines, field("Visibility", pointerValue(migration.TargetVisibility)))
+	if target != nil {
+		availability := failureState(!target.TargetUnavailable, "Available", "Unavailable")
+		lines = append(lines, field("Target", availability.glyph+" "+availability.text))
+	}
 	lines = append(lines,
-		field("Visibility", pointerValue(migration.TargetVisibility)),
 		field("Created", pointerValue(migration.CreatedAt)),
 		field("Started", pointerValue(migration.StartedAt)),
 		field("Completed", completedValue(migration.CompletedAt)),
@@ -80,17 +88,23 @@ func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
 	return renderSection(title, lines...)
 }
 
-func renderTargetState(target *elmapi.TargetState) string {
+func renderTargetState(target *elmapi.TargetState, sourceStatus string, showAvailability bool) string {
 	if target == nil {
 		return ""
 	}
 
 	var sections []string
-	availability := failureState(!target.TargetUnavailable, "Target available", "Target unavailable")
-	sections = append(sections, renderSection("Target",
-		bullet(statusGlyph(pointerString(target.Status)), statusText(pointerString(target.Status))),
-		bullet(availability.glyph, availability.text),
-	))
+	lines := make([]string, 0, 2)
+	if status := pointerString(target.Status); normalizedValue(sourceStatus) != "created" && !terminatedStatus(status) {
+		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
+	}
+	if showAvailability {
+		availability := failureState(!target.TargetUnavailable, "Target available", "Target unavailable")
+		lines = append(lines, bullet(availability.glyph, availability.text))
+	}
+	if len(lines) > 0 {
+		sections = append(sections, renderSection("Target", lines...))
+	}
 
 	for _, progress := range target.RepositoryProgress {
 		sections = append(sections, renderRepositoryProgress(progress))
@@ -124,25 +138,33 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 	styles := theme.New()
 	status := pointerString(combined.Status)
 	readiness := positiveState(combined.ReadyForCutover, "Ready for cutover", "Not ready for cutover")
-	lines := []string{
-		bullet(statusGlyph(status), statusText(status)),
+	if !combined.ReadyForCutover {
+		readiness.glyph = styles.Muted.Render("✗")
 	}
-	renderedValues := []string{status}
+	terminated := terminatedStatus(status)
+	var lines, renderedValues []string
+	normalizedStatus := normalizedValue(status)
+	notStarted := normalizedStatus == "created" || normalizedStatus == "queued"
+	cutoverStatus := cutoverRelatedStatus(status)
+	if cutoverStatus {
+		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
+		renderedValues = append(renderedValues, status)
+	}
 	completed := completedStatus(status)
 	readinessText := "Not ready for cutover"
 	if combined.ReadyForCutover {
 		readinessText = "Ready for cutover"
 	}
-	if !completed && !equivalentValue(status, readinessText) {
+	if !completed && !cutoverStatus {
 		lines = append(lines, bullet(readiness.glyph, readiness.text))
 		renderedValues = append(renderedValues, readinessText)
 	}
 	if displayMessage := strings.TrimSpace(combined.DisplayMessage); displayMessage != "" &&
-		!containsEquivalentValue(renderedValues, displayMessage) {
+		cutoverStatus && !containsEquivalentValue(renderedValues, displayMessage) {
 		lines = append(lines, detail(displayMessage))
 		renderedValues = append(renderedValues, displayMessage)
 	}
-	if !completed {
+	if !completed && !terminated && !notStarted {
 		for _, blocker := range combined.CutoverBlockers {
 			blocker = strings.TrimSpace(blocker)
 			if blocker == "" || containsEquivalentValue(renderedValues, blocker) {
@@ -179,6 +201,25 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 		sections = append(sections, renderSection("Repository states", repositoryLines...))
 	}
 	return joinSections(sections...)
+}
+
+func cutoverRelatedStatus(status string) bool {
+	switch normalizedValue(status) {
+	case "ready for cutover", "cutting over", "cutover pending", "cutover finalizing",
+		"completed", "complete", "success", "succeeded":
+		return true
+	default:
+		return false
+	}
+}
+
+func terminatedStatus(status string) bool {
+	switch normalizedValue(status) {
+	case "terminated", "cancelled", "canceled", "aborted":
+		return true
+	default:
+		return false
+	}
 }
 
 func completedStatus(status string) bool {
@@ -309,8 +350,11 @@ func MigrationRevertCutover(v elmapi.RevertCutoverResponse) string {
 
 func progressLine(label string, processed, added, failed int64) string {
 	styles := theme.New()
+	if processed == 0 && added == 0 && failed == 0 {
+		return field(label, styles.Muted.Render("○ Not started"))
+	}
 	counts := fmt.Sprintf("%s  %s / %s processed",
-		ProgressBar(processed, added, 14),
+		ProgressBar(processed, added, 20),
 		styles.Bold.Render(strconv.FormatInt(processed, 10)),
 		strconv.FormatInt(added, 10),
 	)
@@ -331,7 +375,9 @@ func ProgressBar(processed, total int64, width int) string {
 	if total > 0 {
 		filled = int(min(max(processed, 0), total) * int64(width) / total)
 	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	styles := theme.New()
+	return styles.ProgressBarFill.Render(strings.Repeat("━", filled)) +
+		styles.ProgressBarTrack.Render(strings.Repeat("━", width-filled))
 }
 
 type state struct {
@@ -409,6 +455,9 @@ func statusGlyph(status string) string {
 func statusText(status string) string {
 	styles := theme.New()
 	text := friendlyValue(status)
+	if normalizedValue(status) == "terminated" {
+		text = "Cancelled"
+	}
 	switch strings.ToLower(status) {
 	case "completed", "complete", "success", "succeeded", "ready_for_cutover", "ready for cutover":
 		return styles.Success.Bold(true).Render(text)
