@@ -701,66 +701,85 @@ func TestModelUpdate(t *testing.T) {
 }
 
 func TestFormActions(t *testing.T) {
-	tests := []struct {
-		name    string
-		primary string
-		open    func(*Model) (tea.Model, tea.Cmd)
-	}{
-		{"source migration ID", "Show migration", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openSourceIDForm()
-		}},
-		{"discovered source migration", "Create", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openDiscoveredSourceCreateForm("source/repository", "target")
-		}},
-		{"manual source migration", "Create", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openManualSourceCreateForm(screenHome, "")
-		}},
-		{"target migration ID", "Show migration", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openTargetIDForm()
-		}},
-		{"target migration creation", "Create migration", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openTargetCreateForm()
-		}},
-		{"resources", "Show resources", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openResourcesForm()
-		}},
-		{"report request", "Continue", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openReportForm("Request report", "request")
-		}},
-		{"report status", "Show status", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openReportForm("Report status", "status")
-		}},
-		{"report URL", "Show URL", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openReportForm("Report URL", "url")
-		}},
-		{"mannequin search", "Search", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openMannequinListForm(false)
-		}},
-		{"mannequin export", "Export mannequins", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openMannequinListForm(true)
-		}},
-		{"mannequin reclaim", "Continue", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openMannequinReclaimForm(false)
-		}},
-		{"mannequin CSV reclaim", "Continue", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openMannequinReclaimForm(true)
-		}},
-		{"configuration", "Save", func(model *Model) (tea.Model, tea.Cmd) {
-			return model.openConfigurationForm()
-		}},
-	}
+	t.Run("source migration ID", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openSourceIDForm()
+		assertFormActions(t, updated, "Show migration")
+	})
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			updated, _ := test.open(New(t.Context(), &fakeService{}))
-			model := updated.(*Model)
+	t.Run("discovered source migration", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openDiscoveredSourceCreateForm("source/repository", "target")
+		assertFormActions(t, updated, "Create")
+	})
 
-			assert.Equal(t, []string{test.primary, "Cancel"}, actionLabels(model.form.actions))
-			model.form.cursor = len(model.form.fields)
-			assert.Contains(t, model.formView(), test.primary)
-			assert.Contains(t, model.formView(), "Cancel")
-		})
-	}
+	t.Run("manual source migration", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openManualSourceCreateForm(screenHome, "")
+		assertFormActions(t, updated, "Create")
+	})
+
+	t.Run("target migration ID", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openTargetIDForm()
+		assertFormActions(t, updated, "Show migration")
+	})
+
+	t.Run("target migration creation", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openTargetCreateForm()
+		assertFormActions(t, updated, "Create migration")
+	})
+
+	t.Run("resources", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openResourcesForm()
+		assertFormActions(t, updated, "Show resources")
+	})
+
+	t.Run("report request", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openReportForm("Request report", "request")
+		assertFormActions(t, updated, "Continue")
+	})
+
+	t.Run("report status", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openReportForm("Report status", "status")
+		assertFormActions(t, updated, "Show status")
+	})
+
+	t.Run("report URL", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openReportForm("Report URL", "url")
+		assertFormActions(t, updated, "Show URL")
+	})
+
+	t.Run("mannequin search", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openMannequinListForm(false)
+		assertFormActions(t, updated, "Search")
+	})
+
+	t.Run("mannequin export", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openMannequinListForm(true)
+		assertFormActions(t, updated, "Export mannequins")
+	})
+
+	t.Run("mannequin reclaim", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openMannequinReclaimForm(false)
+		assertFormActions(t, updated, "Continue")
+	})
+
+	t.Run("mannequin CSV reclaim", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openMannequinReclaimForm(true)
+		assertFormActions(t, updated, "Continue")
+	})
+
+	t.Run("configuration", func(t *testing.T) {
+		updated, _ := New(t.Context(), &fakeService{}).openConfigurationForm()
+		assertFormActions(t, updated, "Save")
+	})
+}
+
+func assertFormActions(t *testing.T, updated tea.Model, primary string) {
+	t.Helper()
+
+	model := updated.(*Model)
+	assert.Equal(t, []string{primary, "Cancel"}, actionLabels(model.form.actions))
+	model.form.cursor = len(model.form.fields)
+	assert.Contains(t, model.formView(), primary)
+	assert.Contains(t, model.formView(), "Cancel")
 }
 
 func TestModelNavigationAndLayout(t *testing.T) {
