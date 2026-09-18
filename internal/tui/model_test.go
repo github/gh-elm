@@ -929,17 +929,17 @@ func TestModelNavigationAndLayout(t *testing.T) {
 				Repository: "acme/api",
 				Backfill: elmapi.TargetOriginStateSummary{
 					Breakdown: []elmapi.TargetStateBreakdownEntry{
-						{State: "processed", Type: "issue", Count: 1100},
-						{State: "pending", Type: "issue", Count: 100},
-						{State: "failed", Type: "issue", Count: 50},
-						{State: "processed", Type: "issue_comment", Count: 75},
-						{State: "processed", Type: "organization", Count: 1},
+						{State: "processed", Type: "NODE_TYPE_ISSUE", Count: 1100},
+						{State: "pending", Type: "NODE_TYPE_ISSUE", Count: 100},
+						{State: "failed", Type: "NODE_TYPE_ISSUE", Count: 50},
+						{State: "processed", Type: "NODE_TYPE_ISSUE_COMMENT", Count: 75},
+						{State: "processed", Type: "NODE_TYPE_ORGANIZATION", Count: 1},
 					},
 				},
 				LiveUpdate: elmapi.TargetOriginStateSummary{
 					Breakdown: []elmapi.TargetStateBreakdownEntry{
-						{State: "processed", Type: "pull_request", Count: 79},
-						{State: "eligible", Type: "pull_request", Count: 5},
+						{State: "processed", Type: "NODE_TYPE_PULL_REQUEST", Count: 79},
+						{State: "eligible", Type: "NODE_TYPE_PULL_REQUEST", Count: 5},
 					},
 				},
 			},
@@ -947,15 +947,15 @@ func TestModelNavigationAndLayout(t *testing.T) {
 				Repository: "acme/web",
 				Backfill: elmapi.TargetOriginStateSummary{
 					Breakdown: []elmapi.TargetStateBreakdownEntry{
-						{State: "processed", Type: "issue", Count: 90},
-						{State: "acknowledged", Type: "issue", Count: 10},
+						{State: "processed", Type: "NODE_TYPE_ISSUE", Count: 90},
+						{State: "acknowledged", Type: "NODE_TYPE_ISSUE", Count: 10},
 					},
 				},
 				LiveUpdate: elmapi.TargetOriginStateSummary{
 					Breakdown: []elmapi.TargetStateBreakdownEntry{
-						{State: "processed", Type: "pull_request", Count: 12},
-						{State: "failed", Type: "pull_request", Count: 1},
-						{State: "pending", Type: "pull_request_review", Count: 3},
+						{State: "processed", Type: "NODE_TYPE_PULL_REQUEST", Count: 12},
+						{State: "failed", Type: "NODE_TYPE_PULL_REQUEST", Count: 1},
+						{State: "pending", Type: "NODE_TYPE_PULL_REQUEST_REVIEW", Count: 3},
 					},
 				},
 			},
@@ -1002,6 +1002,7 @@ func TestModelNavigationAndLayout(t *testing.T) {
 		assert.Contains(t, wide, "PullRequest")
 		assert.Contains(t, wide, "PullRequestReview")
 		assert.NotContains(t, wide, "Organization")
+		assert.NotContains(t, wide, "NodeType")
 		assert.Contains(t, wide, "1,265")
 		assert.Contains(t, wide, "50")
 		assert.Contains(t, wide, "110")

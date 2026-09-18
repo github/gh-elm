@@ -474,11 +474,12 @@ func (m *Model) progressTable(title string, summaries []elmapi.TargetRepositoryS
 			entries = repository.LiveUpdate.Breakdown
 		}
 		for _, entry := range entries {
-			if strings.EqualFold(entry.Type, "organization") {
+			resourceType := normalizeResourceType(entry.Type)
+			if resourceType == "organization" {
 				continue
 			}
-			current := byType[entry.Type]
-			current.resourceType = resourceTypeLabel(entry.Type)
+			current := byType[resourceType]
+			current.resourceType = resourceTypeLabel(resourceType)
 			current.total += entry.Count
 			switch strings.ToLower(strings.TrimPrefix(entry.State, "NODE_STATE_")) {
 			case "processed":
@@ -486,7 +487,7 @@ func (m *Model) progressTable(title string, summaries []elmapi.TargetRepositoryS
 			case "failed":
 				current.failed += entry.Count
 			}
-			byType[entry.Type] = current
+			byType[resourceType] = current
 		}
 	}
 
@@ -548,6 +549,10 @@ func (m *Model) progressTable(title string, summaries []elmapi.TargetRepositoryS
 
 func pendingResources(added, processed int64) int64 {
 	return max(0, added-processed)
+}
+
+func normalizeResourceType(value string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "NODE_TYPE_"))
 }
 
 func resourceTypeLabel(value string) string {
