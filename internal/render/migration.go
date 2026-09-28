@@ -33,10 +33,15 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 		return "No migration status data returned.\n"
 	}
 
+	failure := TerminalFailureFor(v)
 	return joinSections(
 		renderMigrationSummary(v.Migration),
+		// The cause sits directly below the summary: on a failed migration it
+		// is the one thing the operator needs, and burying it under progress
+		// bars is how it gets missed.
+		renderTerminalFailure(failure),
 		renderTargetState(v.TargetState),
-		renderCombinedState(v.CombinedState),
+		renderCombinedState(v.CombinedState, failure),
 		renderMessages(v.Messages),
 	)
 }
@@ -46,7 +51,7 @@ func CutoverStatus(v elmapi.MigrationDetail) string {
 	if v.CombinedState == nil {
 		return "No combined state reported for this migration yet.\n"
 	}
-	return renderCombinedState(v.CombinedState)
+	return renderCombinedState(v.CombinedState, TerminalFailureFor(v))
 }
 
 func renderMigrationSummary(migration *elmapi.MigrationSummary) string {
@@ -116,7 +121,7 @@ func renderRepositoryProgress(progress elmapi.RepositoryProgress) string {
 	return renderSection("Progress · "+valueOrEmpty(progress.RepositoryNWO), lines...)
 }
 
-func renderCombinedState(combined *elmapi.CombinedState) string {
+func renderCombinedState(combined *elmapi.CombinedState, failure *elmapi.TerminalFailure) string {
 	if combined == nil {
 		return ""
 	}
@@ -128,6 +133,12 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 		bullet(statusGlyph(status), statusText(status)),
 	}
 	renderedValues := []string{status}
+	// The server prefers the authored failure summary for display_message on a
+	// failed migration, so without seeding it here the same sentence would
+	// render twice: once in the failure section, once again below.
+	if summary := TerminalFailureSummary(failure); summary != "" {
+		renderedValues = append(renderedValues, summary)
+	}
 	completed := completedStatus(status)
 	readinessText := "Not ready for cutover"
 	if combined.ReadyForCutover {

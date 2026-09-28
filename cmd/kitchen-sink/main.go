@@ -102,6 +102,78 @@ var fixtures = []struct {
 		render: renderStatus,
 	},
 	{
+		// A failed migration, carrying the terminal failure the server records.
+		// display_message deliberately repeats the authored summary, which is
+		// what the server sends on a failure, so this fixture also previews the
+		// de-duplication between the failure section and the cutover section.
+		name: "gh elm migration status (failed)",
+		raw: json.RawMessage(`{
+  "migration": {
+    "migration_id": "b41d0c6e-9d2a-4f70-8c1b-5a6f2f0f4e18",
+    "status": "failed",
+    "source_organization_login": "source-org",
+    "source_repository_name": "billing",
+    "target_organization_login": "target-org",
+    "target_repository_name": "billing",
+    "target_visibility": "internal",
+    "target_migration_id": 4307,
+    "created_at": "2026-09-04T12:55:00Z",
+    "started_at": "2026-09-04T12:56:10Z",
+    "completed_at": null,
+    "expires_at": "2026-09-11T12:55:00Z"
+  },
+  "target_state": {
+    "status": "failed",
+    "target_unavailable": false,
+    "repository_progress": [
+      {
+        "repository_nwo": "target-org/billing",
+        "backfill_resources_added": 24,
+        "backfill_resources_processed": 22,
+        "backfill_resources_failed": 2,
+        "live_update_resources_added": 0,
+        "live_update_resources_processed": 0,
+        "live_update_resources_failed": 0,
+        "all_resources_sent": false,
+        "initial_git_push_complete": false,
+        "repository_locked": false
+      }
+    ],
+    "terminal_failure": {
+      "code": "repository_policy",
+      "summary": "Creating the target repository was blocked by a policy on the target organization or enterprise.",
+      "occurred_at": "2026-09-04T12:58:37Z"
+    }
+  },
+  "combined_state": {
+    "status": "failed",
+    "display_message": "Creating the target repository was blocked by a policy on the target organization or enterprise.",
+    "ready_for_cutover": false,
+    "cutover_blockers": [],
+    "repositories": [
+      {
+        "repository_nwo": "target-org/billing",
+        "phase": "backfill",
+        "display_status": "Failed: 2 resources failed"
+      }
+    ],
+    "terminal_failure": {
+      "code": "repository_policy",
+      "summary": "Creating the target repository was blocked by a policy on the target organization or enterprise.",
+      "occurred_at": "2026-09-04T12:58:37Z"
+    }
+  },
+  "messages": [
+    {
+      "message_type": "error",
+      "message": "Two backfill resources failed and should be reviewed.",
+      "created_at": "2026-09-04T12:58:40Z"
+    }
+  ]
+}`),
+		render: renderStatus,
+	},
+	{
 		name: "gh elm migration list",
 		raw: json.RawMessage(`{
   "migrations": [

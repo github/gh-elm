@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
 
@@ -341,7 +342,19 @@ func (m Model) completedDetail() string {
 	return msg
 }
 
+// failedDetail describes why the migration failed, preferring the cause the
+// server recorded over the display message derived from it.
+//
+// The summary and code come from the shared render helpers so this line cannot
+// drift from what `gh elm migration status` prints for the same migration.
 func (m Model) failedDetail() string {
+	if failure := render.TerminalFailureFor(*m.detail); failure != nil {
+		text := m.styles.Failure.Render(render.TerminalFailureSummary(failure))
+		if code := strings.TrimSpace(failure.Code); code != "" {
+			text += m.styles.Muted.Render(" (" + code + ")")
+		}
+		return text
+	}
 	if cs := m.detail.CombinedState; cs != nil && cs.DisplayMessage != "" {
 		return m.styles.Failure.Render(cs.DisplayMessage)
 	}

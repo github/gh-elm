@@ -139,3 +139,60 @@ func TestView(t *testing.T) {
 		assert.Contains(t, m.View(), "Loading migration status")
 	})
 }
+
+func TestFailedDetail(t *testing.T) {
+	failed := combinedFailed
+
+	newModel := func(detail *elmapi.MigrationDetail) Model {
+		m := New("id", time.Second, nil)
+		m.detail = detail
+		return m
+	}
+
+	t.Run("prefers the recorded cause over the display message", func(t *testing.T) {
+		m := newModel(&elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:         &failed,
+				DisplayMessage: "Failed: 2 resources failed",
+				TerminalFailure: &elmapi.TerminalFailure{
+					Code:    "repository_policy",
+					Summary: "Policy blocked it.",
+				},
+			},
+		})
+
+		detail := m.failedDetail()
+
+		assert.Contains(t, detail, "Policy blocked it.")
+		assert.Contains(t, detail, "repository_policy")
+		assert.NotContains(t, detail, "Failed: 2 resources failed")
+	})
+
+	t.Run("falls back to the target state cause", func(t *testing.T) {
+		m := newModel(&elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{Status: &failed},
+			TargetState: &elmapi.TargetState{
+				TerminalFailure: &elmapi.TerminalFailure{
+					Code:    "critical_resource",
+					Summary: "A required resource could not be imported.",
+				},
+			},
+		})
+
+		assert.Contains(t, m.failedDetail(), "A required resource could not be imported.")
+	})
+
+	t.Run("falls back to the display message when no cause was recorded", func(t *testing.T) {
+		m := newModel(&elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{Status: &failed, DisplayMessage: "Failed: 2 resources failed"},
+		})
+
+		assert.Contains(t, m.failedDetail(), "Failed: 2 resources failed")
+	})
+
+	t.Run("falls back to a generic sentence with nothing to show", func(t *testing.T) {
+		m := newModel(&elmapi.MigrationDetail{CombinedState: &elmapi.CombinedState{Status: &failed}})
+
+		assert.Contains(t, m.failedDetail(), "Migration failed")
+	})
+}

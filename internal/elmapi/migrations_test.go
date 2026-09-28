@@ -57,3 +57,76 @@ func TestMigrationResponses(t *testing.T) {
 		assert.Equal(t, body, string(resp.Raw))
 	})
 }
+
+func TestMigrationDetailTerminalFailure(t *testing.T) {
+	const body = `{
+  "migration": {"migration_id": "mig-1", "status": "failed"},
+  "target_state": {
+    "status": "failed",
+    "terminal_failure": {
+      "code": "repository_policy",
+      "summary": "Policy blocked it.",
+      "occurred_at": "2026-09-04T12:58:37Z"
+    }
+  },
+  "combined_state": {
+    "status": "failed",
+    "terminal_failure": {"code": "critical_resource", "summary": "Resource failed.", "occurred_at": null}
+  }
+}`
+
+	newServer := func(t *testing.T, payload string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(payload))
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+
+	t.Run("decodes the cause on both states", func(t *testing.T) {
+		srv := newServer(t, body)
+
+		detail, err := NewClient(srv.URL, "tok").GetMigrationDetail(t.Context(), "mig-1")
+		require.NoError(t, err)
+
+		require.NotNil(t, detail.TargetState.TerminalFailure)
+		assert.Equal(t, "repository_policy", detail.TargetState.TerminalFailure.Code)
+		assert.Equal(t, "Policy blocked it.", detail.TargetState.TerminalFailure.Summary)
+		require.NotNil(t, detail.TargetState.TerminalFailure.OccurredAt)
+		assert.Equal(t, "2026-09-04T12:58:37Z", *detail.TargetState.TerminalFailure.OccurredAt)
+
+		require.NotNil(t, detail.CombinedState.TerminalFailure)
+		assert.Equal(t, "critical_resource", detail.CombinedState.TerminalFailure.Code)
+	})
+
+	t.Run("leaves a null occurred_at nil so it stays distinct from the epoch", func(t *testing.T) {
+		srv := newServer(t, body)
+
+		detail, err := NewClient(srv.URL, "tok").GetMigrationDetail(t.Context(), "mig-1")
+		require.NoError(t, err)
+
+		require.NotNil(t, detail.CombinedState.TerminalFailure)
+		assert.Nil(t, detail.CombinedState.TerminalFailure.OccurredAt)
+	})
+
+	t.Run("leaves the cause nil when the server omits it", func(t *testing.T) {
+		srv := newServer(t, `{"migration":{"migration_id":"mig-1"},"target_state":{},"combined_state":{}}`)
+
+		detail, err := NewClient(srv.URL, "tok").GetMigrationDetail(t.Context(), "mig-1")
+		require.NoError(t, err)
+
+		assert.Nil(t, detail.TargetState.TerminalFailure)
+		assert.Nil(t, detail.CombinedState.TerminalFailure)
+	})
+
+	t.Run("preserves the cause verbatim in the raw document", func(t *testing.T) {
+		srv := newServer(t, body)
+
+		raw, err := NewClient(srv.URL, "tok").GetMigration(t.Context(), "mig-1")
+		require.NoError(t, err)
+
+		// `--json` writes this document straight through, so the contract
+		// reaches scripts without the typed structs having to model it.
+		assert.JSONEq(t, body, string(raw))
+	})
+}
