@@ -10,7 +10,6 @@ on:
   merge_group:
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -27,11 +26,8 @@ jobs:
         with:
           go-version-file: go.mod
           # setup-go caches by default; disable it here because this workflow
-          # also runs on tags and has id-token: write.
+          # also runs on tags.
           cache: false
-
-      - name: OIDC Setup for goproxy
-        uses: github/setup-goproxy@5e60e1074d42316dfe2949ebf9a92bf77b24645b # v1.1.0
 
       - name: Run Go linter
         run: make lint
