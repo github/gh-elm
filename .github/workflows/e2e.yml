@@ -60,7 +60,7 @@ jobs:
       # secrets. Checking out the candidate is safe because candidate code is
       # not executed in this job.
       - name: Check out candidate
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.candidate_ref }}
           persist-credentials: false
@@ -275,7 +275,7 @@ jobs:
       # requested. If the branch moves while this job waits for approval, the
       # originally resolved commit is still tested.
       - name: Check out approved candidate
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
@@ -386,7 +386,7 @@ jobs:
           echo "All E2E harness files passed Bash syntax validation."
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
@@ -536,7 +536,7 @@ jobs:
       # github.sha identifies the immutable trusted workflow revision. Never
       # load the reporter from the candidate selected through candidate_ref.
       - name: Check out trusted reporter
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
