@@ -14,7 +14,6 @@ import (
 // pinNow freezes the clock used for relative failure times so assertions do not
 // drift with wall time.
 func pinNow(t *testing.T, now time.Time) {
-	t.Helper()
 	previous := nowFunc
 	nowFunc = func() time.Time { return now }
 	t.Cleanup(func() { nowFunc = previous })
@@ -47,6 +46,68 @@ func TestTerminalFailureFor(t *testing.T) {
 
 		require.NotNil(t, resolved)
 		assert.Equal(t, "critical_resource", resolved.Code)
+	})
+
+	t.Run("uses the target cause when combined state is absent", func(t *testing.T) {
+		resolved := TerminalFailureFor(elmapi.MigrationDetail{
+			TargetState: &elmapi.TargetState{TerminalFailure: failure("critical_resource", "Target view", nil)},
+		})
+
+		require.NotNil(t, resolved)
+		assert.Equal(t, "critical_resource", resolved.Code)
+	})
+
+	t.Run("uses the target cause when combined state failed without one", func(t *testing.T) {
+		failedStatus := "failed"
+		resolved := TerminalFailureFor(elmapi.MigrationDetail{
+			TargetState:   &elmapi.TargetState{TerminalFailure: failure("critical_resource", "Target view", nil)},
+			CombinedState: &elmapi.CombinedState{Status: &failedStatus},
+		})
+
+		require.NotNil(t, resolved)
+		assert.Equal(t, "critical_resource", resolved.Code)
+	})
+
+	// A terminated migration is a deliberate abort. The target may still report
+	// a fault, but attributing it would tell the operator their own cancellation
+	// was a failure.
+	t.Run("ignores the target cause when the migration was terminated", func(t *testing.T) {
+		terminated := "terminated"
+		assert.Nil(t, TerminalFailureFor(elmapi.MigrationDetail{
+			TargetState:   &elmapi.TargetState{TerminalFailure: failure("critical_resource", "Target view", nil)},
+			CombinedState: &elmapi.CombinedState{Status: &terminated},
+		}))
+	})
+
+	t.Run("ignores the target cause while the migration is still in flight", func(t *testing.T) {
+		for _, status := range []string{"in_progress", "paused"} {
+			t.Run(status, func(t *testing.T) {
+				assert.Nil(t, TerminalFailureFor(elmapi.MigrationDetail{
+					TargetState:   &elmapi.TargetState{TerminalFailure: failure("critical_resource", "Target view", nil)},
+					CombinedState: &elmapi.CombinedState{Status: &status},
+				}))
+			})
+		}
+	})
+
+	t.Run("ignores the target cause when the migration completed", func(t *testing.T) {
+		completed := "completed"
+		assert.Nil(t, TerminalFailureFor(elmapi.MigrationDetail{
+			TargetState:   &elmapi.TargetState{TerminalFailure: failure("critical_resource", "Target view", nil)},
+			CombinedState: &elmapi.CombinedState{Status: &completed},
+		}))
+	})
+
+	// The combined cause is authored only for a genuine failure, so when it is
+	// present it is trusted regardless of how the status reads.
+	t.Run("keeps the combined cause even for a terminated status", func(t *testing.T) {
+		terminated := "terminated"
+		resolved := TerminalFailureFor(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{Status: &terminated, TerminalFailure: failure("repository_policy", "Combined view", nil)},
+		})
+
+		require.NotNil(t, resolved)
+		assert.Equal(t, "repository_policy", resolved.Code)
 	})
 
 	t.Run("returns nil when nothing failed", func(t *testing.T) {
@@ -213,7 +274,10 @@ func TestMigrationStatusTerminalFailure(t *testing.T) {
 }
 
 func TestCutoverStatusTerminalFailure(t *testing.T) {
-	t.Run("does not repeat the summary as the display message", func(t *testing.T) {
+	// Guards both regressions at once: the summary must survive (it was being
+	// suppressed as a duplicate of a section that never rendered) and must not
+	// appear twice once the section does render.
+	t.Run("renders the cause exactly once", func(t *testing.T) {
 		failedStatus := "failed"
 		summary := "Policy blocked it."
 		output := CutoverStatus(elmapi.MigrationDetail{
@@ -224,6 +288,32 @@ func TestCutoverStatusTerminalFailure(t *testing.T) {
 			},
 		})
 
-		assert.NotContains(t, output, summary)
+		assert.Equal(t, 1, strings.Count(output, summary), "cause should render once, in the failure section")
+		assert.Contains(t, output, "Failure")
+		assert.Contains(t, output, "repository_policy")
+	})
+
+	t.Run("keeps a display message that is not the failure summary", func(t *testing.T) {
+		failedStatus := "failed"
+		output := CutoverStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{
+				Status:          &failedStatus,
+				DisplayMessage:  "Cutover is blocked.",
+				TerminalFailure: failure("repository_policy", "Policy blocked it.", nil),
+			},
+		})
+
+		assert.Contains(t, output, "Cutover is blocked.")
+		assert.Contains(t, output, "Policy blocked it.")
+	})
+
+	t.Run("renders no failure section when nothing failed", func(t *testing.T) {
+		inProgress := "in_progress"
+		output := CutoverStatus(elmapi.MigrationDetail{
+			CombinedState: &elmapi.CombinedState{Status: &inProgress, DisplayMessage: "Still running."},
+		})
+
+		assert.NotContains(t, output, "Failure")
+		assert.Contains(t, output, "Still running.")
 	})
 }

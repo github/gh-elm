@@ -19,21 +19,48 @@ var nowFunc = time.Now
 const genericFailureSummary = "Migration failed"
 
 // TerminalFailureFor returns the cause to display for a migration, or nil when
-// none was recorded.
+// none was recorded or none should be attributed.
 //
 // CombinedState wins because the server populates it only for a genuine
-// failure, making it the user-facing view. TargetState is the fallback: it is
-// the destination's faithful report, and it can be set when the combined status
-// describes something other than a failure, so preferring it would surface a
-// cause on migrations the server does not consider failed.
+// failure, making it the user-facing view.
+//
+// TargetState is a narrower fallback. It is the destination's faithful report
+// and can be set while the combined status describes something that is not a
+// failure at all — a user-initiated abort, or a migration still running — so it
+// is used only when the combined state is absent, undecided, or itself failed.
+// Falling back unconditionally would render a cause for a migration the server
+// does not consider failed, misattributing a deliberate abort as a fault.
 func TerminalFailureFor(detail elmapi.MigrationDetail) *elmapi.TerminalFailure {
 	if combined := detail.CombinedState; combined != nil && combined.TerminalFailure != nil {
 		return combined.TerminalFailure
 	}
 	if target := detail.TargetState; target != nil && target.TerminalFailure != nil {
-		return target.TerminalFailure
+		if detail.CombinedState == nil || allowsTargetFailure(pointerString(detail.CombinedState.Status)) {
+			return target.TerminalFailure
+		}
 	}
 	return nil
+}
+
+// allowsTargetFailure reports whether a combined status permits attributing a
+// target-reported cause to the migration.
+//
+// This deliberately does not reuse statusGlyph/statusText, which lump failed in
+// with terminated and cancelled for presentation purposes. That conflation is
+// exactly the distinction this gate turns on: a terminated migration is a
+// deliberate abort, not a fault.
+func allowsTargetFailure(status string) bool {
+	switch normalizedValue(status) {
+	// Empty and unknown mean the combined view has not reached a verdict, so
+	// the target's report is the best information available; failed means it
+	// agrees, and simply did not author its own cause.
+	case "", "unknown", "unspecified", "failed", "failure":
+		return true
+	default:
+		// Terminated, cancelled, completed, and anything still in flight: the
+		// server does not describe this migration as failed, so neither do we.
+		return false
+	}
 }
 
 // TerminalFailureSummary returns the sentence describing a failure, falling

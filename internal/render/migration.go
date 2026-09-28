@@ -51,7 +51,15 @@ func CutoverStatus(v elmapi.MigrationDetail) string {
 	if v.CombinedState == nil {
 		return "No combined state reported for this migration yet.\n"
 	}
-	return renderCombinedState(v.CombinedState, TerminalFailureFor(v))
+	// The failure section must render here too, not just in MigrationStatus:
+	// renderCombinedState suppresses a display_message that repeats the
+	// summary, so without this the cause would be silently dropped from the
+	// cutover view rather than de-duplicated.
+	failure := TerminalFailureFor(v)
+	return joinSections(
+		renderTerminalFailure(failure),
+		renderCombinedState(v.CombinedState, failure),
+	)
 }
 
 func renderMigrationSummary(migration *elmapi.MigrationSummary) string {

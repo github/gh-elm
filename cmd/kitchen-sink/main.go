@@ -174,6 +174,49 @@ var fixtures = []struct {
 		render: renderStatus,
 	},
 	{
+		// A terminated migration whose target independently reported a fault.
+		// The operator aborted this deliberately, so the combined state carries
+		// no cause and the target's must NOT be attributed: this fixture should
+		// render no Failure section at all.
+		name: "gh elm migration status (terminated, target reported a fault)",
+		raw: json.RawMessage(`{
+  "migration": {
+    "migration_id": "c52e1d7f-ae3b-4081-9d2c-6b7a3a1b5f29",
+    "status": "terminated",
+    "source_organization_login": "source-org",
+    "source_repository_name": "payments",
+    "target_organization_login": "target-org",
+    "target_repository_name": "payments",
+    "target_visibility": "internal",
+    "target_migration_id": 4311,
+    "created_at": "2026-09-04T13:10:00Z",
+    "started_at": "2026-09-04T13:11:05Z",
+    "completed_at": null,
+    "expires_at": "2026-09-11T13:10:00Z"
+  },
+  "target_state": {
+    "status": "failed",
+    "target_unavailable": false,
+    "repository_progress": [],
+    "terminal_failure": {
+      "code": "critical_resource",
+      "summary": "A critical resource could not be migrated.",
+      "occurred_at": "2026-09-04T13:12:44Z"
+    }
+  },
+  "combined_state": {
+    "status": "terminated",
+    "display_message": "Migration terminated by request.",
+    "ready_for_cutover": false,
+    "cutover_blockers": [],
+    "repositories": [],
+    "terminal_failure": null
+  },
+  "messages": []
+}`),
+		render: renderStatus,
+	},
+	{
 		name: "gh elm migration list",
 		raw: json.RawMessage(`{
   "migrations": [
