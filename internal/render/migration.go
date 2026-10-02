@@ -37,10 +37,21 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 		sourceStatus = pointerString(v.Migration.Status)
 	}
 
+	failure := TerminalFailureFor(v)
+	summaryTarget := v.TargetState
+	showTargetAvailability := v.Migration == nil
+	if failure != nil {
+		summaryTarget = nil
+		showTargetAvailability = true
+	}
 	return joinSections(
-		renderMigrationSummary(v.Migration, v.TargetState),
-		renderTargetState(v.TargetState, sourceStatus, v.Migration == nil),
-		renderCombinedState(v.CombinedState),
+		renderMigrationSummary(v.Migration, summaryTarget),
+		// The cause sits directly below the summary: on a failed migration it
+		// is the one thing the operator needs, and burying it under progress
+		// bars is how it gets missed.
+		renderTerminalFailure(failure),
+		renderTargetState(v.TargetState, sourceStatus, showTargetAvailability),
+		renderCombinedState(v.CombinedState, failure),
 		renderMessages(v.Messages),
 	)
 }
@@ -50,7 +61,15 @@ func CutoverStatus(v elmapi.MigrationDetail) string {
 	if v.CombinedState == nil {
 		return "No combined state reported for this migration yet.\n"
 	}
-	return renderCombinedState(v.CombinedState)
+	// The failure section must render here too, not just in MigrationStatus:
+	// renderCombinedState suppresses a display_message that repeats the
+	// summary, so without this the cause would be silently dropped from the
+	// cutover view rather than de-duplicated.
+	failure := TerminalFailureFor(v)
+	return joinSections(
+		renderTerminalFailure(failure),
+		renderCombinedState(v.CombinedState, failure),
+	)
 }
 
 func renderMigrationSummary(migration *elmapi.MigrationSummary, target *elmapi.TargetState) string {
@@ -130,7 +149,7 @@ func renderRepositoryProgress(progress elmapi.RepositoryProgress) string {
 	return renderSection("Progress · "+valueOrEmpty(progress.RepositoryNWO), lines...)
 }
 
-func renderCombinedState(combined *elmapi.CombinedState) string {
+func renderCombinedState(combined *elmapi.CombinedState, failure *elmapi.TerminalFailure) string {
 	if combined == nil {
 		return ""
 	}
@@ -150,6 +169,12 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 		lines = append(lines, bullet(statusGlyph(status), statusText(status)))
 		renderedValues = append(renderedValues, status)
 	}
+	// The server prefers the authored failure summary for display_message on a
+	// failed migration, so without seeding it here the same sentence would
+	// render twice: once in the failure section, once again below.
+	if summary := TerminalFailureSummary(failure); summary != "" {
+		renderedValues = append(renderedValues, summary)
+	}
 	completed := completedStatus(status)
 	readinessText := "Not ready for cutover"
 	if combined.ReadyForCutover {
@@ -159,8 +184,9 @@ func renderCombinedState(combined *elmapi.CombinedState) string {
 		lines = append(lines, bullet(readiness.glyph, readiness.text))
 		renderedValues = append(renderedValues, readinessText)
 	}
+	showDisplayMessage := cutoverStatus || failure != nil || normalizedStatus == "in progress"
 	if displayMessage := strings.TrimSpace(combined.DisplayMessage); displayMessage != "" &&
-		cutoverStatus && !containsEquivalentValue(renderedValues, displayMessage) {
+		showDisplayMessage && !containsEquivalentValue(renderedValues, displayMessage) {
 		lines = append(lines, detail(displayMessage))
 		renderedValues = append(renderedValues, displayMessage)
 	}
