@@ -3,42 +3,56 @@ package tui
 import (
 	"fmt"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/workflow"
 )
 
-const homeTitle = "Live migrations"
+const (
+	appTitle  = "GHE Live Migrations"
+	homeTitle = "Main menu"
+)
 
 // View implements tea.Model.
+//
+//nolint:maintidx // Bubble Tea centralizes screen rendering in this method.
 func (m *Model) View() string {
 	if m.width > 0 && (m.width < 48 || m.height < 12) {
-		return m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit")
+		return nativeCursorView(
+			m.frame("Terminal too small", "Resize to at least 48 columns by 12 rows.", "ctrl+c quit", "", ""),
+		)
 	}
 
 	current := m.screen
 	confirming := current == screenConfirm
+	alerting := current == screenAlert
+	resultPopup := current == screenResult && m.result.popup
 	if confirming {
 		current = m.confirm.parent
 	}
+	if alerting {
+		current = m.alert.parent
+	}
+	if resultPopup && !m.result.blankBackground {
+		current = m.result.parent
+	}
 
-	var title, body, help string
+	var title, body, help, topLine, bottomLine string
 	switch current {
 	case screenHome:
 		title = homeTitle
-		body = m.menu([]string{
-			"Migrations",
-			"Create migration",
-			"Target mannequins",
-			"Configuration",
-			"Advanced destination operations",
-			"Quit",
-		})
+		body = m.menu(m.homeActionItems())
+		if m.configurationCheckPending() {
+			body += "\n\n" + m.styles.Muted.Render("… Checking configuration…")
+		}
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.Help, keys.Quit)
 	case screenSourceList:
 		title = "Migrations"
@@ -46,84 +60,146 @@ func (m *Model) View() string {
 			title += " · search: " + m.searchInput.View()
 		}
 		body = m.sourceListView()
+		topLine = m.sourceListTopLine()
+		bottomLine = m.sourceListBottomLine()
 		if m.sourceSearch {
 			help = "type to filter • " + helpLine(keys.Up, keys.Down, keys.Open, keys.Back)
 		} else {
 			help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Search, keys.Density, keys.Refresh, keys.Back)
 		}
 	case screenSourceDetail:
-		title = fmt.Sprintf("Migration %s", m.sourceID)
+		title = m.sourceDetailTitle()
 		body = m.sourceDetailView()
-		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Back)
+		if m.sourceMigrationStarted() {
+			help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		}
 	case screenTargetList:
-		title = "Advanced destination migrations"
+		title = "Destination migrations"
 		body = m.targetListView()
 		help = helpLine(keys.Up, keys.Down, keys.Open, keys.New, keys.Manual, keys.Refresh, keys.Back)
 	case screenTargetDetail:
-		title = fmt.Sprintf("Destination migration %d (advanced)", m.targetID)
+		title = m.targetDetailTitle()
 		body = m.targetDetailView()
-		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenMannequins:
 		title = "Target mannequins"
-		body = m.actionButtons(actionsFromLabels(mannequinActions), m.cursor, m.contentWidth())
+		body = m.actionButtons(mannequinActions, m.actionFocus, m.contentWidth())
 		help = helpLine(keys.Left, keys.Open, keys.Back)
 	case screenConfiguration:
 		title = "Configuration"
 		body = m.configurationView()
-		help = helpLine(keys.Left, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
+		help = helpLine(keys.Left, keys.Up, keys.Down, keys.Open, keys.PageUp, keys.PageDown, keys.Refresh, keys.Back)
 	case screenPicker:
 		title = m.picker.title
+		if m.picker.search {
+			title += " · filter  " + m.picker.input.View()
+		}
 		body = m.pickerView()
-		help = "type to search • ↑/↓ select • enter continue • ctrl+e manual entry • esc cancel"
+		if m.picker.search {
+			help = "type to filter • ↑/↓ select • enter continue • esc close search"
+			if m.picker.kind == pickerSourceRepository {
+				help = "type to filter • ↑/↓ select • enter continue • ? repository details • esc close search"
+			}
+		} else {
+			help = "↑/↓ select • enter continue • f search • ctrl+e manual entry • esc cancel"
+			if m.picker.kind == pickerSourceRepository {
+				help = "↑/↓ select • enter continue • f search • ? repository details • ctrl+e manual entry • esc cancel"
+			}
+		}
 	case screenForm:
 		title = m.form.title
 		body = m.formView()
-		help = "tab/↑/↓ fields • type edit • ←/→ choose • space toggle • enter continue • esc cancel"
+		help = "tab/↑/↓ fields • type edit • alt+del word • ←/→ choose • space toggle • enter continue • esc cancel"
+		if len(m.form.actions) > 0 {
+			help = "tab/↑/↓ fields/actions • type edit • alt+del word • ←/→ choose • space toggle • enter activate • esc cancel"
+		}
 	case screenResult:
 		title = m.result.title
 		body = m.result.body
 		help = helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown, keys.Back)
 	}
+	if resultPopup && m.result.blankBackground {
+		title, body, help = "", "", ""
+	}
 
-	if m.showHelp && !confirming {
+	if m.showHelp && !confirming && !alerting && !resultPopup {
 		title = "Keyboard help"
 		body = m.fullHelpView()
 		help = "? close • q quit"
+		topLine, bottomLine = "", ""
 	}
-	if m.loading {
+	showingRefreshedDetail := m.refreshingDetail &&
+		(current == screenSourceDetail && m.sourceDetail != nil ||
+			current == screenTargetDetail && m.targetDetail != nil)
+	if m.loading && !showingRefreshedDetail {
 		body = m.styles.Active.Render("Loading…")
+		topLine, bottomLine = "", ""
 	}
 	if m.err != nil {
 		body += "\n\n" + m.styles.Failure.Render("Error: "+m.err.Error())
 	}
-	bodyHeight := m.bodyHeight()
+	detailActions := ""
+	if !m.showHelp {
+		detailActions = m.detailActionView(current)
+	}
+	bodyHeight := m.viewportBodyHeight(current)
 	if isScrollableScreen(current) || m.showHelp {
 		body = m.viewportView(body, bodyHeight)
 	} else {
 		body = clip(body, bodyHeight)
 	}
+	if detailActions != "" {
+		body = m.detailLayout(body, detailActions)
+	}
 	if confirming {
 		help = "←/→ select action • enter activate • y confirm • n/esc cancel"
+	} else if alerting || resultPopup {
+		help = "enter/esc close"
 	}
-	rendered := m.frame(title, body, help)
-	if confirming {
+	rendered := m.frame(title, body, help, topLine, bottomLine)
+	if confirming || alerting || resultPopup {
+		rendered = strings.ReplaceAll(rendered, nativeCursorPositionMarker, "")
+	}
+	switch {
+	case confirming:
 		rendered = overlayCenter(
 			rendered,
 			m.confirmationOverlay(),
 			m.displayWidth(),
 			displayHeight(m.height),
 		)
+	case alerting:
+		rendered = overlayCenter(
+			rendered,
+			m.alertOverlay(),
+			m.displayWidth(),
+			displayHeight(m.height),
+		)
+	case resultPopup:
+		rendered = overlayCenter(
+			rendered,
+			m.resultPopupOverlay(),
+			m.displayWidth(),
+			displayHeight(m.height),
+		)
+	case m.pickerInfoOpen:
+		if overlay := m.pickerInfoOverlay(); overlay != "" {
+			rendered = overlayCenter(
+				rendered,
+				overlay,
+				m.displayWidth(),
+				displayHeight(m.height),
+			)
+		}
 	}
-	return rendered
+	return nativeCursorView(rendered)
 }
 
-func (m *Model) frame(title, body, help string) string {
+func (m *Model) frame(title, body, help, topLine, bottomLine string) string {
 	contentWidth := m.contentWidth()
-	brand := m.styles.Primary.Bold(true).Render("GitHub Enterprise")
-	subtitle := m.styles.Info.Bold(true).Render(title)
-	if title == homeTitle {
-		subtitle = m.styles.Success.Render(title)
-	}
+	brand := m.styles.Primary.Bold(true).Render(appTitle)
+	subtitle := m.styles.Muted.Bold(false).Render(title)
 	header := brand + "\n" + subtitle + "\n" +
 		m.styles.Muted.Render(strings.Repeat("─", contentWidth))
 
@@ -133,11 +209,27 @@ func (m *Model) frame(title, body, help string) string {
 		warningBlock = "\n" + m.styles.Warning.Bold(true).Render("⚠ Configuration not ready") + "\n" +
 			warning
 	}
-	content := lipgloss.NewStyle().Width(contentWidth).Render(body)
-	footer := m.styles.Muted.Render(help)
+	contentHeight := m.bodyHeight()
+	content := lipgloss.NewStyle().Width(contentWidth).Height(contentHeight).Render(body)
+	footer := m.footer(help, bottomLine, contentWidth)
+	bodySeparator := "\n\n"
+	if topLine != "" {
+		bodySeparator = "\n" + topLine + "\n"
+	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(
-		header + warningBlock + "\n\n" + content + "\n\n" + footer,
+		header + warningBlock + bodySeparator + content + "\n" + footer,
 	)
+}
+
+func (m *Model) footer(help, status string, width int) string {
+	if status == "" {
+		return m.styles.Muted.Render(help)
+	}
+
+	statusWidth := lipgloss.Width(status)
+	help = ansi.Truncate(help, max(0, width-statusWidth-2), "")
+	gap := max(1, width-lipgloss.Width(help)-statusWidth)
+	return m.styles.Muted.Render(help) + strings.Repeat(" ", gap) + status
 }
 
 func (m *Model) displayWidth() int {
@@ -152,7 +244,7 @@ func (m *Model) contentWidth() int {
 }
 
 func (m *Model) bodyHeight() int {
-	height := displayHeight(m.height) - 6
+	height := displayHeight(m.height) - 5
 	if warning := m.configurationWarning(); warning != "" {
 		height -= lipgloss.Height(lipgloss.NewStyle().Width(m.contentWidth()).Render(warning)) + 1
 	}
@@ -160,6 +252,9 @@ func (m *Model) bodyHeight() int {
 }
 
 func (m *Model) configurationWarning() string {
+	if m.inConfigurationFlow() {
+		return ""
+	}
 	if m.configurationErr != nil {
 		return "Unable to load configuration: " + m.configurationErr.Error()
 	}
@@ -208,23 +303,45 @@ func (m *Model) configurationWarning() string {
 	return strings.Join(issues, ". ") + ". Open Configuration to finish setup."
 }
 
-func (m *Model) menu(items []string) string {
+func (m *Model) inConfigurationFlow() bool {
+	switch m.screen {
+	case screenConfiguration:
+		return true
+	case screenForm:
+		return m.form.parent == screenConfiguration
+	case screenConfirm:
+		return m.confirm.parent == screenConfiguration
+	case screenResult:
+		return m.result.parent == screenConfiguration
+	default:
+		return false
+	}
+}
+
+func (m *Model) menu(items []actionItem) string {
+	return m.verticalMenu(items, m.cursor, false)
+}
+
+func (m *Model) actionMenu(items []actionItem, focus int) string {
+	return m.verticalMenu(items, focus, true)
+}
+
+func (m *Model) verticalMenu(items []actionItem, focus int, showShortcuts bool) string {
 	var builder strings.Builder
 	for index, item := range items {
 		if index > 0 {
 			builder.WriteString("\n")
 		}
-		builder.WriteString(m.selectorCard(item, index == m.cursor, true))
+		label := item.label
+		if item.disabled {
+			label = m.styles.Disabled.Render(label)
+		}
+		if showShortcuts && item.shortcut != "" {
+			label += m.styles.Muted.Render("  " + item.shortcut)
+		}
+		builder.WriteString(m.selectorCard(label, index == focus, true))
 	}
 	return builder.String()
-}
-
-func actionsFromLabels(labels []string) []actionItem {
-	actions := make([]actionItem, len(labels))
-	for index, label := range labels {
-		actions[index] = actionItem{label: label}
-	}
-	return actions
 }
 
 func (m *Model) sourceListView() string {
@@ -243,14 +360,25 @@ func (m *Model) sourceListView() string {
 		}
 		builder.WriteString(m.sourceMigrationCard(migrations[index], index == m.cursor))
 	}
-	if end < len(migrations) {
-		builder.WriteString("\n")
-		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(migrations)-end)))
-	}
-	if start > 0 {
-		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
-	}
 	return builder.String()
+}
+
+func (m *Model) sourceListTopLine() string {
+	migrations := m.visibleSourceMigrations()
+	start, _ := m.sourceListBounds(len(migrations))
+	if start == 0 {
+		return ""
+	}
+	return m.styles.Muted.Render(fmt.Sprintf("↑ %d more", start))
+}
+
+func (m *Model) sourceListBottomLine() string {
+	migrations := m.visibleSourceMigrations()
+	_, end := m.sourceListBounds(len(migrations))
+	if end == len(migrations) {
+		return ""
+	}
+	return m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(migrations)-end))
 }
 
 func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected bool) string {
@@ -259,20 +387,23 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 		status = *migration.Status
 	}
 	glyph, statusText := m.statusDisplay(status)
-	source := migration.SourceOrganizationLogin + "/" + migration.SourceRepositoryName
-	target := migration.TargetOrganizationLogin + "/" + migration.TargetRepositoryName
+	source := repositoryCoordinate(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
+	target := repositoryCoordinate(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
 
 	var card strings.Builder
-	fmt.Fprintf(&card, "%s %s  %s\n", glyph, statusText, m.styles.Bold.Render(source+" → "+target))
+	fmt.Fprintf(&card, "%s %s  %s\n", glyph, statusText, m.repositoryChip(source+" → "+target))
 	if m.compactSourceList() {
-		fmt.Fprintf(&card, "  %s", m.styles.Muted.Render(migration.MigrationID))
+		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("id:"), m.styles.Muted.Render(migration.MigrationID))
 	} else {
-		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("ID"), m.styles.Muted.Render(migration.MigrationID))
+		fmt.Fprintf(&card, "  %s %s", m.styles.Muted.Render("id:"), m.styles.Muted.Render(migration.MigrationID))
 		if migration.TargetMigrationID > 0 {
 			fmt.Fprintf(&card, "%s%s", m.styles.Muted.Render(" · destination "), m.styles.Bold.Render(fmt.Sprintf("%d", migration.TargetMigrationID)))
 		}
 		if migration.CreatedAt != nil && *migration.CreatedAt != "" {
 			fmt.Fprintf(&card, "%s%s", m.styles.Muted.Render(" · created "), m.styles.Muted.Render(*migration.CreatedAt))
+		}
+		if migration.TargetVisibility != nil && *migration.TargetVisibility != "" {
+			fmt.Fprintf(&card, "  %s", m.metadataBadge(*migration.TargetVisibility))
 		}
 	}
 
@@ -280,38 +411,310 @@ func (m *Model) sourceMigrationCard(migration elmapi.MigrationSummary, selected 
 }
 
 func (m *Model) sourceDetailView() string {
-	var status strings.Builder
 	if m.sourceDetail != nil {
-		status.WriteString(render.MigrationStatus(*m.sourceDetail))
+		detail := *m.sourceDetail
+		detail.Messages = nil
+		body := render.MigrationStatus(detail)
+		if detail.Migration != nil {
+			if _, bodyWithoutTitle, found := strings.Cut(body, "\n"); found {
+				return bodyWithoutTitle
+			}
+		}
+		return body
 	}
-	if m.sourceWatching {
-		status.WriteString("\n")
-		status.WriteString(m.styles.Active.Render("● Live watch enabled (2s refresh)"))
-		status.WriteString("\n")
+	return ""
+}
+
+const (
+	progressTableGap      = 3
+	minProgressTableWidth = 46
+)
+
+type progressStage int
+
+const (
+	progressBackfill progressStage = iota
+	progressLiveUpdate
+)
+
+func (m *Model) targetProgressTables(summaries []elmapi.TargetRepositoryStateSummary) string {
+	if len(summaries) == 0 {
+		return ""
 	}
-	var actions strings.Builder
-	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
-	actions.WriteString(m.actionButtons(m.sourceActionItems(), m.cursor, m.contentWidth()))
-	return m.detailLayout(status.String(), actions.String())
+
+	width := m.contentWidth()
+	if width >= 2*minProgressTableWidth+progressTableGap {
+		leftWidth := (width - progressTableGap) / 2
+		rightWidth := width - progressTableGap - leftWidth
+		return lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			m.progressTable("Backfill Breakdown", summaries, progressBackfill, leftWidth),
+			strings.Repeat(" ", progressTableGap),
+			m.progressTable("Live Update Breakdown", summaries, progressLiveUpdate, rightWidth),
+		)
+	}
+
+	return m.progressTable("Backfill Breakdown", summaries, progressBackfill, width) +
+		"\n\n" +
+		m.progressTable("Live Update Breakdown", summaries, progressLiveUpdate, width)
+}
+
+func (m *Model) progressTable(title string, summaries []elmapi.TargetRepositoryStateSummary, stage progressStage, width int) string {
+	type row struct {
+		resourceType string
+		processed    int64
+		failed       int64
+		total        int64
+	}
+
+	byType := make(map[string]row)
+	for _, repository := range summaries {
+		var entries []elmapi.TargetStateBreakdownEntry
+		switch stage {
+		case progressBackfill:
+			entries = repository.Backfill.Breakdown
+		case progressLiveUpdate:
+			entries = repository.LiveUpdate.Breakdown
+		}
+		for _, entry := range entries {
+			resourceType := normalizeResourceType(entry.Type)
+			if resourceType == "organization" {
+				continue
+			}
+			current := byType[resourceType]
+			current.resourceType = resourceTypeLabel(resourceType)
+			current.total += entry.Count
+			switch strings.ToLower(strings.TrimPrefix(entry.State, "NODE_STATE_")) {
+			case "processed":
+				current.processed += entry.Count
+			case "failed":
+				current.failed += entry.Count
+			}
+			byType[resourceType] = current
+		}
+	}
+
+	rows := make([]row, 0, len(byType))
+	for _, current := range byType {
+		rows = append(rows, current)
+	}
+	slices.SortFunc(rows, func(left, right row) int {
+		return strings.Compare(left.resourceType, right.resourceType)
+	})
+
+	var total, totalProcessed, totalFailed int64
+	innerWidth := max(1, width-2)
+	resourceTypeWidth := max(13, innerWidth-30)
+	tableRow := func(resourceType, processed, failed, inProgress string) string {
+		resourceType = ansi.Truncate(resourceType, resourceTypeWidth, "…")
+		left := lipgloss.NewStyle().Width(resourceTypeWidth).Render(resourceType)
+		right := func(value string, cellWidth int) string {
+			return lipgloss.NewStyle().Width(cellWidth).Align(lipgloss.Right).Render(value)
+		}
+		failedCell := right(failed, 7)
+		if failed != "FAILED" && failed != "0" {
+			failedCell = m.styles.Failure.Render(failedCell)
+		}
+		return left + " " + right(processed, 9) + " " + failedCell + " " + right(inProgress, 11)
+	}
+	count := formatCount
+
+	lines := []string{
+		m.styles.Muted.Bold(true).Render(tableRow("RESOURCE TYPE", "PROCESSED", "FAILED", "IN PROGRESS")),
+		m.styles.Muted.Render(strings.Repeat("─", innerWidth)),
+	}
+	for _, current := range rows {
+		inProgress := pendingResources(current.total, current.processed+current.failed)
+		lines = append(lines, tableRow(
+			current.resourceType,
+			count(current.processed),
+			count(current.failed),
+			count(inProgress),
+		))
+		total += current.total
+		totalProcessed += current.processed
+		totalFailed += current.failed
+	}
+	lines = append(lines, m.styles.Bold.Render(tableRow(
+		"TOTAL",
+		count(totalProcessed),
+		count(totalFailed),
+		count(pendingResources(total, totalProcessed+totalFailed)),
+	)))
+
+	heading := m.styles.Bold.Render(fmt.Sprintf("%s (%s total)", title, count(total)))
+	table := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.styles.Muted.GetForeground()).
+		Render(strings.Join(lines, "\n"))
+	return heading + "\n" + table
+}
+
+func pendingResources(added, processed int64) int64 {
+	return max(0, added-processed)
+}
+
+func normalizeResourceType(value string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "NODE_TYPE_"))
+}
+
+func resourceTypeLabel(value string) string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	})
+	if len(parts) == 0 {
+		return "Unknown"
+	}
+	for index := range parts {
+		parts[index] = strings.ToUpper(parts[index][:1]) + strings.ToLower(parts[index][1:])
+	}
+	return strings.Join(parts, "")
+}
+
+func formatCount(value int64) string {
+	digits := strconv.FormatInt(value, 10)
+	start := 0
+	if strings.HasPrefix(digits, "-") {
+		start = 1
+	}
+	for index := len(digits) - 3; index > start; index -= 3 {
+		digits = digits[:index] + "," + digits[index:]
+	}
+	return digits
+}
+
+func (m *Model) sourceDetailTitle() string {
+	if m.sourceDetail != nil && m.sourceDetail.Migration != nil {
+		migration := m.sourceDetail.Migration
+		source := repositoryCoordinate(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
+		target := repositoryCoordinate(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
+		if source != "" && target != "" {
+			return "Migration · " + source + " → " + target
+		}
+	}
+	return fmt.Sprintf("Migration %s", m.sourceID)
+}
+
+func (m *Model) targetDetailTitle() string {
+	var source, target, id string
+	if migration := m.sourceMigrationForTarget(); migration != nil {
+		source = repositoryCoordinate(migration.SourceOrganizationLogin, migration.SourceRepositoryName)
+		target = repositoryCoordinate(migration.TargetOrganizationLogin, migration.TargetRepositoryName)
+		id = migration.MigrationID
+	}
+	if migration := m.targetDetail; migration != nil {
+		if source == "" && len(migration.Repositories) > 0 {
+			source = migration.Repositories[0]
+		}
+		if parsedSource, parsedTarget, ok := parseMigrationDescription(migration.Description); ok {
+			if source == "" {
+				source = parsedSource
+			}
+			if target == "" {
+				target = parsedTarget
+			}
+		}
+		if id == "" {
+			id = migration.ExporterMigrationGUID
+		}
+		if id == "" {
+			id = migration.MigrationID
+		}
+	}
+	if id == "" && m.targetID > 0 {
+		id = strconv.FormatInt(int64(m.targetID), 10)
+	}
+
+	parts := []string{"Migration"}
+	if source != "" && target != "" {
+		parts = append(parts, source+" → "+target)
+	} else if source != "" {
+		parts = append(parts, source)
+	}
+	if id != "" {
+		parts = append(parts, id)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (m *Model) sourceMigrationForTarget() *elmapi.MigrationSummary {
+	if m.sourceDetail != nil && m.sourceDetail.Migration != nil &&
+		workflow.TargetMigrationID(m.sourceDetail.Migration.TargetMigrationID) == m.targetID {
+		return m.sourceDetail.Migration
+	}
+	for index := range m.sourceMigrations {
+		if workflow.TargetMigrationID(m.sourceMigrations[index].TargetMigrationID) == m.targetID {
+			return &m.sourceMigrations[index]
+		}
+	}
+	return nil
+}
+
+func parseMigrationDescription(description string) (source, target string, ok bool) {
+	const prefix = "Migration of "
+	remainder, found := strings.CutPrefix(description, prefix)
+	if !found {
+		return "", "", false
+	}
+	source, target, found = strings.Cut(remainder, " to ")
+	if !found || source == "" || target == "" {
+		return "", "", false
+	}
+	return source, target, true
+}
+
+func repositoryCoordinate(owner, name string) string {
+	switch {
+	case owner == "":
+		return name
+	case name == "":
+		return owner
+	default:
+		return owner + "/" + name
+	}
+}
+
+func (m *Model) sourceMessagesView() string {
+	if m.sourceDetail == nil || len(m.sourceDetail.Messages) == 0 {
+		return "No messages reported."
+	}
+	return render.MigrationStatus(elmapi.MigrationDetail{Messages: m.sourceDetail.Messages})
+}
+
+func (m *Model) migrationCreatedBody(migration elmapi.CreateMigrationResponse) string {
+	id := migration.MigrationID
+	if id == "" {
+		id = "—"
+	}
+	expires := "—"
+	if migration.ExpiresAt != nil && *migration.ExpiresAt != "" {
+		expires = *migration.ExpiresAt
+	}
+	row := func(label, value string) string {
+		return m.styles.Muted.Render(fmt.Sprintf("%-12s", label)) + "  " + value
+	}
+	return row("Migration ID", m.styles.Bold.Render(id)) + "\n" +
+		row("Expires", expires)
 }
 
 func (m *Model) targetListView() string {
 	if len(m.targetMigrations) == 0 {
-		return "No target migrations found.\n\nPress n for advanced direct creation or m to open a numeric target ID."
+		return "No target migrations found.\n\nPress n for direct creation or m to open a numeric target ID."
 	}
 	var builder strings.Builder
 	capacity := max(1, (m.bodyHeight()-2)/4)
 	start, end := pickerBounds(m.cursor, len(m.targetMigrations), capacity)
 	if start > 0 {
-		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)))
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more", start)))
+		_ = builder.WriteByte('\n')
 	}
 	for index := start; index < end; index++ {
 		migration := m.targetMigrations[index]
 		repositories := strings.Join(migration.Repositories, ", ")
 		var card strings.Builder
 		glyph, status := m.statusDisplay(migration.Status)
-		fmt.Fprintf(&card, "%s %s  %s\n", glyph, status, m.styles.Bold.Render(repositories))
-		fmt.Fprintf(&card, "%s %s", m.styles.Muted.Render("ID"), m.styles.Muted.Render(migration.MigrationID))
+		fmt.Fprintf(&card, "%s %s  %s\n", glyph, status, m.repositoryChip(repositories))
+		fmt.Fprintf(&card, "%s %s", m.styles.Muted.Render("id:"), m.styles.Muted.Render(migration.MigrationID))
 		if index > start {
 			builder.WriteString("\n")
 		}
@@ -324,51 +727,10 @@ func (m *Model) targetListView() string {
 }
 
 func (m *Model) targetDetailView() string {
-	var detail strings.Builder
-	if migration := m.targetDetail; migration != nil {
-		fmt.Fprintf(&detail, "Status:       %s\n", friendly(migration.Status))
-		fmt.Fprintf(&detail, "Repositories: %s\n", strings.Join(migration.Repositories, ", "))
-		if migration.Description != "" {
-			fmt.Fprintf(&detail, "Description:  %s\n", migration.Description)
-		}
-		if !migration.ExpiresAt.IsZero() {
-			fmt.Fprintf(&detail, "Expires:      %s\n", migration.ExpiresAt.Format("2006-01-02 15:04:05Z07:00"))
-		}
-		if len(migration.RepositoryProgress) > 0 {
-			detail.WriteString("\nRepository progress\n")
-		}
-		for index, progress := range migration.RepositoryProgress {
-			fmt.Fprintf(
-				&detail,
-				"%s\n  Resources %s %d/%d\n  Events    %s %d/%d\n  Acknowledged: %d backfill · %d live updates\n  Sent: %s resources · %s live updates\n",
-				progress.RepositoryNWO,
-				render.ProgressBar(progress.ResourcesProcessed, progress.ResourcesAdded, 12),
-				progress.ResourcesProcessed,
-				progress.ResourcesAdded,
-				render.ProgressBar(progress.EventsProcessed, progress.EventsAdded, 12),
-				progress.EventsProcessed,
-				progress.EventsAdded,
-				progress.BackfillResourcesAcknowledged,
-				progress.LiveUpdateResourcesAcknowledged,
-				yesNo(progress.AllResourcesSent),
-				yesNo(progress.AllLiveUpdatesSent),
-			)
-			if index < len(migration.RepositoryProgress)-1 {
-				detail.WriteString("\n")
-			}
-		}
+	if m.targetDetail == nil {
+		return ""
 	}
-	var actions strings.Builder
-	actions.WriteString(m.styles.Bold.Render("Actions") + "\n\n")
-	actions.WriteString(m.actionButtons(m.targetActionItems(), m.cursor, m.contentWidth()))
-	return m.detailLayout(detail.String(), actions.String())
-}
-
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
+	return m.targetProgressTables(m.targetDetail.RepositoryStateSummaries)
 }
 
 func (m *Model) detailLayout(detail, actions string) string {
@@ -381,34 +743,70 @@ func (m *Model) detailLayout(detail, actions string) string {
 	return detail + "\n\n" + actions
 }
 
+func (m *Model) detailActionView(current screen) string {
+	var actions []actionItem
+	switch current {
+	case screenSourceDetail:
+		actions = m.sourceActionItems()
+	case screenTargetDetail:
+		return m.actionMenu(m.targetActionItems(), m.actionFocus)
+	default:
+		return ""
+	}
+	return m.actionButtons(actions, m.actionFocus, m.contentWidth())
+}
+
+func (m *Model) viewportBodyHeight(current screen) int {
+	height := m.bodyHeight()
+	if m.showHelp {
+		return height
+	}
+	if actions := m.detailActionView(current); actions != "" {
+		height -= lipgloss.Height(actions) + 2
+	}
+	return max(3, height)
+}
+
 func (m *Model) configurationView() string {
 	var builder strings.Builder
 	if configuration := m.configuration; configuration != nil {
 		sourceURL, sourceTokenSet := effectiveSourceConfiguration(configuration)
 		targetURL, targetTokenSet := effectiveTargetConfiguration(configuration)
-		builder.WriteString(m.styles.Bold.Render("Preflight") + "\n")
-		fmt.Fprintf(&builder, "  %s Source URL\n", m.checkMark(sourceURL != "" && validHTTPURL(sourceURL)))
-		fmt.Fprintf(&builder, "  %s Source token\n", m.checkMark(sourceTokenSet))
+		row := func(mark, label, value string) {
+			fmt.Fprintf(&builder, "  %s %-18s  %s\n", mark, label+":", value)
+		}
+		builder.WriteString(m.styles.Bold.Render("Configuration") + "\n")
+		row(
+			m.checkMark(sourceURL != "" && validHTTPURL(sourceURL)),
+			"Source URL",
+			orUnset(sourceURL),
+		)
+		row(m.checkMark(sourceTokenSet), "Source token", setStatus(sourceTokenSet))
 		if validHTTPURL(sourceURL) && sourceTokenSet {
-			fmt.Fprintf(&builder, "  %s Source authentication%s\n", m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr), m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr))
+			row(
+				m.authenticationMark(m.sourceAuthChecked, m.sourceAuthErr),
+				"Source auth",
+				m.authenticationDetail(m.sourceAuthChecked, m.sourceAuthErr),
+			)
 		}
-		fmt.Fprintf(&builder, "  %s Destination URL\n", m.checkMark(targetURL != "" && validHTTPURL(targetURL)))
-		fmt.Fprintf(&builder, "  %s Destination token\n", m.checkMark(targetTokenSet))
+		row(
+			m.checkMark(targetURL != "" && validHTTPURL(targetURL)),
+			"Destination URL",
+			orUnset(targetURL),
+		)
+		row(m.checkMark(targetTokenSet), "Destination token", setStatus(targetTokenSet))
 		if validHTTPURL(targetURL) && targetTokenSet {
-			fmt.Fprintf(&builder, "  %s Destination authentication%s\n", m.authenticationMark(m.targetAuthChecked, m.targetAuthErr), m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr))
+			row(
+				m.authenticationMark(m.targetAuthChecked, m.targetAuthErr),
+				"Destination auth",
+				m.authenticationDetail(m.targetAuthChecked, m.targetAuthErr),
+			)
 		}
-		builder.WriteString("\n")
-
-		builder.WriteString("Stored configuration\n")
-		fmt.Fprintf(&builder, "Source URL:   %s\n", orUnset(configuration.SourceURL))
-		fmt.Fprintf(&builder, "Source token: %s\n", setStatus(configuration.SourceTokenSet))
-		fmt.Fprintf(&builder, "Target URL:   %s\n", orUnset(configuration.TargetURL))
-		fmt.Fprintf(&builder, "Target token: %s\n", setStatus(configuration.TargetTokenSet))
-		fmt.Fprintf(&builder, "Config:       %s\n", configuration.ConfigPath)
-		fmt.Fprintf(&builder, "Credentials:  %s\n", configuration.CredentialStore)
+		row(" ", "Config", configuration.ConfigPath)
+		row(" ", "Credentials", configuration.CredentialStore)
 	}
 	builder.WriteString("\n" + m.styles.Bold.Render("Actions") + "\n\n")
-	builder.WriteString(m.actionButtons(actionsFromLabels(configurationActions), m.cursor, m.contentWidth()))
+	builder.WriteString(m.actionButtons(configurationActions, m.actionFocus, m.contentWidth()))
 	return builder.String()
 }
 
@@ -447,12 +845,12 @@ func (m *Model) authenticationMark(checked bool, err error) string {
 
 func (m *Model) authenticationDetail(checked bool, err error) string {
 	if !checked {
-		return m.styles.Muted.Render(" (checking)")
+		return m.styles.Muted.Render("checking")
 	}
 	if err != nil {
-		return m.styles.Failure.Render(" (" + err.Error() + ")")
+		return m.styles.Failure.Render(err.Error())
 	}
-	return ""
+	return m.styles.Success.Render("successful")
 }
 
 func (m *Model) formView() string {
@@ -461,14 +859,18 @@ func (m *Model) formView() string {
 		prefix.WriteString(m.styles.Muted.Render(m.form.description))
 		prefix.WriteString("\n\n")
 	}
-	blocks := make([]string, 0, len(m.form.fields))
+	blocks := make([]string, 0, len(m.form.fields)+1)
 	for index, field := range m.form.fields {
-		value := field.value
+		value := ""
+		placeholder := false
+		if field.text != nil {
+			value = *field.text
+		}
 		switch field.kind {
 		case fieldSecret:
 			value = strings.Repeat("•", len([]rune(value)))
 		case fieldBool:
-			if value == "true" {
+			if field.boolean != nil && *field.boolean {
 				value = "[x]"
 			} else {
 				value = "[ ]"
@@ -477,18 +879,46 @@ func (m *Model) formView() string {
 			value = "‹ " + value + " ›"
 		}
 		if value == "" {
-			value = m.styles.Placeholder.Render("(empty)")
+			if field.emptyValue != "" {
+				value = field.emptyValue
+			} else {
+				value = "(empty)"
+				placeholder = true
+			}
 		}
 		label := field.label
-		if index == m.form.cursor {
+		focused := index == m.form.cursor
+		if focused {
 			label = m.styles.Info.Bold(true).Render(label)
+			if field.kind == fieldSecret && field.text != nil && *field.text == "" && placeholder {
+				value = ""
+				placeholder = false
+			}
+			if field.text != nil && (field.kind == fieldText || field.kind == fieldSecret) {
+				if *field.text == "" {
+					value = nativeCursorPositionMarker + value
+				} else {
+					value = truncateFormValue(value, max(1, m.contentWidth()-4))
+					value += nativeCursorPositionMarker
+				}
+			}
+			if placeholder {
+				value = m.styles.Placeholder.Render(value)
+			}
 		}
 		var content strings.Builder
 		fmt.Fprintf(&content, "%s\n  %s", label, value)
 		if field.description != "" {
 			fmt.Fprintf(&content, "\n  %s", m.styles.Muted.Render(field.description))
 		}
-		blocks = append(blocks, m.selectorCard(content.String(), index == m.form.cursor, true))
+		rendered := content.String()
+		if !focused {
+			rendered = m.styles.Muted.Render(rendered)
+		}
+		blocks = append(blocks, m.selectorCard(rendered, focused, true))
+	}
+	if len(m.form.actions) > 0 {
+		blocks = append(blocks, m.actionButtons(m.form.actions, m.focusedFormAction(), m.contentWidth()))
 	}
 
 	var suffix string
@@ -505,17 +935,36 @@ func (m *Model) formView() string {
 	}
 	available := m.bodyHeight() - reserved
 	start, end := focusedBlockRange(blocks, m.form.cursor, max(1, available-2))
+	moreLabel := "field(s)"
+	if len(m.form.actions) > 0 {
+		moreLabel = "item(s)"
+	}
 	var builder strings.Builder
 	builder.WriteString(prefix.String())
 	if start > 0 {
-		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more field(s)", start)) + "\n")
+		builder.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d more %s", start, moreLabel)) + "\n")
 	}
 	builder.WriteString(strings.Join(blocks[start:end], "\n"))
 	if end < len(blocks) {
-		builder.WriteString("\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more field(s)", len(blocks)-end)))
+		builder.WriteString("\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more %s", len(blocks)-end, moreLabel)))
 	}
 	builder.WriteString(suffix)
 	return builder.String()
+}
+
+func truncateFormValue(value string, width int) string {
+	excess := ansi.StringWidth(value) - width
+	if excess <= 0 {
+		return value
+	}
+	return ansi.TruncateLeft(value, excess, "")
+}
+
+func (m *Model) focusedFormAction() int {
+	if m.form.cursor == len(m.form.fields) {
+		return m.form.actionFocus
+	}
+	return -1
 }
 
 func focusedBlockRange(blocks []string, focus, height int) (start, end int) {
@@ -556,37 +1005,149 @@ func (m *Model) pickerView() string {
 
 	items := m.visiblePickerItems()
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "Search: %s\n\n", m.picker.input.View())
 	if len(items) == 0 {
 		fmt.Fprintf(&builder, "%s\n", m.styles.Muted.Render("No matching options."))
 		return builder.String()
 	}
-	start, end := pickerBounds(m.picker.cursor, len(items), max(3, m.bodyHeight()-3))
+	start, end := pickerBounds(m.picker.cursor, len(items), max(3, m.bodyHeight()-1))
 	for index := start; index < end; index++ {
 		if index > start {
 			builder.WriteString("\n")
 		}
-		builder.WriteString(m.selectorCard(items[index], index == m.picker.cursor, true))
+		builder.WriteString(m.pickerItemView(items[index], index == m.picker.cursor))
 	}
 	if end < len(items) {
 		fmt.Fprintf(&builder, "\n%s", m.styles.Muted.Render(fmt.Sprintf("↓ %d more", len(items)-end)))
 	}
+	list := builder.String()
 	if start > 0 {
-		return m.styles.Muted.Render(fmt.Sprintf("↑ %d more\n", start)) + builder.String()
+		list = m.styles.Muted.Render(fmt.Sprintf("↑ %d more", start)) + "\n" + list
 	}
-	return builder.String()
+	if m.picker.kind != pickerSourceRepository || m.contentWidth() < 92 {
+		return list
+	}
+	selected := items[m.picker.cursor]
+	if selected.repository == nil {
+		return list
+	}
+	info := m.repositoryInfoPanel(*selected.repository, false)
+	listWidth := max(30, m.contentWidth()-lipgloss.Width(info)-4)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(listWidth).Render(list),
+		"    ",
+		info,
+	)
+}
+
+func (m *Model) pickerItemView(item pickerItem, selected bool) string {
+	if item.repository == nil {
+		return m.selectorCard(item.value, selected, true)
+	}
+	repository := item.repository
+	var metadata []string
+	if repository.Stargazers > 0 {
+		metadata = append(metadata, fmt.Sprintf("★ %d", repository.Stargazers))
+	}
+	if repository.OpenIssueCount > 0 {
+		metadata = append(metadata, fmt.Sprintf("≡ %d", repository.OpenIssueCount))
+	}
+	if repository.Language != "" {
+		metadata = append(metadata, "◆ "+repository.Language)
+	}
+	switch {
+	case repository.Archived:
+		metadata = append(metadata, "archived")
+	case repository.Visibility != "":
+		metadata = append(metadata, repository.Visibility)
+	case repository.Private:
+		metadata = append(metadata, "private")
+	}
+	if repository.Fork {
+		metadata = append(metadata, "fork")
+	}
+	content := m.styles.Bold.Render(repository.FullName)
+	if len(metadata) > 0 {
+		content += "  " + m.styles.Muted.Render(strings.Join(metadata, " · "))
+	}
+	return m.selectorCard(content, selected, true)
+}
+
+func (m *Model) pickerInfoOverlay() string {
+	items := m.visiblePickerItems()
+	if m.picker.cursor < 0 || m.picker.cursor >= len(items) || items[m.picker.cursor].repository == nil {
+		return ""
+	}
+	return m.repositoryInfoPanel(*items[m.picker.cursor].repository, true)
+}
+
+func (m *Model) repositoryInfoPanel(repository elmapi.Repository, closeButton bool) string {
+	const width = 36
+	row := func(label, value string) string {
+		return m.styles.Muted.Render(fmt.Sprintf("%-14s", label)) + value
+	}
+	visibility := repository.Visibility
+	if visibility == "" && repository.Private {
+		visibility = "private"
+	}
+	if visibility == "" {
+		visibility = "unknown"
+	}
+	description := repository.Description
+	if description == "" {
+		description = "No description."
+	}
+	lines := []string{
+		m.styles.Bold.Render(repository.FullName),
+		"",
+		m.styles.Muted.Render(description),
+		"",
+		row("★ Stars", fmt.Sprintf("%d", repository.Stargazers)),
+		row("≡ Open issues", fmt.Sprintf("%d", repository.OpenIssueCount)),
+		row("◆ Language", orUnset(repository.Language)),
+		row("Visibility", visibility),
+	}
+	if repository.Archived {
+		lines = append(lines, row("State", m.styles.Warning.Render("archived")))
+	}
+	if repository.Fork {
+		lines = append(lines, row("Type", "fork"))
+	}
+	if closeButton {
+		lines = append(lines, "", m.actionButtons([]actionItem{{id: "close", label: "Close", shortcut: "esc"}}, 0, width))
+	}
+	content := lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+	return m.panel(content)
 }
 
 func (m *Model) confirmationOverlay() string {
 	width := min(60, max(24, m.contentWidth()-8))
+	contentWidth := width - 8
 	content := m.styles.Bold.Render(m.confirm.title) + "\n\n" +
-		m.styles.Warning.Render(m.confirm.body) + "\n\n" +
+		m.styles.Warning.Width(contentWidth).Render(m.confirm.body) + "\n\n" +
 		m.actionButtons(
 			[]actionItem{{id: "confirm", label: "Confirm"}, {id: "cancel", label: "Cancel"}},
 			m.confirm.focus,
-			width-6,
+			contentWidth,
 		)
-	return lipgloss.NewStyle().Width(width).Render(m.panel(content))
+	return m.panel(lipgloss.NewStyle().Width(contentWidth).Render(content))
+}
+
+func (m *Model) alertOverlay() string {
+	return m.messageOverlay(m.alert.title, m.alert.body)
+}
+
+func (m *Model) resultPopupOverlay() string {
+	return m.messageOverlay(m.result.title, m.result.body)
+}
+
+func (m *Model) messageOverlay(title, body string) string {
+	width := min(60, max(24, m.contentWidth()-8))
+	contentWidth := width - 8
+	content := m.styles.Bold.Render(title) + "\n\n" +
+		body + "\n\n" +
+		m.actionButtons([]actionItem{{id: "close", label: "Close"}}, 0, contentWidth)
+	return m.panel(lipgloss.NewStyle().Width(contentWidth).Render(content))
 }
 
 func pickerBounds(cursor, total, capacity int) (start, end int) {
@@ -610,16 +1171,14 @@ func (m *Model) statusDisplay(status string) (glyph, label string) {
 	case "in progress", "processing":
 		return m.styles.Active.Render("●"), m.styles.Active.Bold(true).Render("In progress")
 	case "created":
-		return m.styles.Info.Render("●"), m.styles.Bold.Render("Created")
+		return m.styles.Muted.Render("○"), m.styles.Muted.Render("Created")
 	case "queued":
 		return m.styles.Muted.Render("○"), m.styles.Muted.Render("Queued")
 	case "paused":
 		return m.styles.Warning.Render("●"), m.styles.Warning.Render("Paused")
 	case "failed":
 		return m.styles.Failure.Render("✗"), m.styles.Failure.Render("Failed")
-	case "terminated":
-		return m.styles.Failure.Render("⊘"), m.styles.Failure.Render("Terminated")
-	case "cancelled":
+	case "terminated", "cancelled", "canceled":
 		return m.styles.Failure.Render("⊘"), m.styles.Failure.Render("Cancelled")
 	default:
 		return m.styles.Muted.Render("●"), m.styles.Muted.Render(friendly(status))
@@ -637,17 +1196,13 @@ func (m *Model) sourceListBounds(total int) (start, end int) {
 	if total == 0 {
 		return 0, 0
 	}
-	linesPerCard := 4
+	linesPerCard := 3
 	if m.compactSourceList() {
 		linesPerCard = 2
 	}
-	capacity := max(1, (m.bodyHeight()-1)/linesPerCard)
-	start = max(0, m.cursor-capacity+1)
-	end = min(total, start+capacity)
-	if end-start < capacity {
-		start = max(0, end-capacity)
-	}
-	return start, end
+	height := m.bodyHeight()
+	capacity := max(1, height/linesPerCard)
+	return pickerBounds(m.cursor, total, capacity)
 }
 
 func (m *Model) viewportView(body string, height int) string {
@@ -658,8 +1213,12 @@ func (m *Model) viewportView(body string, height int) string {
 	}
 	view.Width = width
 	view.Height = height
-	view.SetContent(body)
+	view.SetContent(m.wrapViewportContent(body))
 	return view.View()
+}
+
+func (m *Model) wrapViewportContent(body string) string {
+	return lipgloss.NewStyle().Width(m.contentWidth()).Render(body)
 }
 
 func (m *Model) fullHelpView() string {
@@ -674,7 +1233,7 @@ func (m *Model) fullHelpView() string {
 		"  " + helpLine(keys.New, keys.Manual, keys.Search, keys.Density, keys.Refresh),
 		"",
 		"Scrollable views",
-		"  " + helpLine(keys.PageUp, keys.PageDown),
+		"  " + helpLine(keys.Up, keys.Down, keys.PageUp, keys.PageDown),
 	}, "\n")
 }
 

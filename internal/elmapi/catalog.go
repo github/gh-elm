@@ -13,8 +13,16 @@ const catalogPageSize = 100
 
 // Repository is a repository visible to the authenticated user.
 type Repository struct {
-	FullName string `json:"full_name"`
-	Owner    struct {
+	FullName       string `json:"full_name"`
+	Description    string `json:"description"`
+	Language       string `json:"language"`
+	Visibility     string `json:"visibility"`
+	Private        bool   `json:"private"`
+	Archived       bool   `json:"archived"`
+	Fork           bool   `json:"fork"`
+	Stargazers     int    `json:"stargazers_count"`
+	OpenIssueCount int    `json:"open_issues_count"`
+	Owner          struct {
 		Type string `json:"type"`
 	} `json:"owner"`
 }

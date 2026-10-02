@@ -25,6 +25,12 @@ type SourceMigrationID string
 // TargetMigrationID is a target-side numeric migration ID.
 type TargetMigrationID int64
 
+// ErrSourceConfigurationMissing means the source endpoint cannot be used.
+var ErrSourceConfigurationMissing = errors.New("source URL and token are not configured")
+
+// ErrTargetConfigurationMissing means the target endpoint cannot be used.
+var ErrTargetConfigurationMissing = errors.New("target URL and token are not configured")
+
 // Service executes ELM workflows using configured endpoints.
 type Service struct{}
 
@@ -152,8 +158,8 @@ func (s *Service) GetSourceMigration(ctx context.Context, id SourceMigrationID) 
 	return client.GetMigrationDetail(ctx, string(id))
 }
 
-// ListSourceRepositories lists repositories visible through the source credentials.
-func (s *Service) ListSourceRepositories(ctx context.Context) ([]string, error) {
+// ListSourceRepositories lists organization-owned repositories visible through the source credentials.
+func (s *Service) ListSourceRepositories(ctx context.Context) ([]elmapi.Repository, error) {
 	client, err := s.sourceClient()
 	if err != nil {
 		return nil, err
@@ -162,16 +168,16 @@ func (s *Service) ListSourceRepositories(ctx context.Context) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(repositories))
+	organizationRepositories := make([]elmapi.Repository, 0, len(repositories))
 	for _, repository := range repositories {
 		if !strings.EqualFold(repository.Owner.Type, "Organization") {
 			continue
 		}
-		if name := strings.TrimSpace(repository.FullName); name != "" {
-			names = append(names, name)
+		if repository.FullName = strings.TrimSpace(repository.FullName); repository.FullName != "" {
+			organizationRepositories = append(organizationRepositories, repository)
 		}
 	}
-	return names, nil
+	return organizationRepositories, nil
 }
 
 // ListTargetOrganizations lists organizations visible through the target credentials.
@@ -227,7 +233,7 @@ func (s *Service) CreateSourceMigration(ctx context.Context, in SourceCreateInpu
 		TargetOrganizationLogin: in.TargetOwner,
 		TargetRepositoryName:    in.TargetRepo,
 		TargetAPIEndpoint:       target.URL,
-		PATName:                 "BOGON",
+		PATName:                 elmapi.SystemPATName,
 		TargetVisibility:        visibility,
 	}
 	if err := ensureUniqueSourceMigration(ctx, sourceClient, req); err != nil {
@@ -546,7 +552,7 @@ func (s *Service) GetConfiguration(context.Context) (*Configuration, error) {
 	return &Configuration{
 		SourceURL:              cfg.SourceURL,
 		SourceTokenSet:         sourceToken != "",
-		TargetURL:              cfg.TargetURL,
+		TargetURL:              endpoints.NormalizeTargetAPIURL(cfg.TargetURL),
 		TargetTokenSet:         targetToken != "",
 		ResolvedSourceURL:      source.URL,
 		ResolvedSourceTokenSet: source.Token != "",
@@ -586,7 +592,7 @@ func (s *Service) SaveConfiguration(ctx context.Context, in ConfigurationInput) 
 		return err
 	}
 	cfg.SourceURL = strings.TrimSpace(in.SourceURL)
-	cfg.TargetURL = strings.TrimSpace(in.TargetURL)
+	cfg.TargetURL = endpoints.NormalizeTargetAPIURL(in.TargetURL)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -625,7 +631,7 @@ func (s *Service) sourceClient() (*elmapi.Client, error) {
 		return nil, err
 	}
 	if ep.URL == "" || ep.Token == "" {
-		return nil, errors.New("source URL and token are not configured")
+		return nil, ErrSourceConfigurationMissing
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), nil
 }
@@ -640,7 +646,7 @@ func (s *Service) targetClient() (*elmapi.Client, error) {
 		return nil, err
 	}
 	if ep.URL == "" || ep.Token == "" {
-		return nil, errors.New("target URL and token are not configured")
+		return nil, ErrTargetConfigurationMissing
 	}
 	return elmapi.NewClient(ep.URL, ep.Token), nil
 }
@@ -655,7 +661,7 @@ func (s *Service) mannequinClient() (*ghapi.Client, error) {
 		return nil, err
 	}
 	if ep.URL == "" || ep.Token == "" {
-		return nil, errors.New("target URL and token are not configured")
+		return nil, ErrTargetConfigurationMissing
 	}
 	return ghapi.NewClient(ep.URL, ep.Token), nil
 }
