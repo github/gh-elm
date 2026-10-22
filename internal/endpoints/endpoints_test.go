@@ -49,6 +49,20 @@ func TestSourcePrecedence(t *testing.T) {
 	assert.Equal(t, "flag-token", ep.Token)
 }
 
+func TestNormalizeSourceAPIURL(t *testing.T) {
+	t.Run("adds the REST path to a GHES origin", func(t *testing.T) {
+		assert.Equal(t, "https://ghes.example.com/api/v3", NormalizeSourceAPIURL("https://ghes.example.com"))
+	})
+
+	t.Run("preserves an explicit REST path", func(t *testing.T) {
+		assert.Equal(t, "https://ghes.example.com/api/v3", NormalizeSourceAPIURL("https://ghes.example.com/api/v3"))
+	})
+
+	t.Run("normalizes whitespace and a bare host before adding the REST path", func(t *testing.T) {
+		assert.Equal(t, "https://ghes.example.com/api/v3", NormalizeSourceAPIURL("  ghes.example.com/  "))
+	})
+}
+
 func TestSourceNormalizesBareHost(t *testing.T) {
 	r := newTestResolver(t)
 

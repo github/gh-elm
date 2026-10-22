@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/github/gh-elm/internal/creds"
 	"github.com/github/gh-elm/internal/elmapi"
 	"github.com/github/gh-elm/internal/endpoints"
+	"github.com/github/gh-elm/internal/ghapi"
 	"github.com/github/gh-elm/internal/render"
 	"github.com/github/gh-elm/internal/theme"
 )
@@ -68,6 +71,7 @@ func newConfigCmd() *cobra.Command {
 	cmd.AddCommand(
 		newConfigShowCmd(),
 		newConfigResetCmd(),
+		newConfigConfirmAccessCmd(),
 		newSetMigratorPATInteractiveCmd(),
 		newSetMigratorPATCmd("set-source-pat", "SOURCE_PAT"),
 		newSetMigratorPATCmd("set-target-pat", "TARGET_PAT"),
@@ -76,8 +80,203 @@ func newConfigCmd() *cobra.Command {
 	return cmd
 }
 
+var (
+	configCredentialRequiredScopes = []string{"admin:enterprise", "admin:org"}
+	sourcePATRequiredScopes        = []string{"repo", "admin:org", "admin:repo_hook", "admin:org_hook"}
+	targetPATRequiredScopes        = []string{"repo", "workflow", "admin:org", "admin:repo_hook", "admin:enterprise"}
+)
+
+type configCredentialKind int
+
+const (
+	sourceConfigCredential configCredentialKind = iota
+	targetConfigCredential
+)
+
+func validateConfigCredential(
+	ctx context.Context,
+	kind configCredentialKind,
+	rawURL string,
+	token string,
+) tokenValidationResult {
+	if strings.TrimSpace(rawURL) == "" {
+		return tokenValidationResult{status: tokenInvalid, cause: errors.New("API URL is not configured")}
+	}
+	if token == "" {
+		return tokenValidationResult{status: tokenInvalid, cause: errors.New("token is not configured")}
+	}
+
+	apiURL := endpoints.NormalizeSourceAPIURL(rawURL)
+	if kind == targetConfigCredential {
+		apiURL = endpoints.NormalizeTargetAPIURL(rawURL)
+	}
+	return validateTokenScopes(ctx, apiURL, token, configCredentialRequiredScopes)
+}
+
+type validationDecision int
+
+const (
+	validationContinue validationDecision = iota
+	validationRetry
+	validationAbort
+)
+
+type tokenValidationStatus int
+
+const (
+	tokenValid tokenValidationStatus = iota
+	tokenInvalid
+	tokenValidationWarning
+)
+
+type tokenValidationResult struct {
+	status        tokenValidationStatus
+	missingScopes []string
+	cause         error
+}
+
+func validateTokenScopes(ctx context.Context, apiURL, token string, requiredScopes []string) tokenValidationResult {
+	if apiURL == "" {
+		return tokenValidationResult{status: tokenValidationWarning, cause: errors.New("API URL is not configured")}
+	}
+
+	grantedScopes, err := ghapi.NewClient(apiURL, token).TokenScopes(ctx)
+	if err != nil {
+		var httpErr *ghapi.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
+			return tokenValidationResult{status: tokenInvalid, cause: errors.New("GitHub rejected the token")}
+		}
+		return tokenValidationResult{status: tokenValidationWarning, cause: err}
+	}
+
+	granted := make(map[string]struct{}, len(grantedScopes))
+	for _, scope := range grantedScopes {
+		granted[scope] = struct{}{}
+	}
+	var missing []string
+	for _, scope := range requiredScopes {
+		if !tokenGrantsScope(granted, scope) {
+			missing = append(missing, scope)
+		}
+	}
+	if len(missing) > 0 {
+		return tokenValidationResult{status: tokenInvalid, missingScopes: missing}
+	}
+	return tokenValidationResult{status: tokenValid}
+}
+
+func tokenGrantsScope(granted map[string]struct{}, required string) bool {
+	if _, ok := granted[required]; ok {
+		return true
+	}
+	_, hasRepo := granted["repo"]
+	return required == "admin:repo_hook" && hasRepo
+}
+
+type tokenValidationError struct {
+	tokenName     string
+	missingScopes []string
+	cause         error
+}
+
+func (e *tokenValidationError) Error() string {
+	if len(e.missingScopes) > 0 {
+		return fmt.Sprintf("%s is missing required scopes: %s", e.tokenName, strings.Join(e.missingScopes, ", "))
+	}
+	return fmt.Sprintf("%s is invalid: %v", e.tokenName, e.cause)
+}
+
+func handleConfigCredentialValidation(
+	cmd *cobra.Command,
+	tokenName string,
+	result tokenValidationResult,
+	choose func() (validationDecision, error),
+) (validationDecision, error) {
+	styles := theme.New()
+	switch result.status {
+	case tokenValid:
+		_, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s %s has all required scopes.\n", styles.Success.Render("✓"), tokenName)
+		return validationContinue, err
+	case tokenInvalid:
+		validationErr := &tokenValidationError{tokenName: tokenName, missingScopes: result.missingScopes, cause: result.cause}
+		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", styles.Failure.Render("✗"), validationErr.Error()); err != nil {
+			return validationAbort, err
+		}
+	case tokenValidationWarning:
+		if _, err := fmt.Fprintf(
+			cmd.ErrOrStderr(),
+			"%s Could not validate %s scopes: %v.\n",
+			styles.Warning.Render("⚠"),
+			tokenName,
+			result.cause,
+		); err != nil {
+			return validationAbort, err
+		}
+	default:
+		return validationAbort, errors.New("unknown token validation status")
+	}
+	return choose()
+}
+
+func runConfigCredentialPhase(
+	cmd *cobra.Command,
+	tokenName string,
+	kind configCredentialKind,
+	rawURL *string,
+	token *string,
+	collect func() error,
+	choose func() (validationDecision, error),
+) error {
+	for {
+		if err := collect(); err != nil {
+			return err
+		}
+		result := validateConfigCredential(cmd.Context(), kind, *rawURL, *token)
+		decision, err := handleConfigCredentialValidation(cmd, tokenName, result, choose)
+		if err != nil {
+			return err
+		}
+		switch decision {
+		case validationContinue:
+			return nil
+		case validationRetry:
+			*token = ""
+			continue
+		case validationAbort:
+			return errors.New("configuration cancelled")
+		default:
+			return errors.New("unknown validation decision")
+		}
+	}
+}
+
+func reportTokenValidation(cmd *cobra.Command, tokenName string, result tokenValidationResult, interactive bool) error {
+	styles := theme.New()
+	switch result.status {
+	case tokenValid:
+		if interactive {
+			_, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s %s has all required scopes.\n", styles.Success.Render("✓"), tokenName)
+			return err
+		}
+		return nil
+	case tokenInvalid:
+		return &tokenValidationError{tokenName: tokenName, missingScopes: result.missingScopes, cause: result.cause}
+	case tokenValidationWarning:
+		_, err := fmt.Fprintf(
+			cmd.ErrOrStderr(),
+			"%s Could not validate %s scopes: %v.\n",
+			styles.Warning.Render("⚠"),
+			tokenName,
+			result.cause,
+		)
+		return err
+	default:
+		return errors.New("unknown token validation status")
+	}
+}
+
 func newSetMigratorPATCmd(commandName, secretName string) *cobra.Command {
-	var org, sourceURL, sourceToken, body string
+	var org, sourceURL, sourceToken, targetURL, body string
 
 	cmd := &cobra.Command{
 		Use:   commandName + " ORG",
@@ -116,6 +315,21 @@ func newSetMigratorPATCmd(commandName, secretName string) *cobra.Command {
 				return fmt.Errorf("no source admin token configured; run `gh elm config`, set %s, or pass --source-token", config.EnvSourceToken)
 			}
 
+			validationURL := ep.URL
+			requiredScopes := sourcePATRequiredScopes
+			if secretName == "TARGET_PAT" {
+				targetEP, targetErr := resolver.Target(targetURL, pat)
+				if targetErr != nil {
+					return targetErr
+				}
+				validationURL = targetEP.URL
+				requiredScopes = targetPATRequiredScopes
+			}
+			result := validateTokenScopes(cmd.Context(), validationURL, pat, requiredScopes)
+			if err := reportTokenValidation(cmd, secretName, result, outputIsTerminal(cmd.OutOrStdout())); err != nil {
+				return err
+			}
+
 			if err := elmapi.NewClient(ep.URL, ep.Token).SetMigratorSecret(cmd.Context(), resolvedOrg, secretName, pat); err != nil {
 				return err
 			}
@@ -127,11 +341,23 @@ func newSetMigratorPATCmd(commandName, secretName string) *cobra.Command {
 	cmd.Flags().StringVarP(&org, "org", "o", "", "Organization that can access the secret.")
 	cmd.Flags().StringVar(&sourceURL, "source-url", "", "Override the source (GHES) API base URL.")
 	cmd.Flags().StringVar(&sourceToken, "source-token", "", "Override the source (GHES) admin token.")
+	if secretName == "TARGET_PAT" {
+		cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target GitHub API base URL for PAT validation.")
+	}
 	return cmd
 }
 
+func outputIsTerminal(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	//nolint:gosec // terminal file descriptors fit in int on supported platforms
+	return term.IsTerminal(int(file.Fd()))
+}
+
 func newSetMigratorPATInteractiveCmd() *cobra.Command {
-	var org, sourceURL, sourceToken string
+	var org, sourceURL, sourceToken, targetURL string
 
 	cmd := &cobra.Command{
 		Use:   "org-tokens ORG",
@@ -153,13 +379,14 @@ func newSetMigratorPATInteractiveCmd() *cobra.Command {
 				sourceToken, _ = cmd.Flags().GetString("source-token")
 			}
 
-			return runSetMigratorPATInteractive(cmd, resolvedOrg, sourceURL, sourceToken)
+			return runSetMigratorPATInteractive(cmd, resolvedOrg, sourceURL, sourceToken, targetURL)
 		},
 	}
 
 	cmd.Flags().StringVarP(&org, "org", "o", "", "Organization that can access the secret.")
 	cmd.Flags().StringVar(&sourceURL, "source-url", "", "Override the source (GHES) API base URL.")
 	cmd.Flags().StringVar(&sourceToken, "source-token", "", "Override the source (GHES) admin token.")
+	cmd.Flags().StringVar(&targetURL, "target-url", "", "Override the target GitHub API base URL for PAT validation.")
 
 	return cmd
 }
@@ -228,6 +455,155 @@ func newConfigureAliasCmd() *cobra.Command {
 	return cmd
 }
 
+func newConfigConfirmAccessCmd() *cobra.Command {
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "confirm-access",
+		Short: "Confirm that configured CLI credentials can access their GitHub APIs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			failure := runConfirmAccessChecks(cmd)
+			if failure == nil {
+				return nil
+			}
+
+			interactive := confirmAccessIsInteractive(
+				check,
+				outputIsTerminal(cmd.OutOrStdout()),
+				inputIsTerminal(cmd.InOrStdin()),
+			)
+			return handleConfirmAccessFailure(
+				failure,
+				interactive,
+				promptRunConfigurationWizard,
+				func() error {
+					store, err := creds.NewStore()
+					if err != nil {
+						return err
+					}
+					return runConfigureInteractive(cmd, store)
+				},
+				func() error { return runConfirmAccessChecks(cmd) },
+			)
+		},
+	}
+	cmd.Flags().BoolVar(&check, "check", false, "Check access without offering interactive reconfiguration")
+	return cmd
+}
+
+func runConfirmAccessChecks(cmd *cobra.Command) error {
+	resolver, err := endpoints.NewResolver()
+	if err != nil {
+		return err
+	}
+
+	source, err := resolver.Source("", "")
+	if err != nil {
+		return err
+	}
+	target, err := resolver.Target("", "")
+	if err != nil {
+		return err
+	}
+
+	failed := false
+	sourceResult := validateConfigCredential(cmd.Context(), sourceConfigCredential, source.URL, source.Token)
+	if err := reportConfirmAccessValidation(cmd, "Source CLI token", sourceResult); err != nil {
+		failed = true
+	}
+	if target.URL != "" {
+		targetResult := validateConfigCredential(cmd.Context(), targetConfigCredential, target.URL, target.Token)
+		if err := reportConfirmAccessValidation(cmd, "Target CLI token", targetResult); err != nil {
+			failed = true
+		}
+	}
+	if failed {
+		return errors.New("one or more configured CLI credentials could not be confirmed")
+	}
+	return nil
+}
+
+func reportConfirmAccessValidation(cmd *cobra.Command, tokenName string, result tokenValidationResult) error {
+	styles := theme.New()
+	switch result.status {
+	case tokenValid:
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s has all required scopes.\n", styles.Success.Render("✓"), tokenName)
+		return err
+	case tokenInvalid:
+		validationErr := &tokenValidationError{tokenName: tokenName, missingScopes: result.missingScopes, cause: result.cause}
+		_, err := fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", styles.Failure.Render("✗"), validationErr.Error())
+		if err != nil {
+			return err
+		}
+		return validationErr
+	case tokenValidationWarning:
+		_, err := fmt.Fprintf(
+			cmd.ErrOrStderr(),
+			"%s Could not validate %s scopes: %v.\n",
+			styles.Warning.Render("⚠"),
+			tokenName,
+			result.cause,
+		)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("could not validate %s: %w", tokenName, result.cause)
+	default:
+		return errors.New("unknown token validation status")
+	}
+}
+
+func promptRunConfigurationWizard() (bool, error) {
+	confirmed := false
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Would you like to run the configuration wizard?").
+				Value(&confirmed),
+		),
+	).WithTheme(theme.Form())
+	if err := runForm(form); err != nil {
+		return false, err
+	}
+	return confirmed, nil
+}
+
+func confirmAccessIsInteractive(check, outputTerminal, inputTerminal bool) bool {
+	return !check && outputTerminal && inputTerminal
+}
+
+func inputIsTerminal(input io.Reader) bool {
+	file, ok := input.(*os.File)
+	if !ok {
+		return false
+	}
+	//nolint:gosec // terminal file descriptors fit in int on supported platforms
+	return term.IsTerminal(int(file.Fd()))
+}
+
+func handleConfirmAccessFailure(
+	failure error,
+	interactive bool,
+	confirmWizard func() (bool, error),
+	runWizard func() error,
+	recheckAccess func() error,
+) error {
+	if !interactive {
+		return failure
+	}
+	confirmed, err := confirmWizard()
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return failure
+	}
+	if err := runWizard(); err != nil {
+		return err
+	}
+	return recheckAccess()
+}
+
 func newConfigShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
@@ -254,6 +630,26 @@ func newConfigResetCmd() *cobra.Command {
 	}
 }
 
+func promptConfigValidationDecision(tokenName string) (validationDecision, error) {
+	decision := validationRetry
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[validationDecision]().
+				Title(tokenName+" could not be validated. What would you like to do?").
+				Options(
+					huh.NewOption("Continue anyway", validationContinue),
+					huh.NewOption("Try again", validationRetry),
+					huh.NewOption("Abort", validationAbort),
+				).
+				Value(&decision),
+		),
+	).WithTheme(theme.Form())
+	if err := runForm(form); err != nil {
+		return validationAbort, err
+	}
+	return decision, nil
+}
+
 func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	//nolint:gosec // os.Stdin.Fd() returns a small, non-negative file descriptor that always fits in an int
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -273,23 +669,41 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	targetURL := cfg.TargetURL
 	var targetToken string
 
-	sourceForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().
-				Title("Source — GitHub Enterprise Server").
-				Description("The GHES appliance you are migrating from."),
-			huh.NewInput().
-				Title("Source URL").
-				Placeholder("https://ghes.example.com").
-				Value(&sourceURL).
-				Validate(validateURL),
-			huh.NewInput().
-				Title("Source token").
-				Description("A personal access token with the admin:enterprise scope.").
-				EchoMode(huh.EchoModePassword).
-				Value(&sourceToken).
-				Validate(validateRequired("a source token")),
-		),
+	if err := runConfigCredentialPhase(
+		cmd,
+		"Source token",
+		sourceConfigCredential,
+		&sourceURL,
+		&sourceToken,
+		func() error {
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewNote().
+						Title("Source — GitHub Enterprise Server").
+						Description("The GHES appliance you are migrating from."),
+					huh.NewInput().
+						Title("Source URL").
+						Placeholder("https://ghes.example.com").
+						Value(&sourceURL).
+						Validate(validateURL),
+					huh.NewInput().
+						Title("Source token").
+						Description("A personal access token with the admin:enterprise and admin:org scopes.").
+						EchoMode(huh.EchoModePassword).
+						Value(&sourceToken).
+						Validate(validateRequired("a source token")),
+				),
+			).WithTheme(theme.Form())
+			return runForm(form)
+		},
+		func() (validationDecision, error) {
+			return promptConfigValidationDecision("Source token")
+		},
+	); err != nil {
+		return err
+	}
+
+	targetChoiceForm := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Configure target (GitHub with Data Residency) credentials now?").
@@ -297,32 +711,42 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 				Value(&configureTarget),
 		),
 	).WithTheme(theme.Form())
-
-	if err := runForm(sourceForm); err != nil {
+	if err := runForm(targetChoiceForm); err != nil {
 		return err
 	}
 
 	if configureTarget {
-		targetForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewNote().
-					Title("Target — GitHub with Data Residency").
-					Description("The destination the repositories are migrating to."),
-				huh.NewInput().
-					Title("Target URL").
-					Placeholder("https://tenant.ghe.com").
-					Value(&targetURL).
-					Validate(validateURL),
-				huh.NewInput().
-					Title("Target token").
-					Description("A personal access token for the migration target.").
-					EchoMode(huh.EchoModePassword).
-					Value(&targetToken).
-					Validate(validateRequired("a target token")),
-			),
-		).WithTheme(theme.Form())
-
-		if err := runForm(targetForm); err != nil {
+		if err := runConfigCredentialPhase(
+			cmd,
+			"Target token",
+			targetConfigCredential,
+			&targetURL,
+			&targetToken,
+			func() error {
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewNote().
+							Title("Target — GitHub with Data Residency").
+							Description("The destination the repositories are migrating to."),
+						huh.NewInput().
+							Title("Target URL").
+							Placeholder("https://tenant.ghe.com").
+							Value(&targetURL).
+							Validate(validateURL),
+						huh.NewInput().
+							Title("Target token").
+							Description("A personal access token with the admin:enterprise and admin:org scopes.").
+							EchoMode(huh.EchoModePassword).
+							Value(&targetToken).
+							Validate(validateRequired("a target token")),
+					),
+				).WithTheme(theme.Form())
+				return runForm(form)
+			},
+			func() (validationDecision, error) {
+				return promptConfigValidationDecision("Target token")
+			},
+		); err != nil {
 			return err
 		}
 	}
@@ -352,7 +776,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	return render.Write(cmd.OutOrStdout(), output.String())
 }
 
-func runSetMigratorPATInteractive(cmd *cobra.Command, org, sourceURL, sourceToken string) error {
+func runSetMigratorPATInteractive(cmd *cobra.Command, org, sourceURL, sourceToken, targetURL string) error {
 	//nolint:gosec // os.Stdin.Fd() returns a small, non-negative file descriptor that always fits in an int
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return errors.New("gh elm config org-tokens is interactive and needs a terminal; " +
@@ -384,7 +808,7 @@ func runSetMigratorPATInteractive(cmd *cobra.Command, org, sourceURL, sourceToke
 					"  * workflow\n"+
 					"  * admin:org\n"+
 					"  * admin:repo_hook\n"+
-					"  * admin:org_hook").
+					"  * admin:enterprise").
 				EchoMode(huh.EchoModePassword).
 				Value(&newTargetToken).
 				Validate(validateRequired("a target token")),
@@ -412,16 +836,55 @@ func runSetMigratorPATInteractive(cmd *cobra.Command, org, sourceURL, sourceToke
 		return fmt.Errorf("no source admin token configured; run `gh elm config`, set %s, or pass --source-token", config.EnvSourceToken)
 	}
 
-	client := elmapi.NewClient(ep.URL, ep.Token)
-	if err := client.SetMigratorSecret(cmd.Context(), org, "SOURCE_PAT", newSourceToken); err != nil {
+	targetEP, err := resolver.Target(targetURL, newTargetToken)
+	if err != nil {
 		return err
 	}
 
-	if err := client.SetMigratorSecret(cmd.Context(), org, "TARGET_PAT", newTargetToken); err != nil {
-		return fmt.Errorf("SOURCE_PAT was set, but setting TARGET_PAT failed: %w", err)
+	if err := setMigratorPATPair(
+		cmd,
+		org,
+		ep.URL,
+		ep.Token,
+		targetEP.URL,
+		newSourceToken,
+		newTargetToken,
+		true,
+	); err != nil {
+		return err
 	}
 
 	return render.Write(cmd.OutOrStdout(), render.Success("Set SOURCE_PAT and TARGET_PAT migrator secrets for organization "+org+"."))
+}
+
+func setMigratorPATPair(
+	cmd *cobra.Command,
+	org string,
+	sourceAPIURL string,
+	sourceAdminToken string,
+	targetAPIURL string,
+	sourcePAT string,
+	targetPAT string,
+	interactive bool,
+) error {
+	sourceResult := validateTokenScopes(cmd.Context(), sourceAPIURL, sourcePAT, sourcePATRequiredScopes)
+	targetResult := validateTokenScopes(cmd.Context(), targetAPIURL, targetPAT, targetPATRequiredScopes)
+
+	if err := reportTokenValidation(cmd, "SOURCE_PAT", sourceResult, interactive); err != nil {
+		return err
+	}
+	if err := reportTokenValidation(cmd, "TARGET_PAT", targetResult, interactive); err != nil {
+		return err
+	}
+
+	client := elmapi.NewClient(sourceAPIURL, sourceAdminToken)
+	if err := client.SetMigratorSecret(cmd.Context(), org, "SOURCE_PAT", sourcePAT); err != nil {
+		return err
+	}
+	if err := client.SetMigratorSecret(cmd.Context(), org, "TARGET_PAT", targetPAT); err != nil {
+		return fmt.Errorf("SOURCE_PAT was set, but setting TARGET_PAT failed: %w", err)
+	}
+	return nil
 }
 
 func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
