@@ -37,6 +37,8 @@ gh elm --version         # print the extension version
 
 gh elm config                # interactively set up credentials
 gh elm config show           # print current config (tokens redacted)
+gh elm config confirm-access # validate configured CLI tokens interactively
+gh elm config confirm-access --check # validate without offering reconfiguration
 gh elm config reset          # remove stored config and credentials
 gh elm config set-source-pat ORG # set an organization's SOURCE_PAT secret
 gh elm config set-target-pat ORG # set an organization's TARGET_PAT secret
@@ -217,9 +219,15 @@ gh elm target mannequin reclaim octo-org 'legacy-ci[bot]' 'example-ci[bot]'
 `gh elm config` walks you through the two systems `gh elm` talks to:
 
 - **Source** — your GitHub Enterprise Server (GHES) appliance (URL + a PAT with the
-  `admin:enterprise` scope).
-- **Target** — the GitHub with Data Residency migration target (URL + a PAT). Optional;
-  only needed for `gh elm target` commands.
+  `admin:enterprise` and `admin:org` scopes).
+- **Target** — the GitHub with Data Residency migration target (URL + a PAT with the
+  `admin:enterprise` and `admin:org` scopes). Optional; only needed for `gh elm target`
+  commands.
+
+Each wizard phase validates its token against that instance as soon as it is submitted.
+Successful validation advances automatically. If authentication fails, scopes are missing,
+or validation is unavailable, the wizard lets you continue anyway, try that phase again,
+or abort without saving the wizard's changes.
 
 Where values are stored:
 
@@ -231,6 +239,12 @@ Where values are stored:
 
 Force a specific backend with `GH_ELM_CREDENTIAL_STORE=keyring` or `GH_ELM_CREDENTIAL_STORE=file`.
 `gh elm config show` prints which backend is active.
+
+Use `gh elm config confirm-access` to check the effective source and configured target
+credentials. In an interactive terminal, a failed check offers to run the configuration
+wizard. Use `gh elm config confirm-access --check` in scripts and CI to disable that prompt
+and return a nonzero status when authentication, scope validation, or API access cannot be
+confirmed.
 
 ### Environment variables and precedence
 
@@ -267,9 +281,18 @@ printf %s "$TARGET_PAT" | gh elm config set-target-pat --org octo-org
 
 The required `ORG` operand identifies the organization that owns the secret; `--org`
 provides an equivalent flag form. The commands use the configured source URL and source
-admin token. Per-command
-`--source-url` and `--source-token` flags override those values. Values passed with
-`--body` can appear in shell history, so prefer the prompt, environment, or standard input.
+admin token. Per-command `--source-url` and `--source-token` flags override those values;
+`set-target-pat` also accepts `--target-url` for validation against a different target API.
+
+Before storing a token, `gh elm` checks the scopes reported by the token's own GitHub
+instance. `SOURCE_PAT` requires `repo`, `admin:org`, `admin:repo_hook`, and
+`admin:org_hook`. `TARGET_PAT` requires `repo`, `workflow`, `admin:org`,
+`admin:repo_hook`, and `admin:enterprise`. A token missing scopes is rejected. If the
+instance cannot report scopes, the command warns and continues so unsupported token types,
+proxies, or temporary validation failures do not prevent configuration.
+
+Values passed with `--body` can appear in shell history, so prefer the prompt, environment,
+or standard input.
 
 Other overrides:
 

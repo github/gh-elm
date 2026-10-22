@@ -53,7 +53,7 @@ func (r *Resolver) Source(flagURL, flagToken string) (Endpoint, error) {
 	if err != nil {
 		return ep, err
 	}
-	ep.URL = ensureGHESRESTBase(ep.URL)
+	ep.URL = NormalizeSourceAPIURL(ep.URL)
 	return ep, nil
 }
 
@@ -114,13 +114,14 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// ensureGHESRESTBase turns a GHES appliance base URL into its REST API root by
+// NormalizeSourceAPIURL turns a GHES appliance base URL into its REST API root by
 // appending /api/v3 when the URL carries no path. GH_SOURCE_HOST is typically a
 // bare host (for example ghes.example.com); the GHES REST API is served under
 // /api/v3, so a base without a path would otherwise hit the web frontend and
 // fail (a 302 redirect, or 406 for a JSON Accept header). A base that already
 // carries a path (for example .../api/v3) is left untouched.
-func ensureGHESRESTBase(raw string) string {
+func NormalizeSourceAPIURL(raw string) string {
+	raw = normalizeBaseURL(raw)
 	if raw == "" {
 		return ""
 	}

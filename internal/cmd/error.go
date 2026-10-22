@@ -15,6 +15,12 @@ import (
 
 // FormatError renders an error for terminal display.
 func FormatError(err error) string {
+	var validationErr *tokenValidationError
+	if errors.As(err, &validationErr) {
+		styles := theme.New()
+		return render.Human(styles.Failure.Bold(true).Render("✗") + " " + validationErr.Error())
+	}
+
 	var httpErr *elmapi.HTTPError
 	if !errors.As(err, &httpErr) {
 		styles := theme.New()
