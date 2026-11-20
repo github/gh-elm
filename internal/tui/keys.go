@@ -64,7 +64,7 @@ var keys = keyMap{
 	),
 	Search: key.NewBinding(
 		key.WithKeys("/", "f"),
-		key.WithHelp("/", "search"),
+		key.WithHelp("f", "search"),
 	),
 	Density: key.NewBinding(
 		key.WithKeys("ctrl+v"),

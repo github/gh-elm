@@ -121,6 +121,10 @@ func TestNormalizeTargetAPIURL(t *testing.T) {
 		assert.Equal(t, "https://API.staffship.blabla.com", NormalizeTargetAPIURL("https://API.staffship.blabla.com"))
 	})
 
+	t.Run("normalizes a bare web hostname", func(t *testing.T) {
+		assert.Equal(t, "https://api.staffship.blabla.com", NormalizeTargetAPIURL("staffship.blabla.com"))
+	})
+
 	t.Run("prefixes a hostname that only contains api elsewhere", func(t *testing.T) {
 		assert.Equal(t, "https://api.staffship-api.blabla.com", NormalizeTargetAPIURL("https://staffship-api.blabla.com"))
 	})

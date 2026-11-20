@@ -179,11 +179,9 @@ func newCreateCmd() *cobra.Command {
 				TargetOrganizationLogin: repositories.target.organization,
 				TargetRepositoryName:    repositories.target.repository,
 				TargetAPIEndpoint:       targetAPI,
-				// WORKAROUND (API defect): the create endpoint requires a
-				// non-empty pat_name, but migration credentials are supplied by
-				// the system rather than this CLI, so there is nothing meaningful
-				// to send. Stub it with a sentinel until the API stops requiring it.
-				PATName:          "BOGON",
+				// The API resolves the source and target tokens server-side from
+				// this required static credential reference.
+				PATName:          elmapi.SystemPATName,
 				TargetVisibility: visibility,
 			}
 

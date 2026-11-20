@@ -256,6 +256,19 @@ func TestUpdate(t *testing.T) {
 		assert.Nil(t, m.detail.Migration)
 		assert.NotContains(t, m.View(), "Failed to refresh")
 	})
+
+	t.Run("terminated migration displays as cancelled", func(t *testing.T) {
+		m := New("id", time.Second, nil)
+		m.detail = combined(combinedTerminated)
+		m.basePhase, m.overlay = DerivePhase(m.detail)
+
+		output := m.View()
+
+		assert.Equal(t, "Cancelled", OverlayTerminated.String())
+		assert.Contains(t, output, "Migration cancelled")
+		assert.NotContains(t, output, "Terminated")
+		assert.NotContains(t, output, "Migration terminated")
+	})
 }
 
 func TestFailedDetail(t *testing.T) {

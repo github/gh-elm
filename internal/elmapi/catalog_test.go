@@ -15,7 +15,7 @@ func TestListRepositories(t *testing.T) {
 		assert.Equal(t, "100", r.URL.Query().Get("per_page"))
 		assert.Equal(t, "owner,collaborator,organization_member", r.URL.Query().Get("affiliation"))
 		_, _ = w.Write([]byte(`[
-			{"full_name":"zeta/repo","owner":{"type":"Organization"}},
+			{"full_name":"zeta/repo","description":"API service","language":"Go","visibility":"private","private":true,"archived":true,"fork":false,"stargazers_count":12,"open_issues_count":4,"owner":{"type":"Organization"}},
 			{"full_name":"Acme/api","owner":{"type":"Organization"}}
 		]`))
 	}))
@@ -26,7 +26,19 @@ func TestListRepositories(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []Repository{
 		repository("Acme/api", "Organization"),
-		repository("zeta/repo", "Organization"),
+		{
+			FullName:       "zeta/repo",
+			Description:    "API service",
+			Language:       "Go",
+			Visibility:     "private",
+			Private:        true,
+			Archived:       true,
+			Stargazers:     12,
+			OpenIssueCount: 4,
+			Owner: struct {
+				Type string `json:"type"`
+			}{Type: "Organization"},
+		},
 	}, repositories)
 }
 

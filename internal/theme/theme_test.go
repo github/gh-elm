@@ -14,13 +14,16 @@ func TestNew(t *testing.T) {
 	t.Run("semantic colours come from the theme palette", func(t *testing.T) {
 		assert.Equal(t, lipgloss.NoColor{}, s.Primary.GetForeground())
 		assert.Equal(t, colorGreen, s.Success.GetForeground())
-		assert.Equal(t, colorBlue, s.Active.GetForeground())
+		assert.Equal(t, colorGreen, s.Active.GetForeground())
 		assert.Equal(t, warningColor, s.Warning.GetForeground())
 		assert.Equal(t, warningColor, s.Paused.GetForeground())
 		assert.Equal(t, githubRed, s.Failure.GetForeground())
 		assert.Equal(t, colorBlue, s.Info.GetForeground())
 		assert.Equal(t, colorSecondary, s.Secondary.GetForeground())
+		assert.Equal(t, colorDisabled, s.Disabled.GetForeground())
 		assert.Equal(t, colorPlaceholder, s.Placeholder.GetForeground())
+		assert.Equal(t, progressBarFill, s.ProgressBarFill.GetForeground())
+		assert.Equal(t, progressBarTrack, s.ProgressBarTrack.GetForeground())
 		assert.Equal(t, colorBlue, s.FocusedButton.GetBackground())
 		assert.Equal(t, colorButtonText, s.FocusedButton.GetForeground())
 		assert.Equal(t, buttonIdleBackground, s.BlurredButton.GetBackground())
@@ -53,6 +56,10 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, lipgloss.Color("242"), s.Muted.GetForeground())
 	})
 
+	t.Run("disabled is a lighter grey than muted", func(t *testing.T) {
+		assert.Equal(t, lipgloss.Color("244"), s.Disabled.GetForeground())
+	})
+
 	t.Run("emphasis carries no colour of its own", func(t *testing.T) {
 		assert.True(t, s.Bold.GetBold())
 		assert.Equal(t, lipgloss.NoColor{}, s.Bold.GetForeground())
@@ -60,7 +67,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("other styles use fixed colours", func(t *testing.T) {
 		for name, style := range map[string]lipgloss.Style{
-			"Info": s.Info, "Secondary": s.Secondary, "Muted": s.Muted,
+			"Info": s.Info, "Secondary": s.Secondary, "Muted": s.Muted, "Disabled": s.Disabled,
 			"Placeholder": s.Placeholder, "Success": s.Success, "Active": s.Active,
 			"Failure": s.Failure,
 		} {
