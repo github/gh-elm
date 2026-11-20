@@ -230,6 +230,33 @@ type TargetState struct {
 	Status             *string              `json:"status"`
 	TargetUnavailable  bool                 `json:"target_unavailable"`
 	RepositoryProgress []RepositoryProgress `json:"repository_progress"`
+	// TerminalFailure is the destination's own report of why it failed, passed
+	// through faithfully. It is nil when the target is unavailable or has not
+	// failed, and may be set for states that CombinedState does not describe as
+	// a failure.
+	TerminalFailure *TerminalFailure `json:"terminal_failure"`
+}
+
+// TerminalFailure is the recorded cause of a migration reaching a terminal
+// state. The server records exactly one per migration and never overwrites it,
+// so this is the root cause rather than a later consequence.
+//
+// The whole object is nil on a migration that has not failed, and on any GHES
+// released before the field existed.
+type TerminalFailure struct {
+	// Code categorizes the failure and is a stable contract: branch on it
+	// rather than on Summary. Callers must tolerate codes they do not
+	// recognize, because the server adds new ones independently of this client.
+	Code string `json:"code"`
+	// Summary is the customer-facing sentence describing what happened. The
+	// server authors it from a fixed table keyed by Code and never derives it
+	// from upstream error text, so it carries no customer or target data and is
+	// safe to render verbatim.
+	Summary string `json:"summary"`
+	// OccurredAt is an RFC 3339 timestamp, nil when the server recorded no
+	// time. The server deliberately sends null rather than the Unix epoch so
+	// that "no time recorded" stays distinguishable from "failed in 1970".
+	OccurredAt *string `json:"occurred_at"`
 }
 
 // RepositoryProgress is per-repository backfill/live-update counts.
@@ -253,6 +280,11 @@ type CombinedState struct {
 	ReadyForCutover bool                      `json:"ready_for_cutover"`
 	CutoverBlockers []string                  `json:"cutover_blockers"`
 	Repositories    []CombinedRepositoryState `json:"repositories"`
+	// TerminalFailure is the user-facing cause of the failure. The server sets
+	// it only when Status is failed, so a terminated migration — a user-
+	// initiated abort rather than a fault — carries no cause here even though
+	// TargetState may still report one.
+	TerminalFailure *TerminalFailure `json:"terminal_failure"`
 }
 
 // CombinedRepositoryState is per-repository derived phase/status.
