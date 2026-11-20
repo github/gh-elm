@@ -84,12 +84,15 @@ func TestConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://source.example", configuration.SourceURL)
 	assert.True(t, configuration.SourceTokenSet)
-	assert.Equal(t, "https://target.example", configuration.TargetURL)
+	assert.Equal(t, "https://api.target.example", configuration.TargetURL)
 	assert.True(t, configuration.TargetTokenSet)
 	assert.Equal(t, "https://source.example/api/v3", configuration.ResolvedSourceURL)
 	assert.True(t, configuration.ResolvedSourceTokenSet)
 	assert.Equal(t, "https://api.target.example", configuration.ResolvedTargetURL)
 	assert.True(t, configuration.ResolvedTargetTokenSet)
+	stored, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.target.example", stored.TargetURL)
 
 	t.Setenv(config.EnvSourceURL, "source-env.example")
 	t.Setenv(config.EnvSourceToken, "source-env-token")
@@ -206,7 +209,7 @@ func TestRepositoryCatalog(t *testing.T) {
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v3/user/repos", r.URL.Path)
 		_, _ = w.Write([]byte(`[
-			{"full_name":"octo/source","owner":{"type":"Organization"}},
+			{"full_name":"octo/source","description":"Source repository","language":"Go","stargazers_count":7,"owner":{"type":"Organization"}},
 			{"full_name":"personal/source","owner":{"type":"User"}}
 		]`))
 	}))
@@ -229,7 +232,11 @@ func TestRepositoryCatalog(t *testing.T) {
 
 	repositories, err := service.ListSourceRepositories(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"octo/source"}, repositories)
+	require.Len(t, repositories, 1)
+	assert.Equal(t, "octo/source", repositories[0].FullName)
+	assert.Equal(t, "Source repository", repositories[0].Description)
+	assert.Equal(t, "Go", repositories[0].Language)
+	assert.Equal(t, 7, repositories[0].Stargazers)
 
 	organizations, err := service.ListTargetOrganizations(t.Context())
 	require.NoError(t, err)
@@ -281,4 +288,49 @@ func assertWorkflowCustomerTransition(t *testing.T, body map[string]any) string 
 	require.True(t, ok, "operation_id must be a string")
 	require.NoError(t, uuid.Validate(operationID))
 	return operationID
+}
+
+func TestCreateSourceMigrationUsesSystemPATReference(t *testing.T) {
+	t.Setenv("GH_ELM_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_ELM_CREDENTIAL_STORE", "file")
+
+	var request elmapi.CreateMigrationRequest
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v3/enterprise/live-migrations", r.URL.Path)
+		if r.Method == http.MethodGet {
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"migrations":  []any{},
+				"total_count": 0,
+			}))
+			return
+		}
+		require.Equal(t, http.MethodPost, r.Method)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"migration_id":"migration-1","expires_at":null}`))
+	}))
+	t.Cleanup(source.Close)
+	target := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(target.Close)
+
+	service := New()
+	require.NoError(t, service.SaveConfiguration(t.Context(), ConfigurationInput{
+		SourceURL:   source.URL,
+		SourceToken: "source-token",
+		TargetURL:   target.URL,
+		TargetToken: "target-token",
+	}))
+
+	result, err := service.CreateSourceMigration(t.Context(), SourceCreateInput{
+		SourceOwner: "octo-source",
+		SourceRepo:  "repository",
+		TargetOwner: "octo-target",
+		TargetRepo:  "repository",
+		Visibility:  "internal",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "migration-1", result.Migration.MigrationID)
+	assert.Equal(t, elmapi.SystemPATName, request.PATName)
+	assert.Equal(t, target.URL, request.TargetAPIEndpoint)
 }

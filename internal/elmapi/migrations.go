@@ -32,12 +32,16 @@ const (
 	StatusFailed     = "failed"
 	StatusTerminated = "terminated"
 	StatusAll        = "all"
+
+	// SystemPATName is the credential reference required by the live-migration
+	// create API. The source and target token values remain stored server-side.
+	SystemPATName = "system-pat"
 )
 
 // CreateMigrationRequest is the body of a create-migration call. TargetVisibility
 // is optional and defaults to internal server-side when omitted. TargetAPIEndpoint
-// and PATName are required by the API; the migration commands derive/stub them
-// (see newCreateCmd) rather than exposing dedicated flags.
+// and PATName are required by the API; callers derive the endpoint and use the
+// static SystemPATName credential reference rather than exposing dedicated flags.
 type CreateMigrationRequest struct {
 	SourceOrganizationLogin string `json:"source_organization_login"`
 	SourceRepositoryName    string `json:"source_repository_name"`

@@ -24,7 +24,7 @@ func runRoot(cmd *cobra.Command) error {
 		tea.WithContext(cmd.Context()),
 		tea.WithAltScreen(),
 		tea.WithInput(cmd.InOrStdin()),
-		tea.WithOutput(cmd.OutOrStdout()),
+		tea.WithOutput(elmtui.NativeCursorOutput(cmd.OutOrStdout())),
 	)
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && cmd.Context().Err() != nil {
