@@ -50,10 +50,23 @@ func MigrationStatus(v elmapi.MigrationDetail) string {
 		// is the one thing the operator needs, and burying it under progress
 		// bars is how it gets missed.
 		renderTerminalFailure(failure),
+		renderSection("Source", "  "+SourceRepositoryArchiveState(v.Migration)),
 		renderTargetState(v.TargetState, sourceStatus, showTargetAvailability),
 		renderCombinedState(v.CombinedState, failure),
 		renderMessages(v.Messages),
 	)
+}
+
+// SourceRepositoryArchiveState renders a nullable source observation, not migration progress.
+func SourceRepositoryArchiveState(migration *elmapi.MigrationSummary) string {
+	styles := theme.New()
+	if migration == nil || migration.SourceRepositoryArchived == nil {
+		return styles.Muted.Render("Source repository archive state unavailable")
+	}
+	if *migration.SourceRepositoryArchived {
+		return styles.Primary.Render("Source repository archived")
+	}
+	return styles.Primary.Render("Source repository not archived")
 }
 
 // CutoverStatus renders the cutover portion of a migration status response.
@@ -139,11 +152,9 @@ func renderRepositoryProgress(progress elmapi.RepositoryProgress) string {
 
 	resources := positiveState(progress.AllResourcesSent, "All resources sent", "Resources still being sent")
 	gitPush := positiveState(progress.InitialGitPushComplete, "Initial Git push complete", "Initial Git push pending")
-	lock := neutralState(progress.RepositoryLocked, "Source repository locked", "Source repository unlocked")
 	lines = append(lines,
 		bullet(resources.glyph, resources.text),
 		bullet(gitPush.glyph, gitPush.text),
-		bullet(lock.glyph, lock.text),
 	)
 
 	return renderSection("Progress · "+valueOrEmpty(progress.RepositoryNWO), lines...)
@@ -436,20 +447,6 @@ func failureState(value bool, trueText, falseText string) state {
 	return state{
 		glyph: styles.Failure.Render("✗"),
 		text:  styles.Failure.Render(falseText),
-	}
-}
-
-func neutralState(value bool, trueText, falseText string) state {
-	styles := theme.New()
-	if value {
-		return state{
-			glyph: styles.Warning.Render("●"),
-			text:  styles.Warning.Render(trueText),
-		}
-	}
-	return state{
-		glyph: styles.Muted.Render("○"),
-		text:  styles.Muted.Render(falseText),
 	}
 }
 

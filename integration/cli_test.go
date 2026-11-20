@@ -61,6 +61,70 @@ func TestInvalidCommand(t *testing.T) {
 }
 
 func TestMigrationStatus(t *testing.T) {
+	t.Run("source archive observation and raw JSON", func(t *testing.T) {
+		cases := []struct {
+			name string
+			body string
+			want string
+		}{
+			{"true", `{"migration":{"source_repository_archived":true}}`, "Source repository archived"},
+			{"false with completed legacy true", `{"migration":{"source_repository_archived":false,"future_field":{"value":1}},"combined_state":{"status":"completed"},"target_state":{"repository_progress":[{"repository_locked":true}]},"future_field":{"value":1}}`, "Source repository not archived"},
+			{"null", `{"migration":{"source_repository_archived":null}}`, "Source repository archive state unavailable"},
+			{"absent", `{"migration":{}}`, "Source repository archive state unavailable"},
+			{"missing migration", `{"combined_state":{"status":"completed"}}`, "Source repository archive state unavailable"},
+			{"null migration", `{"migration":null,"combined_state":{"status":"completed"}}`, "Source repository archive state unavailable"},
+			{"ignores top-level observation", `{"migration":{},"source_repository_archived":true}`, "Source repository archive state unavailable"},
+			{"empty", `{}`, "No migration status data returned."},
+			{"null only", `{"migration":null}`, "No migration status data returned."},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					assert.Equal(t, http.MethodGet, r.Method)
+					assert.Equal(t, "/api/v3/enterprise/live-migrations/mig-1", r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(tc.body))
+				}))
+				t.Cleanup(srv.Close)
+				args := []string{"migration", "status", "mig-1", "--source-url", srv.URL, "--source-token", "fixture-token"}
+				result := runCLI(t, nil, args...)
+				require.Zero(t, result.ExitCode, result.Stderr)
+				assert.Empty(t, result.Stderr)
+				assert.Contains(t, result.Stdout, tc.want)
+				assert.Equal(t, 1, strings.Count(result.Stdout, tc.want))
+				assert.NotContains(t, result.Stdout, "Source repository locked")
+				assert.NotContains(t, result.Stdout, "Source repository unlocked")
+				t.Logf("Controlled-response CLI output:\n%s", result.Stdout)
+
+				result = runCLI(t, nil, append(args, "--json")...)
+				require.Zero(t, result.ExitCode, result.Stderr)
+				assert.Empty(t, result.Stderr)
+				assert.JSONEq(t, tc.body, result.Stdout)
+				assert.Equal(t, int32(2), requests.Load())
+			})
+		}
+	})
+
+	t.Run("invalid observation is an error only for typed human output", func(t *testing.T) {
+		const response = `{"migration":{"source_repository_archived":"unexpected"},"future_field":[false,null,42]}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(response))
+		}))
+		t.Cleanup(srv.Close)
+		args := []string{"migration", "status", "mig-1", "--source-url", srv.URL, "--source-token", "fixture-token"}
+		result := runCLI(t, nil, args...)
+		require.NotZero(t, result.ExitCode)
+		assert.Empty(t, result.Stdout)
+		assert.Contains(t, result.Stderr, "source_repository_archived")
+
+		result = runCLI(t, nil, append(args, "--json")...)
+		require.Zero(t, result.ExitCode, result.Stderr)
+		assert.Empty(t, result.Stderr)
+		assert.JSONEq(t, response, result.Stdout)
+	})
+
 	t.Run("succeeds", func(t *testing.T) {
 		const response = `{"migration":{"migration_id":"mig-1","status":"in_progress"}}`
 

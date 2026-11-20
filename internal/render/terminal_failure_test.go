@@ -233,6 +233,21 @@ func TestMigrationStatusTerminalFailure(t *testing.T) {
 		assert.Contains(t, output, "Policy blocked it.")
 	})
 
+	t.Run("renders the failure before the source archive observation", func(t *testing.T) {
+		output := MigrationStatus(elmapi.MigrationDetail{
+			Migration: &elmapi.MigrationSummary{Status: &failedStatus, SourceRepositoryArchived: new(false)},
+			CombinedState: &elmapi.CombinedState{
+				Status:          &failedStatus,
+				TerminalFailure: failure("repository_policy", "Policy blocked it.", nil),
+			},
+		})
+
+		require.Contains(t, output, "Failure")
+		require.Contains(t, output, "Source repository not archived")
+		assert.Less(t, strings.Index(output, "Failure"), strings.Index(output, "Source repository not archived"))
+		assert.Equal(t, 1, strings.Count(output, "Policy blocked it."))
+	})
+
 	t.Run("does not repeat the summary as the combined display message", func(t *testing.T) {
 		summary := "Policy blocked it."
 		output := MigrationStatus(elmapi.MigrationDetail{
