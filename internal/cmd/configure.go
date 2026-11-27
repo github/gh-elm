@@ -272,7 +272,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	configureTarget := cfg.TargetURL != ""
 	targetURL := cfg.TargetURL
 	var targetToken string
-	var targetAPIURL string
+	targetAPIURL := cfg.TargetAPIURL
 
 	sourceForm := huh.NewForm(
 		huh.NewGroup(
@@ -315,6 +315,17 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 					Value(&targetURL).
 					Validate(validateURL),
 				huh.NewInput().
+					Title("Target API URL").
+					Description("Leave blank for the api. host of the target URL. Set it if the API is reached through a proxy.").
+					PlaceholderFunc(func() string {
+						if strings.TrimSpace(targetURL) == "" {
+							return "https://api.tenant.ghe.com"
+						}
+						return endpoints.NormalizeTargetAPIURL(targetURL)
+					}, &targetURL).
+					Value(&targetAPIURL).
+					Validate(validateOptionalURL),
+				huh.NewInput().
 					Title("Target token").
 					Description("A personal access token for the migration target.").
 					EchoMode(huh.EchoModePassword).
@@ -324,22 +335,6 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		).WithTheme(theme.Form())
 
 		if err := runForm(targetForm); err != nil {
-			return err
-		}
-
-		defaultAPIURL := endpoints.NormalizeTargetAPIURL(targetURL)
-		targetAPIURL = firstSet(cfg.TargetAPIURL, defaultAPIURL)
-		apiForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Target API URL").
-					Description("Defaults to the api. host of the target URL. Change it if the API is reached through a proxy.").
-					Value(&targetAPIURL).
-					Validate(validateURL),
-			),
-		).WithTheme(theme.Form())
-
-		if err := runForm(apiForm); err != nil {
 			return err
 		}
 	}
@@ -575,4 +570,11 @@ func storedTargetAPIURL(normalizedTargetURL, input string) string {
 		return ""
 	}
 	return api
+}
+
+func validateOptionalURL(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return validateURL(s)
 }

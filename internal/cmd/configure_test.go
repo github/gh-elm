@@ -291,3 +291,9 @@ func TestTargetAPIURLRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://proxy-api.example.net", cfg.TargetAPIURL)
 }
+
+func TestValidateOptionalURL(t *testing.T) {
+	assert.NoError(t, validateOptionalURL(""))
+	assert.NoError(t, validateOptionalURL("https://proxy-api.example.net"))
+	assert.Equal(t, validateURL("not a url") == nil, validateOptionalURL("not a url") == nil)
+}
