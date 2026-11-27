@@ -24,6 +24,9 @@ const (
 	// #nosec G101
 	EnvSourceToken = "GH_SOURCE_TOKEN"
 	EnvTargetURL   = "GH_TARGET_HOST"
+	// EnvTargetAPIURL is a full target API base URL used verbatim (no api.
+	// prefix is added). For proxies whose API host is not api.<web host>.
+	EnvTargetAPIURL = "GH_TARGET_API_URL"
 	// EnvTargetToken is an environment variable name, not a credential.
 	// #nosec G101
 	EnvTargetToken = "GH_TARGET_TOKEN"

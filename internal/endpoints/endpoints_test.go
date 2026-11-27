@@ -110,6 +110,15 @@ func TestTargetPrecedence(t *testing.T) {
 	assert.Equal(t, "flag-token", ep.Token)
 }
 
+func TestTargetAPIURLEnvIsVerbatim(t *testing.T) {
+	r := newTestResolver(t)
+	t.Setenv(config.EnvTargetAPIURL, "https://ghec-dr-api.example.net/")
+
+	ep, err := r.Target("https://flag.example.com", "flag-token")
+	require.NoError(t, err)
+	assert.Equal(t, "https://ghec-dr-api.example.net", ep.URL)
+}
+
 func TestNormalizeTargetAPIURL(t *testing.T) {
 	t.Run("prefixes the hostname and preserves URL components", func(t *testing.T) {
 		got := NormalizeTargetAPIURL(" https://user@staffship.blabla.com:8443/base?mode=test#fragment ")

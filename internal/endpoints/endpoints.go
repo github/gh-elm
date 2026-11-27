@@ -65,6 +65,10 @@ func (r *Resolver) Target(flagURL, flagToken string) (Endpoint, error) {
 	if err != nil {
 		return ep, err
 	}
+	if apiURL := normalizeBaseURL(os.Getenv(config.EnvTargetAPIURL)); apiURL != "" {
+		ep.URL = apiURL
+		return ep, nil
+	}
 	ep.URL = NormalizeTargetAPIURL(ep.URL)
 	return ep, nil
 }
