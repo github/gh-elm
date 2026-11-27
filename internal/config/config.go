@@ -24,6 +24,9 @@ const (
 	// #nosec G101
 	EnvSourceToken = "GH_SOURCE_TOKEN"
 	EnvTargetURL   = "GH_TARGET_HOST"
+	// EnvTargetAPIURL is a full target API base URL used verbatim (no api.
+	// prefix is added). For proxies whose API host is not api.<web host>.
+	EnvTargetAPIURL = "GH_TARGET_API_URL"
 	// EnvTargetToken is an environment variable name, not a credential.
 	// #nosec G101
 	EnvTargetToken = "GH_TARGET_TOKEN"
@@ -33,6 +36,10 @@ const (
 type Config struct {
 	SourceURL string `json:"source_url,omitempty"`
 	TargetURL string `json:"target_url,omitempty"`
+	// TargetAPIURL, when set, is the target API base URL used verbatim. It
+	// overrides the api. prefix derived from TargetURL (for example when the
+	// API is reached through a proxy).
+	TargetAPIURL string `json:"target_api_url,omitempty"`
 }
 
 // Dir returns gh-elm's config directory, honoring GH_ELM_CONFIG_DIR, then

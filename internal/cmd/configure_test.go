@@ -257,3 +257,43 @@ func TestValidateURL(t *testing.T) {
 		}
 	})
 }
+
+func TestStoredTargetAPIURL(t *testing.T) {
+	def := "https://api.tenant.ghe.com"
+	assert.Equal(t, "", storedTargetAPIURL(def, ""), "blank keeps the default")
+	assert.Equal(t, "", storedTargetAPIURL(def, " https://api.tenant.ghe.com/ "), "default is not pinned")
+	assert.Equal(t, "", storedTargetAPIURL(def, "https://API.tenant.ghe.com"), "case-insensitive default")
+	assert.Equal(t, "https://proxy-api.example.net", storedTargetAPIURL(def, "https://proxy-api.example.net/"))
+}
+
+func TestConfigureShowTargetAPIURL(t *testing.T) {
+	seedFileStore(t)
+	require.NoError(t, (&config.Config{
+		SourceURL:    "https://ghes.example.com",
+		TargetURL:    "https://api.tenant.ghe.com",
+		TargetAPIURL: "https://proxy-api.example.net",
+	}).Save(), "seed config")
+
+	out, err := execConfigure("show")
+	require.NoError(t, err, "config show")
+	assert.Contains(t, out, "https://proxy-api.example.net", "stored API URL should be shown")
+
+	require.NoError(t, (&config.Config{SourceURL: "https://ghes.example.com", TargetURL: "https://api.tenant.ghe.com"}).Save())
+	out, err = execConfigure("show")
+	require.NoError(t, err, "config show")
+	assert.Contains(t, out, "API URL", "API URL row present")
+}
+
+func TestTargetAPIURLRoundTrip(t *testing.T) {
+	seedFileStore(t)
+	require.NoError(t, (&config.Config{TargetAPIURL: "https://proxy-api.example.net"}).Save())
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "https://proxy-api.example.net", cfg.TargetAPIURL)
+}
+
+func TestValidateOptionalURL(t *testing.T) {
+	assert.NoError(t, validateOptionalURL(""))
+	assert.NoError(t, validateOptionalURL("https://proxy-api.example.net"))
+	assert.Equal(t, validateURL("not a url") == nil, validateOptionalURL("not a url") == nil)
+}

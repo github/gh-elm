@@ -272,6 +272,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	configureTarget := cfg.TargetURL != ""
 	targetURL := cfg.TargetURL
 	var targetToken string
+	targetAPIURL := cfg.TargetAPIURL
 
 	sourceForm := huh.NewForm(
 		huh.NewGroup(
@@ -314,6 +315,17 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 					Value(&targetURL).
 					Validate(validateURL),
 				huh.NewInput().
+					Title("Target API URL").
+					Description("Leave blank for the api. host of the target URL. Set it if the API is reached through a proxy.").
+					PlaceholderFunc(func() string {
+						if strings.TrimSpace(targetURL) == "" {
+							return "https://api.tenant.ghe.com"
+						}
+						return endpoints.NormalizeTargetAPIURL(targetURL)
+					}, &targetURL).
+					Value(&targetAPIURL).
+					Validate(validateOptionalURL),
+				huh.NewInput().
 					Title("Target token").
 					Description("A personal access token for the migration target.").
 					EchoMode(huh.EchoModePassword).
@@ -330,6 +342,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	cfg.SourceURL = strings.TrimSpace(sourceURL)
 	if configureTarget {
 		cfg.TargetURL = endpoints.NormalizeTargetAPIURL(targetURL)
+		cfg.TargetAPIURL = storedTargetAPIURL(cfg.TargetURL, targetAPIURL)
 	}
 	if err := cfg.Save(); err != nil {
 		return err
@@ -450,6 +463,7 @@ func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
 	fmt.Fprintln(&output, "Target (GitHub with Data Residency):")
 	fmt.Fprintln(&output, render.Fields(
 		render.Field{Label: "URL", Value: orUnset(cfg.TargetURL)},
+		render.Field{Label: "API URL", Value: orUnset(firstSet(cfg.TargetAPIURL, cfg.TargetURL))},
 		render.Field{Label: "Token", Value: targetToken},
 	))
 	fmt.Fprintln(&output, "\nStored at:")
@@ -536,4 +550,31 @@ func configPathOrUnknown() string {
 		return "(unknown)"
 	}
 	return p
+}
+
+func firstSet(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// storedTargetAPIURL returns the API URL to persist: empty when the input is
+// blank or equals the derived default (so a later target URL change is not
+// pinned to a stale default), otherwise the trimmed input verbatim.
+func storedTargetAPIURL(normalizedTargetURL, input string) string {
+	api := strings.TrimRight(strings.TrimSpace(input), `/\`)
+	if api == "" || strings.EqualFold(api, normalizedTargetURL) {
+		return ""
+	}
+	return api
+}
+
+func validateOptionalURL(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return validateURL(s)
 }
