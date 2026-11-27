@@ -347,10 +347,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	cfg.SourceURL = strings.TrimSpace(sourceURL)
 	if configureTarget {
 		cfg.TargetURL = endpoints.NormalizeTargetAPIURL(targetURL)
-		cfg.TargetAPIURL = ""
-		if api := strings.TrimRight(strings.TrimSpace(targetAPIURL), "/"); api != "" && api != cfg.TargetURL {
-			cfg.TargetAPIURL = api
-		}
+		cfg.TargetAPIURL = storedTargetAPIURL(cfg.TargetURL, targetAPIURL)
 	}
 	if err := cfg.Save(); err != nil {
 		return err
@@ -567,4 +564,15 @@ func firstSet(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// storedTargetAPIURL returns the API URL to persist: empty when the input is
+// blank or equals the derived default (so a later target URL change is not
+// pinned to a stale default), otherwise the trimmed input verbatim.
+func storedTargetAPIURL(normalizedTargetURL, input string) string {
+	api := strings.TrimRight(strings.TrimSpace(input), `/\`)
+	if api == "" || strings.EqualFold(api, normalizedTargetURL) {
+		return ""
+	}
+	return api
 }
