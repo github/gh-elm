@@ -272,6 +272,7 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 	configureTarget := cfg.TargetURL != ""
 	targetURL := cfg.TargetURL
 	var targetToken string
+	var targetAPIURL string
 
 	sourceForm := huh.NewForm(
 		huh.NewGroup(
@@ -325,11 +326,31 @@ func runConfigureInteractive(cmd *cobra.Command, store creds.Store) error {
 		if err := runForm(targetForm); err != nil {
 			return err
 		}
+
+		defaultAPIURL := endpoints.NormalizeTargetAPIURL(targetURL)
+		targetAPIURL = firstSet(cfg.TargetAPIURL, defaultAPIURL)
+		apiForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target API URL").
+					Description("Defaults to the api. host of the target URL. Change it if the API is reached through a proxy.").
+					Value(&targetAPIURL).
+					Validate(validateURL),
+			),
+		).WithTheme(theme.Form())
+
+		if err := runForm(apiForm); err != nil {
+			return err
+		}
 	}
 
 	cfg.SourceURL = strings.TrimSpace(sourceURL)
 	if configureTarget {
 		cfg.TargetURL = endpoints.NormalizeTargetAPIURL(targetURL)
+		cfg.TargetAPIURL = ""
+		if api := strings.TrimRight(strings.TrimSpace(targetAPIURL), "/"); api != "" && api != cfg.TargetURL {
+			cfg.TargetAPIURL = api
+		}
 	}
 	if err := cfg.Save(); err != nil {
 		return err
@@ -450,6 +471,7 @@ func runConfigureShow(cmd *cobra.Command, store creds.Store) error {
 	fmt.Fprintln(&output, "Target (GitHub with Data Residency):")
 	fmt.Fprintln(&output, render.Fields(
 		render.Field{Label: "URL", Value: orUnset(cfg.TargetURL)},
+		render.Field{Label: "API URL", Value: orUnset(firstSet(cfg.TargetAPIURL, cfg.TargetURL))},
 		render.Field{Label: "Token", Value: targetToken},
 	))
 	fmt.Fprintln(&output, "\nStored at:")
@@ -536,4 +558,13 @@ func configPathOrUnknown() string {
 		return "(unknown)"
 	}
 	return p
+}
+
+func firstSet(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

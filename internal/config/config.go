@@ -36,6 +36,10 @@ const (
 type Config struct {
 	SourceURL string `json:"source_url,omitempty"`
 	TargetURL string `json:"target_url,omitempty"`
+	// TargetAPIURL, when set, is the target API base URL used verbatim. It
+	// overrides the api. prefix derived from TargetURL (for example when the
+	// API is reached through a proxy).
+	TargetAPIURL string `json:"target_api_url,omitempty"`
 }
 
 // Dir returns gh-elm's config directory, honoring GH_ELM_CONFIG_DIR, then

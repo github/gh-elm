@@ -119,6 +119,22 @@ func TestTargetAPIURLEnvIsVerbatim(t *testing.T) {
 	assert.Equal(t, "https://ghec-dr-api.example.net", ep.URL)
 }
 
+func TestStoredTargetAPIURLIsVerbatim(t *testing.T) {
+	r := newTestResolver(t)
+	r.cfg.TargetURL = "https://api.tenant.example.com"
+	r.cfg.TargetAPIURL = "https://proxy-api.example.net"
+	t.Setenv(config.EnvTargetToken, "tok")
+
+	ep, err := r.Target("", "")
+	require.NoError(t, err)
+	assert.Equal(t, "https://proxy-api.example.net", ep.URL)
+
+	// An explicit flag host wins over the stored API URL.
+	ep, err = r.Target("https://flag.example.com", "")
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.flag.example.com", ep.URL)
+}
+
 func TestNormalizeTargetAPIURL(t *testing.T) {
 	t.Run("prefixes the hostname and preserves URL components", func(t *testing.T) {
 		got := NormalizeTargetAPIURL(" https://user@staffship.blabla.com:8443/base?mode=test#fragment ")

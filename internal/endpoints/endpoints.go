@@ -69,6 +69,14 @@ func (r *Resolver) Target(flagURL, flagToken string) (Endpoint, error) {
 		ep.URL = apiURL
 		return ep, nil
 	}
+	// A stored API URL applies only when no flag or env host overrides the
+	// stored target, so an explicit host never pairs with a stale API URL.
+	if flagURL == "" && os.Getenv(config.EnvTargetURL) == "" {
+		if apiURL := normalizeBaseURL(r.cfg.TargetAPIURL); apiURL != "" {
+			ep.URL = apiURL
+			return ep, nil
+		}
+	}
 	ep.URL = NormalizeTargetAPIURL(ep.URL)
 	return ep, nil
 }
